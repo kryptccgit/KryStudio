@@ -1,12 +1,3 @@
-// Reference library tools (research/08 §4, §6): what the user's own songs
-// have taught Krypt. Agents READ the library (status, search, one track's
-// analysis, a collection's style profile, the originality check), may
-// queue a folder or one song for the light pass — inside the user's Browser
-// folders, or after the user allowed it (electron/mcp/consent.ts) — and may
-// switch on deep analysis (stems) only when a stem model is already
-// installed. They never download, never see a reference's
-// transcribed notes (summaries only: compose, don't copy).
-
 import path from 'node:path';
 import { z } from 'zod';
 import type { MainDeps, LibraryAccess } from '../types';
@@ -73,8 +64,6 @@ async function resolveTrack(lib: LibraryAccess, ref: string, collectionId?: stri
   if (!t.ok || !t.data) fail(t.message ?? 'Track not found');
   return t.data;
 }
-
-// ── Formatting ──────────────────────────────────────────────────────────
 
 function pitchClassOf(name: string): number | null {
   const m = /^([A-G])([#b]?)/.exec(name);
@@ -180,15 +169,12 @@ function referenceReport(t: TrackDetail, collName: string): { text: string; data
   };
 }
 
-/** One warning line per match (commit_edit and check_originality). */
 export function originalityLines(r: OriginalityReport, max = 12): string[] {
   return r.matches.slice(0, max).map(
     (m) =>
       `${safeName(m.line, 80)}: ${m.notes} consecutive notes match "${safeName(m.trackName, 60)}" (${m.stem}) from bar ${m.atBar} (reference at ${mmss(m.refAtSec)}), similarity ${Math.round(m.similarity * 100)}%`,
   );
 }
-
-// ── Tools ───────────────────────────────────────────────────────────────
 
 export const libraryStatus = defineTool({
   name: 'library_status',
@@ -319,15 +305,8 @@ export const getStyleProfile = defineTool({
   },
 });
 
-// ── The studied reference's melody (research/15 §1: never copy its melody or hook) ──
-
-/** Stems whose melody check_originality reads from the studied reference: the sung line, then the lead / other parts. */
 const MELODY_STEMS: StemName[] = ['vocals', 'other'];
 
-/**
- * The studied reference's melody lines: its cached vocal and other stems, transcribed mono (cached per file), on the
- * reference's beat grid. Never separates or changes anything; a note says why a line is missing.
- */
 export async function referenceMelodyLines(deps: MainDeps, ref: StudiedReference, ctx?: Pick<RunCtx, 'progress' | 'signal'>): Promise<{ lines: ReferenceLine[]; notes: string[] }> {
   const notes: string[] = [];
   const an = deps.analyzer;
@@ -359,13 +338,11 @@ export async function referenceMelodyLines(deps: MainDeps, ref: StudiedReference
 export interface ReferenceOriginality {
   name: string;
   checkedLines: number;
-  /** Melody lines read from the reference (vocal / other stems). */
   referenceLines: string[];
   matches: OriginalityReport['matches'];
   notes: string[];
 }
 
-/** The project's melodic lines against the studied reference's melody (null when no reference is studied). */
 export async function referenceOriginality(deps: MainDeps, patternId: string | null, ctx: Pick<RunCtx, 'progress' | 'signal'>, warnings: string[]): Promise<ReferenceOriginality | null> {
   const ref = await projectReference(deps, undefined, null, ctx, warnings);
   if (!ref) return null;
@@ -376,7 +353,6 @@ export async function referenceOriginality(deps: MainDeps, patternId: string | n
   return { name: ref.brief.name, checkedLines: lines.length, referenceLines: read.lines.map((l) => l.stem), matches, notes: read.notes };
 }
 
-/** "COPIED FROM THE REFERENCE" lines for matches with the studied reference. */
 export function copiedLines(r: ReferenceOriginality, max = 8): string[] {
   return r.matches.slice(0, max).map(
     (m) =>
@@ -437,7 +413,6 @@ export const checkOriginality = defineTool({
   },
 });
 
-/** A folder for library_import: absolute, local, an existing directory the File access policy covers (never a whole drive). */
 export function checkImportFolder(input: string, access: PathAccess | string[], grants?: PathGrants): string {
   const s = unquotePath(input);
   const { real } = realUserPath(s, 'folder');
@@ -447,7 +422,6 @@ export function checkImportFolder(input: string, access: PathAccess | string[], 
   fail(`For safety, agents can only import folders inside the folders the user added to the Browser${acc.mode === 'browser' ? ' (Settings ▸ Agents ▸ File access is set to "Browser folders only")' : ''}. Ask the user to add "${safeName(path.dirname(s), 120)}" (or a parent) in the Browser panel, or to import it in the Library panel themselves.`);
 }
 
-/** A single song for library_import: a local audio file the File access policy covers. */
 export function checkImportFile(input: string, access: PathAccess | string[], grants?: PathGrants): string {
   const s = unquotePath(input);
   const { real } = realUserPath(s, 'audio');
@@ -489,7 +463,6 @@ export const libraryImport = defineTool({
     }
     const r = file ? await lib.addFiles(coll.id, [file]) : await lib.addFolder(coll.id, folder!);
     if (!r.ok || !r.data) fail(r.message ?? 'Import failed');
-    // One song: name its record so the agent can read_reference / library_deep it next.
     let track: { id: string; name: string } | null = null;
     if (file) {
       const q = await lib.query({ text: path.basename(file).replace(/\.[a-z0-9]+$/i, ''), collectionId: coll.id, limit: 50 });
@@ -527,7 +500,6 @@ export const libraryDeep = defineTool({
       if (!r.ok) fail(r.message ?? "Couldn't turn deep analysis off");
       return { ok: true, message: r.message ?? 'Deep analysis off.', changed: [] };
     }
-    // Installed models only: agents never download (the library refuses too; this check gives the agent the reason).
     const models = deps.analyzer?.listModels() ?? null;
     if (models) {
       const stems = models.filter((m) => m.def.task === 'stems');

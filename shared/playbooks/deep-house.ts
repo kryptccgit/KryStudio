@@ -1,4 +1,3 @@
-// Deep house: warm, jazzy 9th chords, round bass, shuffling percussion, slow filter movement.
 import type { Playbook } from './types';
 
 export const DEEP_HOUSE: Playbook = {

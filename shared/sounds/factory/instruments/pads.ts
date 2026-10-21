@@ -1,5 +1,3 @@
-// Factory PAD presets: sustained chords, beds and atmospheres.
-
 import type { InstrumentPreset } from '../../types';
 import {
   ALG, DIV, FM, HALL, LFO, PLATE, POS, ROOM, SH, T, TAPE, TRI, WAVE,

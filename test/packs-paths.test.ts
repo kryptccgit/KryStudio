@@ -1,6 +1,3 @@
-// 'pack:<id>/<path>' samples in main: resolution (never escaping userData/packs), relinking on open with the pack
-// named in the message, ProjectService.resolveSamplePath, and the engine launch arg --packs-dir (with the fallback
-// for an engine build that predates it).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -40,7 +37,6 @@ test('resolvePackPath: pack:<id>/<path> → <packsDir>/<id>/<path>; unsafe paths
   ]) {
     assert.equal(resolvePackPath(bad, dir), path.resolve(dir), bad);
   }
-  // Not a pack path: unchanged; factory paths keep working.
   assert.equal(resolvePackPath('C:\\x.wav', dir), 'C:\\x.wav');
   assert.equal(isPack('pack:a/b'), true);
   assert.equal(isPack('factory:drums/kick.wav'), false);
@@ -67,10 +63,8 @@ test('relinkSamples: missing pack samples are reported once per pack (by name), 
   const r = relinkSamples(project, null, (p) => fs.existsSync(p), { packsDir: packs });
   assert.deepEqual(r.missing, []);
   assert.deepEqual(r.missingPacks.map((m) => m.id), ['grand-test', 'strings-test']);
-  // Unknown to the catalog: the id stands in for the name.
   assert.equal(r.missingPacks[0].name, 'grand-test');
   assert.equal(r.project, project, 'pack paths are portable: never rewritten');
-  // Without a packs folder to check, pack paths are assumed present (like factory:).
   assert.deepEqual(relinkSamples(project, null, () => false).missingPacks, []);
 
   assert.equal(missingPacksText([{ name: 'Grand Piano' }]), 'needs the Grand Piano sound pack: download it in Home ▸ Sounds');
@@ -115,7 +109,6 @@ test('opening a project whose pack isn\'t installed says which pack to download 
   assert.equal(r.ok, true, r.message);
   assert.match(r.message!, /Opened "song" \(needs the grand-test sound pack: download it in Home ▸ Sounds\)/);
   assert.ok(Object.values(doc.project.samples).some((s) => s.path === 'pack:grand-test/krypt/grand.sfz'), 'kept as a portable pack path');
-  // Installed: no note.
   const sfz = path.join(root, 'userData', 'packs', 'grand-test', 'krypt', 'grand.sfz');
   fs.mkdirSync(path.dirname(sfz), { recursive: true });
   fs.writeFileSync(sfz, '<region> sample=a.wav');
@@ -123,8 +116,6 @@ test('opening a project whose pack isn\'t installed says which pack to download 
   assert.equal(again.ok, true);
   assert.doesNotMatch(again.message!, /sound pack/);
 });
-
-// ── Engine launch: --packs-dir ─────────────────────────────────────────
 
 const FAKE = String.raw`
 const argv = process.argv.slice(2);
@@ -184,7 +175,6 @@ test('the engine starts with --packs-dir <userData/packs>', async () => {
   assert.deepEqual(launches[0].slice(-2), ['--packs-dir', packs]);
   assert.match(sup.status().engineVersion ?? '', /--packs-dir/);
   await sup.stop();
-  // No packs folder configured: the classic arguments only.
   const plain = engine({});
   plain.sup.start();
   await until(() => plain.sup.status().state === 'running');
@@ -204,7 +194,6 @@ test('an engine build that rejects --packs-dir is restarted without it (not coun
   assert.equal(sup.status().restarts, 0, 'not a crash');
   assert.ok(logs.some((l) => /predates sound packs/.test(l)));
   await sup.stop();
-  // A different (newer) build: the flag is offered again.
   exe = 'engine-b.exe';
   const before = launches.length;
   sup.start();

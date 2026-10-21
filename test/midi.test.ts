@@ -6,7 +6,6 @@ import { DocHost, USER } from '@shared/doc/DocHost';
 import { createDefaultProject } from '@shared/schema/factory';
 import { CATALOG } from '@shared/plugins/catalog';
 
-/** Build an SMF byte array by hand: header + raw MTrk bodies. */
 function rawSmf(format: number, ppq: number, bodies: number[][]): Uint8Array {
   const out: number[] = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, format, 0, bodies.length, (ppq >> 8) & 0xff, ppq & 0xff];
   for (const b of bodies) {
@@ -41,15 +40,13 @@ test('write → read round-trips notes, tempo, meter and names (format 1)', () =
 });
 
 test('running status, note-on vel 0 as note-off, PPQ 96 → 960', () => {
-  // Format 0, PPQ 96. Tempo 500000 µs (120 BPM). Note C4 at 0 for 96 ticks,
-  // then E4 at 96 for 48 ticks written with running status + vel-0 note-off.
   const body = [
     0x00, 0xff, 0x51, 0x03, 0x07, 0xa1, 0x20,
-    0x00, 0xff, 0x03, 0x04, 0x50, 0x69, 0x61, 0x6e, // name "Pian"
+    0x00, 0xff, 0x03, 0x04, 0x50, 0x69, 0x61, 0x6e,
     0x00, 0x90, 60, 100,
-    0x60, 60, 0, // running status note-on vel 0 → off at 96
-    0x00, 64, 90, // running status note-on at 96
-    0x30, 0x80, 64, 0x40, // explicit note-off at 144
+    0x60, 60, 0,
+    0x00, 64, 90,
+    0x30, 0x80, 64, 0x40,
     0x00, 0xff, 0x2f, 0x00,
   ];
   const f = readSmf(rawSmf(0, 96, [body]));
@@ -74,7 +71,6 @@ test('running status, note-on vel 0 as note-off, PPQ 96 → 960', () => {
 
 test('unterminated notes end at the track end; stray note-offs are ignored', () => {
   const body = [0x00, 0x90, 60, 100, 0x10, 0x80, 61, 0, 0x81, 0x00, 0xff, 0x2f, 0x00];
-  // delta 0x81 0x00 = 128: end of track at tick 16 + 128 = 144
   const f = readSmf(rawSmf(0, 96, [body]));
   assert.deepEqual(f.tracks[0].notes, [{ tick: 0, dur: 144, key: 60, vel: 100, channel: 0 }]);
 });
@@ -134,7 +130,7 @@ test('import plan applies cleanly through DocHost commands', () => {
   assert.equal(host.getHistory().length, 1, 'whole import is one undo step');
   const notes = Object.values(host.project.patterns[pr.data!.id].notes).flatMap((m) => Object.values(m));
   assert.equal(notes.length, 1);
-  assert.equal(notes[0].dur, 960); // 480 ticks @ PPQ 480 = 1 beat
+  assert.equal(notes[0].dur, 960);
   assert.equal(host.undo().ok, true);
   assert.equal(host.project.patterns[pr.data!.id], undefined);
 });

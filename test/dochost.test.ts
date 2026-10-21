@@ -99,7 +99,6 @@ test('selective undo is refused when a later edit touched the same data', () => 
   const r = host.undo(AGENT);
   assert.equal(r.ok, false);
   assert.match(r.message!, /changed the same thing/);
-  // Undo the user's edit first, then the agent's works.
   assert.equal(host.undo(USER).ok, true);
   assert.equal(host.undo(AGENT).ok, true);
 });
@@ -203,13 +202,11 @@ test('channels.remove cleans notes and audio clips; patterns.remove cleans clips
   assert.deepEqual(checkIntegrity(host.project), []);
 });
 
-// ── Project tabs: exportState / swap (research/19-project-tabs.md) ─────
-
 test('swap: undo/redo per tab survives switching there and back; versions keep counting up', () => {
   const { host, pat, kick } = fresh();
   host.exec('notes.add', { patternId: pat, channelId: kick, notes: [{ tick: 0, key: 60 }] }, { actor: USER });
   host.exec('transport.set', { bpm: 150 }, { actor: USER });
-  assert.equal(host.undo(USER).ok, true); // bpm back to 140, redo pending
+  assert.equal(host.undo(USER).ok, true);
   const a = host.exportState();
   const vA = host.version;
 
@@ -244,13 +241,10 @@ test('swap: coalescing never merges an edit into the other tab, or across a swit
   const a = host.exportState();
   host.swap({ project: createDefaultProject('B'), history: [], undoSeq: 0 });
   host.swap(a);
-  // Same key, same actor, within the window: still a NEW entry after a switch.
   host.exec('channels.set', { id: kick, volume: 0.2 }, { actor: USER, coalesceKey: 'knob:vol' });
   assert.equal(host.getHistory().length, 2);
-  // Without a switch, drags coalesce as before.
   host.exec('channels.set', { id: kick, volume: 0.3 }, { actor: USER, coalesceKey: 'knob:vol' });
   assert.equal(host.getHistory().length, 2);
-  // The exported state is a copy: edits made after exporting don't leak into it.
   assert.equal(a.history.length, 1);
 });
 
@@ -268,7 +262,6 @@ test('swap: subscribers see a reset carrying the project; open groups are ended'
   assert.equal(last.project, b);
   assert.equal(last.version, host.version);
   assert.equal(host.listOpenGroups().length, 0);
-  // A late edit naming the ended group becomes an ordinary entry; endGroup is a no-op.
   host.exec('transport.set', { bpm: 99 }, { actor: AGENT, groupId: g });
   host.endGroup(g);
   assert.equal(host.getHistory().length, 1);

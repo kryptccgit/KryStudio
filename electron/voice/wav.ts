@@ -1,16 +1,8 @@
-// WAV helpers for Krypt Voice (pure Buffer work, no I/O): read the format and
-// duration of a rendered line, and join the lines of a lyric into one source
-// file for the analyzer's `sing` (same format required; silence between).
-// Handles PCM 8/16/24/32-bit and 32-bit float, RIFF and WAVE_FORMAT_EXTENSIBLE,
-// and streamed files whose data size is 0 or 0xFFFFFFFF (Fish streams WAV).
-
 export interface WavInfo {
-  /** 1 = PCM, 3 = IEEE float. */
   format: number;
   channels: number;
   sampleRate: number;
   bitsPerSample: number;
-  /** Byte offset and length of the sample data. */
   dataOffset: number;
   dataBytes: number;
   durationSec: number;
@@ -62,10 +54,6 @@ function header(info: Pick<WavInfo, 'format' | 'channels' | 'sampleRate' | 'bits
   return h;
 }
 
-/**
- * Join WAV files of the same format with `gapSec` of silence between them. Returns the file and where each part
- * starts (seconds), or an error sentence.
- */
 export function concatWav(parts: Uint8Array[], gapSec = 0.2): { bytes: Buffer; offsets: number[]; durationSec: number } | { error: string } {
   if (!parts.length) return { error: 'nothing to join' };
   const infos: WavInfo[] = [];
@@ -80,7 +68,6 @@ export function concatWav(parts: Uint8Array[], gapSec = 0.2): { bytes: Buffer; o
   }
   const frameBytes = (f.bitsPerSample / 8) * f.channels;
   const gapBytes = Math.round(Math.max(0, gapSec) * f.sampleRate) * frameBytes;
-  // 8-bit PCM is unsigned: its silence is 0x80.
   const gap = Buffer.alloc(gapBytes, f.format === 1 && f.bitsPerSample === 8 ? 0x80 : 0);
   const chunks: Buffer[] = [];
   const offsets: number[] = [];
@@ -99,7 +86,6 @@ export function concatWav(parts: Uint8Array[], gapSec = 0.2): { bytes: Buffer; o
   return { bytes: Buffer.concat([header(f, bytes), ...chunks]), offsets, durationSec: bytes / frameBytes / f.sampleRate };
 }
 
-/** A silent mono 16-bit WAV (tests, placeholders). */
 export function silentWav(seconds: number, sampleRate = 24000): Buffer {
   const frames = Math.max(1, Math.round(seconds * sampleRate));
   return Buffer.concat([header({ format: 1, channels: 1, sampleRate, bitsPerSample: 16 }, frames * 2), Buffer.alloc(frames * 2)]);

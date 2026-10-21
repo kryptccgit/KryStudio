@@ -1,8 +1,3 @@
-//! VST3 hosting on the `vst3` crate (MIT OR Apache-2.0 bindings generated
-//! from the MIT VST 3.8 SDK; NOT vst3-sys, which is GPL). We write the host
-//! side ourselves (research/03 §2.2): module loading, class discovery,
-//! component/controller wiring, bus setup, processing, state and editors.
-
 #![allow(non_snake_case)]
 
 use crate::audio::{AudioThread, Processor};
@@ -26,20 +21,15 @@ use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryExW, 
 
 const AUDIO_MODULE_CLASS: &str = "Audio Module Class";
 
-// ── Modules ──────────────────────────────────────────────────────────────
-
 pub struct Module {
     _lib: HMODULE,
     pub factory: ComPtr<IPluginFactory>,
 }
 
 thread_local! {
-    /// Loaded modules stay loaded for the life of the host (many plugins
-    /// misbehave when unloaded and reloaded).
     static MODULES: RefCell<HashMap<PathBuf, Rc<Module>>> = RefCell::new(HashMap::new());
 }
 
-/// The DLL inside a `.vst3` bundle folder, or the file itself.
 pub fn binary_path(path: &Path) -> Result<PathBuf, String> {
     if path.is_dir() {
         let stem = path.file_stem().ok_or("bad bundle name")?.to_string_lossy().into_owned();
@@ -47,7 +37,6 @@ pub fn binary_path(path: &Path) -> Result<PathBuf, String> {
         if bin.is_file() {
             return Ok(bin);
         }
-        // Some bundles name the inner binary differently: take the only .vst3 there.
         let dir = path.join("Contents").join("x86_64-win");
         if let Ok(rd) = std::fs::read_dir(&dir) {
             for e in rd.flatten() {
@@ -71,12 +60,10 @@ pub fn load_module(path: &Path) -> Result<Rc<Module>, String> {
         return Ok(m);
     }
     let w = win::wide(&bin.to_string_lossy());
-    // SAFETY: loading foreign code is this process's job; crashes stay here.
     let lib = unsafe { LoadLibraryExW(w.as_ptr(), std::ptr::null_mut(), LOAD_WITH_ALTERED_SEARCH_PATH) };
     if lib.is_null() {
         return Err(format!("couldn't load {}: {}", bin.display(), std::io::Error::last_os_error()));
     }
-    // SAFETY: optional/required exports with their documented signatures.
     unsafe {
         if let Some(init) = GetProcAddress(lib, c"InitDll".as_ptr() as *const u8) {
             let init: extern "system" fn() -> bool = std::mem::transmute(init);
@@ -126,7 +113,6 @@ pub struct ClassInfo {
 pub fn audio_classes(m: &Module) -> Vec<ClassInfo> {
     let f = &m.factory;
     let mut out = Vec::new();
-    // SAFETY: plain factory queries into zeroed out-structs.
     unsafe {
         let mut fi: PFactoryInfo = std::mem::zeroed();
         let fvendor = if f.getFactoryInfo(&mut fi) == kResultOk { cstr(&fi.vendor) } else { String::new() };
@@ -159,8 +145,6 @@ pub fn audio_classes(m: &Module) -> Vec<ClassInfo> {
     out
 }
 
-// ── Component + controller wiring ────────────────────────────────────────
-
 pub struct Plugin {
     pub component: ComPtr<IComponent>,
     pub controller: Option<ComPtr<IEditController>>,
@@ -170,7 +154,6 @@ pub struct Plugin {
 
 impl Plugin {
     pub fn create(m: &Module, cid: &TUID) -> Result<Plugin, String> {
-        // SAFETY: COM calls following the SDK's hosting sequence.
         unsafe {
             let mut obj: *mut c_void = std::ptr::null_mut();
             let iid = vst3_iid::<IComponent>();
@@ -208,7 +191,6 @@ impl Plugin {
                     p.connections = Some((a, b));
                 }
             }
-            // Sync the controller with the processor's default state.
             if let Some(ctl) = &p.controller {
                 let s = ComWrapper::new(MemoryStream::default());
                 if let Some(sp) = s.to_com_ptr::<IBStream>() {
@@ -224,7 +206,6 @@ impl Plugin {
 
     pub fn has_editor(&self) -> bool {
         let Some(ctl) = &self.controller else { return false };
-        // SAFETY: createView returns an AddRef'd view (or null) that we release.
         unsafe {
             let v = ctl.createView(c"editor".as_ptr());
             match ComPtr::from_raw(v) {
@@ -234,9 +215,7 @@ impl Plugin {
         }
     }
 
-    /// (input buses, output buses, event input buses)
     pub fn bus_counts(&self) -> (i32, i32, i32) {
-        // SAFETY: plain queries.
         unsafe {
             (
                 self.component.getBusCount(MediaTypes_::kAudio as MediaType, BusDirections_::kInput as BusDirection),
@@ -246,12 +225,10 @@ impl Plugin {
         }
     }
 
-    /// ParamSpec-shaped JSON for visible, writable params + per-param step counts.
     pub fn describe_params(&self) -> (Vec<Value>, Vec<(u32, i32)>) {
         let mut out = Vec::new();
         let mut steps = Vec::new();
         let Some(ctl) = &self.controller else { return (out, steps) };
-        // SAFETY: plain queries into zeroed structs.
         unsafe {
             let n = ctl.getParameterCount().clamp(0, 4096);
             for i in 0..n {
@@ -298,7 +275,6 @@ impl Plugin {
 
 impl Drop for Plugin {
     fn drop(&mut self) {
-        // SAFETY: SDK teardown order: disconnect, terminate controller, terminate component.
         unsafe {
             if let Some((a, b)) = self.connections.take() {
                 a.disconnect(b.as_ptr());
@@ -329,8 +305,6 @@ fn arrangement_channels(a: SpeakerArrangement) -> usize {
     (a as u64).count_ones() as usize
 }
 
-// ── Audio side ───────────────────────────────────────────────────────────
-
 struct Bus {
     channels: usize,
     main: bool,
@@ -354,17 +328,13 @@ struct Vst3Proc {
     has_events: bool,
     held: [bool; 128],
     steps: Arc<Vec<(u32, i32)>>,
-    /// GUI edits → processor.
     from_ui: rtrb::Consumer<(u32, f64)>,
-    /// Engine/processor values → controller (UI thread).
     to_ui: rtrb::Producer<(u32, f64)>,
     ctx: ProcessContext,
     mode: i32,
     samples: i64,
 }
 
-// SAFETY: moved to the audio thread once; every COM object inside is then
-// used only from that thread.
 unsafe impl Send for Vst3Proc {}
 
 impl Vst3Proc {
@@ -378,17 +348,14 @@ impl Vst3Proc {
 
 impl Processor for Vst3Proc {
     fn started(&mut self) {
-        // SAFETY: SDK: setProcessing(true) before the first process call.
         unsafe { self.proc.setProcessing(1) };
     }
 
     fn stopping(&mut self) {
-        // SAFETY: matching setProcessing(false).
         unsafe { self.proc.setProcessing(0) };
     }
 
     fn process(&mut self, blk: *mut Block, events: &[Ev]) -> Result<(), ()> {
-        // SAFETY: the audio thread owns the block for this call.
         let b = unsafe { &mut *blk };
         let n = (b.frames as usize).min(self.max);
         if n == 0 {
@@ -402,7 +369,6 @@ impl Processor for Vst3Proc {
         }
         let last = (n - 1) as i32;
         let note = |kind: u16, offset: i32, key: u32, vel: f64, tuning: f64| -> Event {
-            // SAFETY: plain-old-data union init.
             let mut e: Event = unsafe { std::mem::zeroed() };
             e.busIndex = 0;
             e.sampleOffset = offset;
@@ -444,7 +410,6 @@ impl Processor for Vst3Proc {
                 _ => {}
             }
         }
-        // Audio: main buses map onto the shared block, the rest onto scratch.
         let stride = MAX_FRAMES;
         let inp = b.audio_in.as_mut_ptr() as *mut f32;
         let outp = b.audio_out.as_mut_ptr() as *mut f32;
@@ -452,7 +417,6 @@ impl Processor for Vst3Proc {
         for (bi, bus) in self.ins.iter().enumerate() {
             let start = k;
             for c in 0..bus.channels {
-                // SAFETY: buffers sized for max frames.
                 let p = unsafe {
                     if bus.main && bus.channels == 1 {
                         for i in 0..n {
@@ -472,23 +436,19 @@ impl Processor for Vst3Proc {
             }
             self.in_bufs[bi].numChannels = bus.channels as i32;
             self.in_bufs[bi].silenceFlags = 0;
-            // SAFETY: points into in_ptrs, which outlives the call.
             self.in_bufs[bi].__field0.channelBuffers32 = unsafe { self.in_ptrs.as_mut_ptr().add(start) };
         }
         let mut k = 0;
         for (bi, bus) in self.outs.iter().enumerate() {
             let start = k;
             for c in 0..bus.channels {
-                // SAFETY: as above.
                 let p = unsafe { if bus.main && c < 2 { outp.add(c * stride) } else { self.scratch_out.as_mut_ptr().add(k * self.max) } };
-                // SAFETY: zero before processing (some plugins only add).
                 unsafe { std::ptr::write_bytes(p, 0, n) };
                 self.out_ptrs[k] = p;
                 k += 1;
             }
             self.out_bufs[bi].numChannels = bus.channels as i32;
             self.out_bufs[bi].silenceFlags = 0;
-            // SAFETY: as above.
             self.out_bufs[bi].__field0.channelBuffers32 = unsafe { self.out_ptrs.as_mut_ptr().add(start) };
         }
         let playing = b.flags & flag::PLAYING != 0;
@@ -518,12 +478,10 @@ impl Processor for Vst3Proc {
             outputEvents: std::ptr::null_mut(),
             processContext: &mut self.ctx,
         };
-        // SAFETY: every pointer in `data` is valid for this call.
         let r = unsafe { self.proc.process(&mut data) };
         self.samples += n as i64;
         if let Some(mo) = self.outs.iter().position(|o| o.main) {
             if self.outs[mo].channels == 1 {
-                // SAFETY: owned block.
                 unsafe { std::ptr::copy_nonoverlapping(outp, outp.add(stride), n) };
             }
         }
@@ -538,8 +496,6 @@ impl Processor for Vst3Proc {
         }
     }
 }
-
-// ── Main-thread instance ─────────────────────────────────────────────────
 
 struct Editor {
     view: ComPtr<IPlugView>,
@@ -577,7 +533,6 @@ impl Vst3Instance {
         let handler = ComWrapper::new(ComponentHandler { edits: RefCell::new(Vec::new()), restart: Cell::new(0) });
         if let Some(ctl) = &plugin.controller {
             if let Some(h) = handler.as_com_ref::<IComponentHandler>() {
-                // SAFETY: the handler outlives the controller (we own both).
                 unsafe { ctl.setComponentHandler(h.as_ptr()) };
             }
         }
@@ -612,7 +567,6 @@ impl Vst3Instance {
         let (nin, nout, nev) = self.plugin.bus_counts();
         let mut ins = Vec::new();
         let mut outs = Vec::new();
-        // SAFETY: SDK activation sequence: buses → arrangements → setupProcessing → setActive.
         unsafe {
             let mut in_arr: Vec<SpeakerArrangement> = Vec::new();
             let mut out_arr: Vec<SpeakerArrangement> = Vec::new();
@@ -640,7 +594,6 @@ impl Vst3Instance {
                 if out_arr.is_empty() { std::ptr::null_mut() } else { out_arr.as_mut_ptr() },
                 out_arr.len() as i32,
             );
-            // Whatever was accepted (stereo, or the plugin's own choice), use it.
             let _ = r;
             for (i, b) in ins.iter_mut().enumerate() {
                 let mut a: SpeakerArrangement = 0;
@@ -714,14 +667,12 @@ impl Vst3Instance {
             drop(a.stop());
         }
         if self.active.replace(false) {
-            // SAFETY: matching setActive(true).
             unsafe { self.plugin.component.setActive(0) };
         }
     }
 
     fn close_view(&mut self) {
         if let Some(ed) = self.editor.take() {
-            // SAFETY: SDK teardown: removed() before destroying the parent.
             unsafe {
                 ed.view.setFrame(std::ptr::null_mut());
                 ed.view.removed();
@@ -750,10 +701,8 @@ impl Hosted for Vst3Instance {
     }
 
     fn get_state(&mut self) -> Result<Vec<u8>, String> {
-        // Blob: "KV3S" + u32 len + component state + u32 len + controller state.
         let cs = ComWrapper::new(MemoryStream::default());
         let ks = ComWrapper::new(MemoryStream::default());
-        // SAFETY: plain state calls with our streams.
         unsafe {
             let p = cs.to_com_ptr::<IBStream>().ok_or("stream")?;
             if self.plugin.component.getState(p.as_ptr()) != kResultOk {
@@ -791,7 +740,6 @@ impl Hosted for Vst3Instance {
         } else {
             (data, &[][..])
         };
-        // SAFETY: SDK restore order: component.setState, controller.setComponentState, controller.setState.
         unsafe {
             let cs = ComWrapper::new(MemoryStream::from_bytes(c));
             let p = cs.to_com_ptr::<IBStream>().ok_or("stream")?;
@@ -818,7 +766,6 @@ impl Hosted for Vst3Instance {
             return Ok(());
         }
         let ctl = self.plugin.controller.as_ref().ok_or("no edit controller")?;
-        // SAFETY: SDK editor sequence: createView → isPlatformTypeSupported → setFrame → attached.
         unsafe {
             let view = ComPtr::from_raw(ctl.createView(c"editor".as_ptr())).ok_or_else(|| format!("{} has no editor", self.name))?;
             if view.isPlatformTypeSupported(kPlatformTypeHWND) != kResultTrue {
@@ -869,7 +816,6 @@ impl Hosted for Vst3Instance {
         if !ed.resizable || w == 0 || h == 0 {
             return;
         }
-        // SAFETY: view is attached; standard size negotiation.
         unsafe {
             let mut cur: ViewRect = std::mem::zeroed();
             ed.view.getSize(&mut cur);
@@ -896,7 +842,6 @@ impl Hosted for Vst3Instance {
     }
 
     fn tick(&mut self) {
-        // Plugin GUI edits → processor (next block) + engine (doc sync).
         let edits: Vec<(u32, f64)> = self.handler.edits.borrow_mut().drain(..).collect();
         for (id, v) in edits {
             if let Some(tx) = self.from_ui_tx.as_mut() {
@@ -906,16 +851,13 @@ impl Hosted for Vst3Instance {
             let plain = if sc > 0 { (v * sc as f64).round() } else { v };
             wire::event(json!({ "event": "param", "inst": self.id, "paramId": id, "value": plain }));
         }
-        // Engine automation / processor output → controller (keeps the GUI in sync).
         if let (Some(rx), Some(ctl)) = (self.to_ui_rx.as_mut(), self.plugin.controller.as_ref()) {
             while let Ok((id, v)) = rx.pop() {
-                // SAFETY: UI-thread controller call.
                 unsafe { ctl.setParamNormalized(id, v) };
             }
         }
         if let Some(ed) = &self.editor {
             if !win::is_window(ed.container) {
-                // The container vanished (owner destroyed): detach.
                 self.close_view();
             }
         }
@@ -942,15 +884,11 @@ impl Drop for Vst3Instance {
         self.close_view();
         self.deactivate();
         if let Some(ctl) = &self.plugin.controller {
-            // SAFETY: detach our handler before the controller goes away.
             unsafe { ctl.setComponentHandler(std::ptr::null_mut()) };
         }
     }
 }
 
-// ── Scanning ─────────────────────────────────────────────────────────────
-
-/// moduleinfo.json is JSON5-ish: strip comments and trailing commas.
 fn json5_lite(src: &str) -> String {
     let mut out = String::with_capacity(src.len());
     let b: Vec<char> = src.chars().collect();
@@ -986,7 +924,6 @@ fn json5_lite(src: &str) -> String {
             }
             i += 2;
         } else if c == ',' {
-            // Drop a trailing comma before } or ].
             let mut j = i + 1;
             while j < b.len() && b[j].is_whitespace() {
                 j += 1;
@@ -1035,7 +972,6 @@ fn desc_json(path: &str, cid: &str, name: &str, vendor: &str, version: &str, sub
     })
 }
 
-/// moduleinfo.json fast path (no code loaded).
 fn from_moduleinfo(path: &Path) -> Option<Vec<Value>> {
     if !path.is_dir() {
         return None;
@@ -1068,8 +1004,6 @@ fn from_moduleinfo(path: &Path) -> Option<Vec<Value>> {
     Some(out)
 }
 
-/// `--scan` for a .vst3: emit the moduleinfo result first (if any), then
-/// load the module to read parameters/editor/bus layout.
 pub fn scan(path: &str, emit: &mut dyn FnMut(Value)) -> Result<Vec<Value>, String> {
     let p = Path::new(path);
     if let Some(mi) = from_moduleinfo(p) {

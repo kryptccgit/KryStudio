@@ -1,4 +1,3 @@
-// R&B: laid-back grooves, extended chords, warm bass, space for the vocal.
 import type { Playbook } from './types';
 
 export const RNB: Playbook = {

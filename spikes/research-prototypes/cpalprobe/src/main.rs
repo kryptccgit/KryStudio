@@ -9,7 +9,7 @@ fn run(device: &cpal::Device, cfg: cpal::StreamConfig, label: &str) {
     let stream = device.build_output_stream(
         cfg.clone(),
         move |data: &mut [f32], _info: &cpal::OutputCallbackInfo| {
-            for s in data.iter_mut() { *s = 0.0; } // silence
+            for s in data.iter_mut() { *s = 0.0; }
             if let Ok(mut v) = l2.try_lock() { if v.len() < 4096 { v.push((Instant::now(), data.len() / ch)); } }
         },
         |e| eprintln!("stream error: {e}"),

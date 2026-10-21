@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Third-party plugin discovery: the standard VST3 / CLAP folders, the
-// candidate files in them, and ONE throwaway scanner process per file
-// (`krypt-studio-pluginhost.exe --scan <file>`), killed on timeout. A plugin
-// that crashes or hangs while being scanned only kills that process
-// (research/03 §2.4). No VST2: .dll files in VST2 folders are only counted
-// so the Plugin Manager can explain why they don't show up.
-// ──────────────────────────────────────────────────────────────────────
-
 import { spawn } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -17,7 +8,6 @@ export type PluginFormat = 'vst3' | 'clap';
 export interface PluginCandidate {
   path: string;
   format: PluginFormat;
-  /** Size + mtime of the binary (bundle: the inner DLL) — the cache key. */
   size: number;
   mtime: number;
 }
@@ -30,22 +20,19 @@ export type ScanOutcome =
 
 const env = (k: string): string | undefined => process.env[k] || undefined;
 
-/** Standard folders, highest priority first (research/03 §2.1). */
 export function standardPluginFolders(): Array<{ path: string; formats: PluginFormat[] }> {
   const out: Array<{ path: string; formats: PluginFormat[] }> = [];
-  if (process.platform !== 'win32') return out; // plugin hosting is Windows-only for now (electron/plugins/index.ts)
+  if (process.platform !== 'win32') return out;
   const local = env('LOCALAPPDATA');
   const common = env('CommonProgramFiles') ?? env('COMMONPROGRAMFILES') ?? 'C:\\Program Files\\Common Files';
   if (local) out.push({ path: path.join(local, 'Programs', 'Common', 'VST3'), formats: ['vst3'] });
   out.push({ path: path.join(common, 'VST3'), formats: ['vst3'] });
   out.push({ path: path.join(common, 'CLAP'), formats: ['clap'] });
   if (local) out.push({ path: path.join(local, 'Programs', 'Common', 'CLAP'), formats: ['clap'] });
-  // The CLAP spec says hosts must honour CLAP_PATH (';'-separated).
   for (const p of (env('CLAP_PATH') ?? '').split(';').map((s) => s.trim()).filter(Boolean)) out.push({ path: p, formats: ['clap'] });
   return out;
 }
 
-/** Where VST2 plugins usually live (counted only; VST2 can't be hosted). */
 export function vst2Folders(): string[] {
   if (process.platform !== 'win32') return [];
   const pf = env('ProgramFiles') ?? 'C:\\Program Files';
@@ -64,7 +51,6 @@ export async function dirExists(p: string): Promise<boolean> {
 async function statKey(p: string, isDir: boolean): Promise<{ size: number; mtime: number }> {
   try {
     if (isDir) {
-      // A bundle: key on the 64-bit binary inside (that's what changes on update).
       const stem = path.basename(p, path.extname(p));
       const bin = path.join(p, 'Contents', 'x86_64-win', `${stem}.vst3`);
       try {
@@ -82,7 +68,6 @@ async function statKey(p: string, isDir: boolean): Promise<{ size: number; mtime
   }
 }
 
-/** Every .vst3 (file or bundle folder) and .clap under `root` (bounded depth). */
 export async function findCandidates(root: string, formats: PluginFormat[], depth = 6): Promise<PluginCandidate[]> {
   const out: PluginCandidate[] = [];
   const walk = async (dir: string, d: number): Promise<void> => {
@@ -110,7 +95,6 @@ export async function findCandidates(root: string, formats: PluginFormat[], dept
   return out;
 }
 
-/** .dll files in the VST2 folders (depth 3). */
 export async function countVst2(folders: string[]): Promise<number> {
   let n = 0;
   const walk = async (dir: string, d: number): Promise<void> => {
@@ -130,10 +114,6 @@ export async function countVst2(folders: string[]): Promise<number> {
   return n;
 }
 
-/**
- * Run `<hostExe> --scan <file>` and parse its JSON lines (the last complete
- * line wins; a VST3 may first print a moduleinfo.json-only line).
- */
 export function runScanner(hostExe: string, file: string, timeoutMs = 30_000): Promise<ScanOutcome> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
@@ -163,7 +143,6 @@ export function runScanner(hostExe: string, file: string, timeoutMs = 30_000): P
           if (v && v.partial) partial = Array.isArray(v.plugins) ? v.plugins : [];
           else final = v;
         } catch {
-          /* a torn last line from a crash */
         }
       }
       return { final, partial };
@@ -174,7 +153,6 @@ export function runScanner(hostExe: string, file: string, timeoutMs = 30_000): P
       try {
         child.kill();
       } catch {
-        /* gone */
       }
       resolve({ kind: 'timeout', message: `Scanning took longer than ${Math.round(timeoutMs / 1000)} s`, plugins: parse().partial });
     }, timeoutMs);

@@ -1,7 +1,3 @@
-// AnalyzerService against a real DocHost + the fake analyzer: stems → doc
-// structure (one undo step, origin, copied params, aligned clips, muted
-// source), transcription tick maths (tempo-synced vs not), drum roles,
-// caches, job list + cancel, model gating. Also the pure convert helpers.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -69,8 +65,6 @@ async function rig(opts: { stems?: boolean; basicPitch?: boolean; bpm?: number }
 
 const histLen = (doc: DocHost) => doc.getHistory().length;
 
-// ── Pure helpers ────────────────────────────────────────────────────────
-
 test('convert: seconds → ticks at a tempo, quantize, drum role dedupe, effective tempo', () => {
   assert.equal(secToTick(0.5, 120), 960);
   assert.equal(secToTick(0.5, 140), 1120);
@@ -97,19 +91,17 @@ test('convert: seconds → ticks at a tempo, quantize, drum role dedupe, effecti
 
 test('convert: notes land where and at the pitch the clip plays them (pitch shift, warp markers, reverse, repitch)', () => {
   const doc = new DocHost(createDefaultProject('x'), CAT);
-  const p = doc.project; // 140 bpm
+  const p = doc.project;
   const base = p.channels[p.channelOrder[0]];
   const clip = (params: Record<string, number>, warp?: any) => ({ ...base, generator: { type: 'krypt.audioclip', params, sampleId: null, ...(warp ? { warp } : {}) } }) as any;
   const note = { startSec: 1, durSec: 0.5, key: 60, vel: 0.8 };
 
-  // The bug: a clip key-matched +1.73 st gave notes from the raw file, ~2 semitones off what you hear.
   const shifted = clipPlayback(p, CAT, clip({ pitch: 1.73 }), { frames: 480000, sampleRate: 48000 });
   assert.deepEqual(notesToTicks([note], shifted), [{ tick: secToTick(1, 140), key: 62, dur: secToTick(0.5, 140), vel: 0.8, fine: -27 }]);
   assert.deepEqual(notesToTicks([note], clipPlayback(p, CAT, clip({ pitch: -12 }), null))[0].key, 48);
   assert.equal(notesToTicks([note], clipPlayback(p, CAT, clip({}), null))[0].fine, undefined, 'unshifted: no fine');
   assert.deepEqual(notesToTicks([note], 120), [{ tick: 1920, key: 60, dur: 960, vel: 0.8 }], 'a plain tempo still works');
 
-  // Warp markers define the timing: 2 s of source = 8 beats.
   const markers = [
     { id: 'a', sec: 0, beat: 0 },
     { id: 'b', sec: 2, beat: 8 },
@@ -118,15 +110,12 @@ test('convert: notes land where and at the pitch the clip plays them (pitch shif
   assert.equal(secToTick(1, warped), 4 * 960);
   assert.deepEqual(notesToTicks([note], warped)[0], { tick: 3840, key: 60, dur: 1920, vel: 0.8 });
 
-  // Reversed: the file plays from its end, so a note 1-1.5 s into a 10 s file sits at 8.5-9 s.
   const rev = clipPlayback(p, CAT, clip({ reverse: 1 }), { frames: 480000, sampleRate: 48000 });
   assert.deepEqual(notesToTicks([note], rev)[0], { tick: secToTick(8.5, 140), key: 60, dur: secToTick(9, 140) - secToTick(8.5, 140), vel: 0.8 });
 
-  // Repitch: the pitch param is ignored, the speed sets the pitch. 70 bpm source followed at 140 = 2x = +12.
   const vari = clipPlayback(p, CAT, clip({ tempo_sync: 1, src_bpm: 70, pitch: 5 }, { mode: 'repitch', markers: [] }), null);
   assert.ok(Math.abs(heardSemis(vari, 1) - 12) < 1e-6);
   assert.equal(notesToTicks([note], vari)[0].key, 72);
-  // A non-audio-clip channel (sampler) plays its file as is.
   assert.deepEqual(clipPlayback(p, CAT, base, null), { bpm: 140 });
 });
 
@@ -147,7 +136,6 @@ test('audio clip timing params keep the same audio on screen: setGenParams / par
     return r.data;
   };
   const trackId = doc.project.playlist.trackOrder[0];
-  // 10 s of audio at the default 140 bpm = 10 × 140 / 60 beats = 22400 ticks.
   const { clipId, channelId } = exec('playlist.addAudio', { path: path.join(AUDIO, 'Loop.wav'), trackId, start: 960, frames: 441000, sampleRate: 44100, channels: 2 });
   exec('playlist.updateClips', { updates: [{ id: clipId, length: 22400, offset: 1400, fadeIn: 280, fadeOut: 560 }] });
   const clip = () => doc.project.playlist.clips[clipId];
@@ -168,8 +156,6 @@ test('audio clip timing params keep the same audio on screen: setGenParams / par
   assert.deepEqual(shape(), [960, 22400, 1400, 280, 560], 'undo restores clip and params together');
   assert.deepEqual(checkIntegrity(doc.project), []);
 });
-
-// ── Stems ───────────────────────────────────────────────────────────────
 
 test('separateStems without the model: clear message, project untouched', async () => {
   const { doc, svc, addLoop, supervisor } = await rig();
@@ -235,13 +221,11 @@ test('separateStems: 4 stems under the source track, one undo step, origin set, 
   assert.equal(states.at(-1)!.jobs.length, 0, 'finished job removed from the broadcast state');
   assert.equal(svc.state().jobs.length, 0);
 
-  // Undo = one step back to the original.
   const u = doc.undo(USER);
   assert.equal(u.ok, true, u.message);
   assert.equal(doc.project.playlist.clips[clipId].mute, false);
   assert.ok(out.channelIds.every((id) => !doc.project.channels[id]));
 
-  // Again: from the stem cache (no analyzer run).
   const r2 = await svc.separateStems(clipId);
   assert.equal(r2.ok, true, r2.message);
   assert.match(r2.message!, /from the stem cache/);
@@ -298,8 +282,6 @@ test('jobs: listed with progress, cancellable; cancel leaves nothing behind; a m
   await supervisor.stop();
 });
 
-// ── Analysis ────────────────────────────────────────────────────────────
-
 test('analyze: clip / channel / file targets, cached per file, errors in plain words', async () => {
   const { svc, addLoop, supervisor } = await rig();
   const { clipId, channelId } = addLoop();
@@ -323,8 +305,6 @@ test('analyze: clip / channel / file targets, cached per file, errors in plain w
   assert.match(crash.message!, /stopped unexpectedly while analysing audio/);
   await supervisor.stop();
 });
-
-// ── Transcription ───────────────────────────────────────────────────────
 
 test('toPattern mono on a tempo-synced clip: ticks at the source tempo, aligned pattern clip, one undo step', async () => {
   const { doc, svc, addLoop, supervisor } = await rig({ bpm: 140 });
@@ -354,7 +334,6 @@ test('toPattern mono on a tempo-synced clip: ticks at the source tempo, aligned 
   assert.deepEqual([pc.start, pc.length, pc.offset], [src.start, src.length, src.offset], 'same window as the audio clip');
   assert.equal(p.playlist.trackOrder.indexOf(pc.trackId), srcIdx + 1, 'on a new track right under the clip');
   assert.equal(r.data!.notes, 2);
-  // Undo removes pattern, channel, track and clip in one go.
   assert.equal(doc.undo(USER).ok, true);
   assert.equal(doc.project.patterns[pat.id], undefined);
   assert.equal(doc.project.channels[ch.id], undefined);
@@ -436,7 +415,6 @@ test('toPattern plays the notes with the original audio: one region per note, pi
   assert.ok(fs.existsSync(path.join(path.dirname(sfzPath), 'source.wav')), 'the source copy sits next to the mapping');
   const sfz = fs.readFileSync(sfzPath, 'utf8');
   assert.equal((sfz.match(/<region>/g) ?? []).length, 2, 'one region per note');
-  // Each note's velocity lands in its own region (key 60 at 0 s, key 64 at 0.5 s).
   const notes = Object.values(p.patterns[r.data!.patternId].notes[ch.id]).sort((a, b) => a.tick - b.tick);
   const offsets = notes.map((n) => {
     const v = Math.max(1, Math.round(n.vel * 127));

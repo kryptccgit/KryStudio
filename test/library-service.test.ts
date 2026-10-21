@@ -1,10 +1,3 @@
-// LibraryService end to end against a real DocHost + the fake analyzer
-// sidecar: folder import → light pass (features, drum grid, chords,
-// vector), failures recorded while the queue continues, resumable after a
-// simulated restart, persisted pause, rescan (changed / missing / back /
-// new), deep pass (temp stems deleted, lines + hashes stored, silent vocal
-// stems skipped), profiles (cached per rev), similarity, the originality
-// check, focus, addToProject, estimates and a corrupt DB moved aside.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -29,7 +22,6 @@ const script = writeFakeAnalyzer(TMP);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const CAT = earsCatalog();
 
-// A beat model in the test catalog (bundled), so the light pass can be checked with and without it.
 const BEAT_WEIGHTS = Buffer.from('beat this weights');
 const BEAT_DEF: ModelDef = {
   id: 'beat-this-small',
@@ -57,7 +49,6 @@ function baseSettings(): Settings {
   };
 }
 
-/** Write a tiny "audio" file (the fake analyzer never decodes it). */
 function song(dir: string, name: string, body = 'RIFF'): string {
   fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, name);
@@ -109,7 +100,6 @@ async function rig(o: RigOpts = {}) {
   return { root, userData, svc, doc, states, logs, logFile, supervisor, music, settings: () => settings };
 }
 
-/** Stop the library, then its fake analyzer (else the child keeps the test process alive). */
 async function close(r: { svc: LibraryService; supervisor: AnalyzerSupervisor }): Promise<void> {
   await r.svc.stop();
   await r.supervisor.stop();
@@ -142,8 +132,6 @@ async function statuses(svc: LibraryService, collectionId: string): Promise<Reco
   assert.equal(q.ok, true, q.message);
   return Object.fromEntries(q.data!.tracks.map((t) => [t.name, t.status]));
 }
-
-// ── Import + light pass ─────────────────────────────────────────────────
 
 test('import: recursive folder scan, audio only, light pass stores features + summary', async () => {
   const r = await rig({ beat: true });
@@ -290,8 +278,6 @@ test('no analyzer: imports are kept and the queue says why it waits', async () =
   }
 });
 
-// ── Persistence ─────────────────────────────────────────────────────────
-
 test('resume: a restart continues pending work and never redoes finished tracks', async () => {
   const root = path.join(TMP, 'resume');
   const r1 = await rig({ root });
@@ -301,7 +287,7 @@ test('resume: a restart continues pending work and never redoes finished tracks'
   await r1.svc.addFolder(c.id, r1.music);
   await waitFor('two tracks analysed', async () => Object.values(await statuses(r1.svc, c.id)).filter((s) => s === 'light').length >= 2);
   const done1 = Object.entries(await statuses(r1.svc, c.id)).filter(([, s]) => s === 'light').map(([n]) => n);
-  await close(r1); // "quit": running jobs are cancelled and stay queued
+  await close(r1);
   assert.ok(done1.length >= 2 && done1.length < 6, `${done1.length} done before the restart`);
 
   const r2 = await rig({ root });
@@ -368,14 +354,12 @@ test('rescan: new files queued, changed ones re-analysed, deleted ones missing, 
     await idle(r.svc);
     assert.deepEqual(await statuses(r.svc, c.id), { Keep: 'light', Change: 'light', Gone: 'missing', Away: 'missing', Fresh: 'light' });
     assert.equal(countRuns(r.logFile, 'analyze'), 6, '4 + the changed one again + the new one');
-    // Moved back unchanged (rename keeps size + mtime): restored without re-analysis.
     fs.renameSync(parked, away);
     const back = await r.svc.rescan(c.id);
     assert.deepEqual(back.data, { added: 0, changed: 0, missing: 0 });
     assert.match(back.message!, /1 back/);
     assert.equal((await statuses(r.svc, c.id)).Away, 'light');
     assert.equal(countRuns(r.logFile, 'analyze'), 6);
-    // removeTracks deletes records only, never files.
     const keepId = (await r.svc.query({ collectionId: c.id, text: 'keep' })).data!.tracks[0].id;
     const rm = await r.svc.removeTracks([keepId]);
     assert.equal(rm.ok, true);
@@ -385,8 +369,6 @@ test('rescan: new files queued, changed ones re-analysed, deleted ones missing, 
     await close(r);
   }
 });
-
-// ── Deep pass ───────────────────────────────────────────────────────────
 
 test('deep: needs a stem model; separate → transcribe → lines + hashes; temp stems deleted; silent vocals skipped', async () => {
   const none = await rig();
@@ -444,8 +426,6 @@ test('deep: needs a stem model; separate → transcribe → lines + hashes; temp
   }
 });
 
-// ── Profiles, similarity, originality, focus, project ───────────────────
-
 test('profile (cached per change), similar, originality, focus and addToProject end to end', async () => {
   const r = await rig({ stems: true, basicPitch: true });
   try {
@@ -473,7 +453,6 @@ test('profile (cached per change), similar, originality, focus and addToProject 
     assert.equal(sim.data![0].track.name, 'Second', 'the 120 bpm F#m twin ranks above the 160 bpm C major one');
     assert.ok(sim.data![0].score >= sim.data![1].score);
 
-    // Originality: the reference melody, transposed up 3 semitones, in a pitched pattern → flagged.
     const p = r.doc.project;
     const keys = p.channelOrder.find((id) => /keys/i.test(p.channels[id].name))!;
     const melody: Array<[number, number, number]> = [[0, 1, 62], [1, 0.5, 65], [1.5, 0.5, 69], [2, 1, 67], [3, 1.5, 64], [4.5, 0.5, 72], [5, 1, 70], [6, 0.5, 65], [6.5, 0.5, 67], [7, 1, 62], [8, 1, 69], [9, 2, 60]];
@@ -490,7 +469,6 @@ test('profile (cached per change), similar, originality, focus and addToProject 
     assert.ok(rep.data!.matches[0].notes >= 8);
     assert.match(rep.data!.summary, /legal advice/i);
 
-    // Focus: persisted in settings, exposed to agents, cleared with the collection.
     const f = await r.svc.setFocus({ collectionId: c.id, brief: 'dark, sparse' });
     assert.equal(f.ok, true, f.message);
     assert.deepEqual(r.settings().library?.focus, { collectionId: c.id, name: 'Night trap', brief: 'dark, sparse' });
@@ -499,7 +477,6 @@ test('profile (cached per change), similar, originality, focus and addToProject 
     const forFocus = await r.svc.originalityForFocus([pat.data!.id]);
     assert.ok(forFocus && forFocus.matches.length >= 1, 'commit_edit check applies (focus + deep references)');
 
-    // addToProject: a new playlist track + audio clip, one undo step.
     const before = r.doc.getHistory().length;
     const tracksBefore = r.doc.project.playlist.trackOrder.length;
     const atp = await r.svc.addToProject(ids.Song);

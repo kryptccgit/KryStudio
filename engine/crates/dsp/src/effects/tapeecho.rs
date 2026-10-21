@@ -1,18 +1,3 @@
-//! krypt.tapeecho — a tape-style echo.
-//!
-//! One delay line per side, read by a modulated "playback head": wow (a slow
-//! sine with a smoothed random drift, up to ±4 ms) and flutter (two fast
-//! sines, up to ±0.25 ms) move a fractional read with cubic Hermite
-//! interpolation, so the echoes bend in pitch like tape. Time is tempo
-//! synced (straight, dotted and triplet values) or free in ms, and glides
-//! (~150 ms) when changed, like a tape speed change. Each repeat goes
-//! through the age filters (band-limit: low cut 30 → 300 Hz, high cut
-//! 16 → 2.4 kHz) and a tanh tape saturator in the loop, so high feedback
-//! thickens and compresses instead of exploding. Age also adds hiss, gated
-//! by the echo level (silence stays silent). Ping-pong bounces the repeats
-//! left / right; Freeze stops recording and loops the last delay time
-//! forever without loss. Mix blends inside the device (zero latency).
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::delay::DelayLine;
 use crate::blocks::filters::{Svf, SvfMode};
@@ -53,13 +38,11 @@ pub fn descriptor() -> PluginDescriptor {
 }
 
 const MAX_SECONDS: f32 = 10.0;
-/// Wow: ±4 ms at 100 %; flutter: ±0.25 ms.
 const WOW_S: f32 = 0.004;
 const FLUTTER_S: f32 = 0.000_25;
 
 pub struct TapeEcho {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     lines: [DelayLine; 2],
@@ -76,14 +59,12 @@ pub struct TapeEcho {
     sync: bool,
     freeze: bool,
     freeze_req: bool,
-    /// read offset (pushes) that recirculates one loop while frozen
     frozen_d: usize,
     div_beats: f64,
     div_idx: usize,
     free_ms: f32,
     max_samples: f32,
     last_bpm: f64,
-    // modulation state
     wow_ph: f32,
     fl_ph: [f32; 2],
     drift: f32,
@@ -205,7 +186,6 @@ impl Effect for TapeEcho {
             self.snap();
         }
         if self.freeze_req && !self.freeze {
-            // loop exactly one (current) delay time
             self.frozen_d = (self.time.cur.round().max(2.0) as usize) - 1;
         }
         self.freeze = self.freeze_req;
@@ -222,7 +202,6 @@ impl Effect for TapeEcho {
             let t = self.time.next();
             let fb = self.fb.next();
             let mix = self.mix.next();
-            // playback-head modulation (centred, so the average echo time is exact)
             let mut m = 0.0f32;
             if wow_d > 0.0 {
                 self.wow_ph += wow_inc;
@@ -248,7 +227,6 @@ impl Effect for TapeEcho {
                 }
                 m += fl_d * f;
             }
-            // the read happens before this sample's push: offset t - 1 = an echo exactly t samples later
             let d = ((t + m) as f64 - 1.0).max(0.0);
             let dl = self.lines[0].read_f64(d);
             let dr = self.lines[1].read_f64(d);
@@ -265,7 +243,6 @@ impl Effect for TapeEcho {
                 self.lines[0].push(flush(tanh_fast(wl * k) * inv_k));
                 self.lines[1].push(flush(tanh_fast(wr * k) * inv_k));
             }
-            // hiss follows the echo level, so silence stays digital silence
             let lvl = xl.abs().max(xr.abs()).max(dl.abs()).max(dr.abs());
             self.env = if lvl > self.env { lvl } else { self.env + (lvl - self.env) * self.env_rel };
             if self.env < 1e-6 {

@@ -1,9 +1,3 @@
-// Home ▸ Sounds & Plugins: presets (factory + yours), the factory sounds,
-// optional sound packs (real recorded instruments, downloaded on click),
-// sample folders found on this PC (one click adds them to the Browser, where
-// agents can use them too), the stock instruments and effects, and the
-// user's VST3 / CLAP plugins (Plugin Manager state, live).
-
 import { useCallback, useEffect, useState } from 'react';
 import { AudioLines, Blocks, Check, FolderOpen, FolderPlus, FolderSearch, FolderTree, Piano, RefreshCw, SlidersVertical, SwatchBook, TriangleAlert } from 'lucide-react';
 import { EFFECTS, INSTRUMENTS } from '@shared/plugins/catalog';

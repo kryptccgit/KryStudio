@@ -1,8 +1,3 @@
-// Take lanes + comping commands (Wave 12.2b; the model is explained in
-// shared/schema/takes.ts). Every comp edit rewrites the group's comp and
-// rebuilds its clips on the track in the SAME command, so one comp gesture
-// is one undo step and the engine only ever sees ordinary clips.
-
 import { z } from 'zod';
 import { defineCommand, must, CommandError, type CommandContext } from './types';
 import { defaultNote, paletteColor, type Project } from '../schema/project';
@@ -27,7 +22,6 @@ import {
 import { channelsRemove } from './channels';
 import { patternsRemove } from './patterns';
 
-/** Default crossfade: 20 ms at the project tempo. */
 export function defaultCrossfade(bpm: number): number {
   return Math.max(1, Math.round(secondsToTicks(0.02, bpm)));
 }
@@ -44,22 +38,17 @@ function findTake(g: TakeGroup, a: { takeId?: string; pass?: number }): Take {
 
 const zWhich = {
   takeId: z.string().optional(),
-  /** Recording pass, 1-based ("take from pass N"). */
   pass: z.number().int().min(1).optional(),
 };
 const oneTake = (a: { takeId?: string; pass?: number }) => !!a.takeId !== (a.pass !== undefined);
 const ONE_TAKE = { message: 'pass exactly one of takeId or pass' };
 
-/** Run a command body inside this one (same draft); a CommandError from it propagates. */
 function sub<A>(def: { args: z.ZodType<A>; run: (d: Project, a: A, ctx: CommandContext) => unknown }, d: Project, args: unknown, ctx: CommandContext): void {
   def.run(d, def.args.parse(args), ctx);
 }
 
-// ── Create ────────────────────────────────────────────────────────────
-
 const zPassNote = z.object({
   channelId: z.string(),
-  /** Song tick. */
   tick: z.number().min(0),
   dur: z.number().min(1),
   key: z.number().int().min(0).max(127),
@@ -89,7 +78,6 @@ export const takesCreateGroup = defineCommand({
         z.object({
           start: z.number().int().min(0),
           end: z.number().int().min(1),
-          /** Audio: seconds into the file where this pass begins. */
           sec: z.number().min(0).default(0),
           notes: z.array(zPassNote).max(20000).optional(),
         }),
@@ -98,7 +86,6 @@ export const takesCreateGroup = defineCommand({
       .max(MAX_TAKES),
     crossfade: z.number().int().min(0).max(MAX_CROSSFADE).optional(),
     prefer: z.enum(['last', 'first']).default('last'),
-    /** Audio: play the takes through this existing insert (the Recording Studio's vocal insert) instead of a new one. */
     insertId: z.string().optional(),
   }),
   run(d, a, ctx) {
@@ -179,8 +166,6 @@ export const takesCreateGroup = defineCommand({
   },
 });
 
-// ── Comp edits ────────────────────────────────────────────────────────
-
 export const takesSelect = defineCommand({
   id: 'takes.select',
   label: (a) => (a.start !== undefined || a.end !== undefined ? 'Comp a range' : `Use take ${a.pass ?? ''}`.trim()),
@@ -225,7 +210,6 @@ export const takesFlatten = defineCommand({
   args: z.object({ groupId: z.string() }),
   run(d, a, ctx) {
     const g = group(d, a.groupId);
-    // A take is kept when any clip still plays it (the comp, or a copy the user made elsewhere).
     const used = new Set<string>();
     for (const c of Object.values(d.playlist.clips)) {
       const t = takeOfClip(g, c) ?? takeOfClip(g, { ...c, trackId: g.trackId });
@@ -259,7 +243,6 @@ export const takesRemoveTake = defineCommand({
     let comp: CompSegment[] = g.comp.filter((s) => s.takeId !== t.id);
     delete g.takes[t.id];
     g.takeOrder = g.takeOrder.filter((id) => id !== t.id);
-    // Fill each hole from the other takes, the latest pass winning.
     const others = orderedTakes(g).sort((x, y) => x.pass - y.pass);
     for (const h of holes) {
       let fill: CompSegment[] = [];
@@ -313,7 +296,6 @@ export const takesRename = defineCommand({
   },
 });
 
-/** Erase a range from the comp (silence there) — e.g. drop a breath between phrases. */
 export const takesClearRange = defineCommand({
   id: 'takes.clearRange',
   label: () => 'Silence comp range',

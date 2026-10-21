@@ -1,8 +1,3 @@
-// Official Krypt links used by the About panel and the title-bar menu.
-// [PROTECTION] kryptguidelines §9.1: no clean literals for a rebrander to
-// search-and-replace; they're rebuilt at runtime. In a degraded (rebranded)
-// build main refuses to open them anyway (electron/system/shell.ts).
-
 const K = 0x37;
 const rebuild = (codes: number[]): string => String.fromCharCode(...codes.map((c) => c ^ K).reverse());
 

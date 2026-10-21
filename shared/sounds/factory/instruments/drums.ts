@@ -1,12 +1,7 @@
-// Factory drum presets: Krypt DrumSynth voices (no samples needed; keys transpose
-// relative to C5 = MIDI 60) plus a few Krypt Sampler kits built on the legacy
-// factory samples (shared/sounds/types.ts LEGACY_FACTORY_PATHS).
-
 import type { InstrumentPreset } from '../../types';
 import { CRUSH, DRUM, DV, PLATE, ROOM, SAMPLER, TAPE, clipper, drive, drum, eq, preset, reverb, sampler, transient } from './kit';
 
 export const DRUM_PRESETS: InstrumentPreset[] = [
-  // ── Kick ──
   preset({
     id: 'factory:kick/punchy',
     name: 'Punchy Kick',
@@ -64,7 +59,6 @@ export const DRUM_PRESETS: InstrumentPreset[] = [
     range: [55, 67],
   }),
 
-  // ── Snare ──
   preset({
     id: 'factory:snare/tight',
     name: 'Tight Snare',
@@ -112,7 +106,6 @@ export const DRUM_PRESETS: InstrumentPreset[] = [
     range: [55, 67],
   }),
 
-  // ── Clap ──
   preset({
     id: 'factory:clap/big',
     name: 'Big Clap',
@@ -136,7 +129,6 @@ export const DRUM_PRESETS: InstrumentPreset[] = [
     range: [55, 67],
   }),
 
-  // ── Hats ──
   preset({
     id: 'factory:hat/closed',
     name: 'Closed Hat',
@@ -194,7 +186,6 @@ export const DRUM_PRESETS: InstrumentPreset[] = [
     range: [55, 67],
   }),
 
-  // ── Ride / crash ──
   preset({
     id: 'factory:ride/bright',
     name: 'Bright Ride',
@@ -240,7 +231,6 @@ export const DRUM_PRESETS: InstrumentPreset[] = [
     range: [55, 72],
   }),
 
-  // ── Percussion ──
   preset({
     id: 'factory:perc/rim',
     name: 'Rim Shot',
@@ -300,7 +290,6 @@ export const DRUM_PRESETS: InstrumentPreset[] = [
     range: [55, 79],
   }),
 
-  // ── Toms ──
   preset({
     id: 'factory:tom/low',
     name: 'Low Tom',

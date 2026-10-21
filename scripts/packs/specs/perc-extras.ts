@@ -1,10 +1,3 @@
-// Percussion Extras: recorded hand and world percussion for grooves and top loops: claps, shakers, tambourines,
-// cajon, bongos, congas, darbuka, frame drum, claves, woodblock, cowbells, agogo, log drum, guiro, cabasa, brake
-// drum, sleigh bells, a vibraslap, a slapstick, whistles and concert snare rolls.
-// Source: the Versilian Community Sample Library (VCSL) by Versilian Studios, CC0 1.0 (LICENSE at the pinned commit,
-// the same commit the Keys & Mallets pack uses). Recorded at natural level and shipped as recorded (we can't
-// normalise files we don't host): the softest velocity layers (peaks below about -36 dBFS) are left out, and
-// `peakDb` lets the app set each one's level.
 import type { GenreId } from '@shared/sounds/genres';
 import { sample, type SampleDef } from '../lib';
 import type { SamplePackSpec } from '../lib';
@@ -23,7 +16,6 @@ const SI = 'Idiophones/Struck Idiophones/';
 const SM = 'Membranophones/Struck Membranophones/';
 
 type Kind = SampleDef['kind'];
-/** files[i] → "<name> <i+1>" (just "<name>" for a single file). */
 const set = (folder: string, dir: string, files: string[], name: string, kind: Kind, tags: string[], genres: GenreId[] = WORLD) =>
   files.map((f, i) => sample(folder, 'vcsl', `${dir}${f}`, files.length > 1 ? `${name} ${i + 1}` : name, kind, ['organic', ...tags], genres));
 
@@ -32,7 +24,6 @@ export const PERC_EXTRAS: SamplePackSpec = {
   type: 'samples',
   sources: { vcsl: VCSL_SOURCE },
   samples: [
-    // claps and shakers
     ...set('claps', `${SI}Claps/`, ['Clap_rr1.wav', 'Clap_rr2.wav', 'Clap_rr3.wav', 'Clap_rr4.wav', 'Clap_rr5.wav', 'Clap_rr6.wav'], 'Group Clap', 'clap', ['big', 'wide'], GROOVE),
     ...set('claps', `${SI}Claps/`, ['SoloClap_vl2.wav', 'SoloClap_vl3.wav', 'SoloClap_vl4.wav'], 'Solo Clap', 'clap', ['short'], GROOVE),
     ...set('shakers', `${SI}Shaker, Small/`, ['Mid_ShakerHighFaster_Up_rr1.wav', 'Mid_ShakerHighFaster_Up_rr2.wav', 'Mid_ShakerLowFaster_Up_rr1.wav', 'Mid_ShakerLowFaster_Up_rr2.wav'], 'Shaker Tick', 'shaker', ['short'], GROOVE),
@@ -43,7 +34,6 @@ export const PERC_EXTRAS: SamplePackSpec = {
     ...set('shakers', `${SI}Shaker, Large/`, ['LShaker_Shake1D_rr2_Mid.wav', 'LShaker_Shake1D_rr3_Mid.wav', 'LShaker_Shake1U_rr4_Mid.wav'], 'Big Shaker Shake', 'shaker', [], GROOVE),
     ...set('shakers', `${SI}Cabasa/`, ['Cabasa1_Hit_rr1_Mid.wav', 'Cabasa1_Hit_rr2_Mid.wav'], 'Cabasa Hit', 'shaker', ['short']),
     ...set('shakers', `${SI}Cabasa/`, ['Cabasa1_Rub_v2_rr1_Mid.wav', 'Cabasa1_Rub_v2_rr2_Mid.wav'], 'Cabasa Twist', 'shaker', []),
-    // tambourines and bells
     ...set('tambourine', `${SI}Tambourine 1/`, ['Tamb1_Hit_v2_rr1_Mid.wav', 'Tamb1_Hit_v1_rr1_Mid.wav'], 'Tambourine Hit', 'perc', ['tambourine', 'bright'], GROOVE),
     ...set('tambourine', `${SI}Tambourine 2/`, ['Tamb2_Hit_v2_rr2_Mid.wav', 'Tamb2_Hit_v1_rr1_Mid.wav'], 'Tambourine Hit Dry', 'perc', ['tambourine', 'bright'], GROOVE),
     ...set('tambourine', `${SI}Tambourine 1/`, ['Tamb1_Shake_rr1_Mid.wav', 'Tamb1_Shake_rr2_Mid.wav'], 'Tambourine Shake', 'shaker', ['tambourine'], GROOVE),
@@ -57,7 +47,6 @@ export const PERC_EXTRAS: SamplePackSpec = {
     ...set('bells', `${SI}Cowbells/`, ['Cowbell2_Double_v3_rr1_Mid.wav'], 'Cowbell Double', 'perc', ['metallic'], [...WORLD, 'phonk', 'trap']),
     ...set('bells', `${SI}Agogo Bells/`, ['Agogo_High_v3_rr1_Mid.wav', 'Agogo_High_v2_rr1_Mid.wav'], 'Agogo High', 'perc', ['metallic', 'bright']),
     ...set('bells', `${SI}Agogo Bells/`, ['Agogo_Low_v2_rr1_Mid.wav'], 'Agogo Low', 'perc', ['metallic']),
-    // wood
     ...set('wood', `${SI}Claves/`, ['Claves1_Hit_v3_rr1_Mid.wav', 'Claves2_Hit_v3_rr1_Mid.wav', 'Claves1_Hit_v2_rr1_Mid.wav', 'Claves2_Hit_v2_rr1_Mid.wav'], 'Claves', 'perc', ['wood', 'short', 'bright']),
     ...set('wood', `${SI}Woodblock/`, ['wood_click_ff.wav', 'wood_click_f_rr1.wav', 'wood_click_f_rr2.wav', 'wood_click3_vl2.wav', 'wood_click2_mp.wav'], 'Woodblock', 'perc', ['wood', 'short']),
     ...set('wood', `${SI}Slit Drum/`, ['LogDrumHi_MedM_v3_rr1_Sum.wav', 'LogDrumHi_MedM_v2_rr1_Sum.wav'], 'Log Drum High', 'perc', ['wood', 'warm'], ['afrobeats', 'deep-house', 'house', 'lofi', 'reggaeton']),
@@ -67,7 +56,6 @@ export const PERC_EXTRAS: SamplePackSpec = {
     ...set('wood', `${SI}Vibraslap/Legacy/`, ['vibraslap_rr1.wav', 'vibraslap_rr3.wav'], 'Vibraslap', 'perc', ['rattle']),
     ...set('wood', `${SI}Ratchet/`, ['Ratchet1_Crank_rr1_Mid.wav', 'Ratchet2_Crank_v1_rr1_Mid.wav'], 'Ratchet Crank', 'perc', ['wood', 'rattle']),
     ...set('wood', `${SI}Ratchet/`, ['Ratchet1_Fast_rr1_Mid.wav'], 'Ratchet Spin', 'perc', ['wood', 'rattle', 'long']),
-    // hand drums
     ...set('cajon', `${SI}Cajon/`, ['Cajon_hit1_fff_rr1.wav', 'Cajon_hit1_fff_rr2.wav', 'Cajon_hit1_f_rr1.wav', 'Cajon_hit1_f_rr2.wav'], 'Cajon Hit A', 'perc', ['wood', 'punchy'], GROOVE),
     ...set('cajon', `${SI}Cajon/`, ['Cajon_hit2_f_rr1.wav', 'Cajon_hit2_f_rr2.wav', 'Cajon_hit2_mp_rr1.wav'], 'Cajon Hit B', 'perc', ['wood', 'punchy'], GROOVE),
     ...set('cajon', `${SI}Cajon/`, ['Cajon_hit3_f_rr1.wav', 'Cajon_hit3_f_rr2.wav', 'Cajon_hit3_mp_rr1.wav'], 'Cajon Hit C', 'perc', ['wood', 'punchy'], GROOVE),
@@ -91,11 +79,9 @@ export const PERC_EXTRAS: SamplePackSpec = {
     ...set('frame-drum', `${SM}Frame Drum/`, ['HDrumL_HitMuted_v3_rr1_Sum.wav', 'HDrumL_HitMuted_v3_rr2_Sum.wav'], 'Frame Drum Low Muted', 'perc', ['deep', 'short']),
     ...set('frame-drum', `${SM}Frame Drum/`, ['HDrumS_Hit_v3_rr1_Sum.wav', 'HDrumS_Hit_v3_rr2_Sum.wav'], 'Frame Drum Small', 'perc', ['warm']),
     ...set('frame-drum', `${SM}Frame Drum/`, ['HDrumS_HitMuted_v3_rr1_Sum.wav'], 'Frame Drum Small Muted', 'perc', ['short']),
-    // metal
     ...set('metal', `${SI}Brake Drum/`, ['BrakeDrum1_Hammer_v3_rr1_Mid.wav', 'BrakeDrum1_Hammer_v2_rr1_Mid.wav', 'BrakeDrum2_Hammer1_v2_rr1_Mid.wav', 'BrakeDrum2_Hammer3_v3_rr1_Mid.wav'], 'Brake Drum Hit', 'perc', ['metallic', 'hard'], [...GROOVE, 'techno']),
     ...set('metal', `${SI}Brake Drum/`, ['BrakeDrum1_YarnM_v3_rr1_Mid.wav'], 'Brake Drum Soft', 'perc', ['metallic'], [...GROOVE, 'techno']),
     ...set('metal', `${SI}Brake Drum/`, ['BrakeDrum1_Susp_v3_rr1_Mid.wav', 'BrakeDrum2_Susp_v2_rr1_Mid.wav'], 'Brake Drum Ring', 'perc', ['metallic', 'long'], [...GROOVE, 'techno']),
-    // whistles, toys and snare rolls
     ...set('whistles', 'Aerophones/Edge-blown Aerophones/Ball Whistle/', ['Main_BallWhistle_Short-001.wav'], 'Samba Whistle Short', 'perc', ['whistle'], ['reggaeton', 'afrobeats', 'house', 'edm']),
     ...set('whistles', 'Aerophones/Edge-blown Aerophones/Ball Whistle/', ['Main_BallWhistle_Long-001.wav'], 'Samba Whistle Long', 'perc', ['whistle'], ['reggaeton', 'afrobeats', 'house', 'edm']),
     ...set('whistles', 'Aerophones/Edge-blown Aerophones/Train Whistle, Toy/', ['Main_TrainMed_Short-001.wav'], 'Toy Train Whistle', 'perc', ['whistle'], ['pop', 'lofi', 'house']),

@@ -1,7 +1,3 @@
-// Browser-only mock of window.krypt.packs: the catalog's packs (two made-up demo packs while the catalog is empty)
-// with downloads simulated over about three seconds (progress events, Cancel, Remove, Update). Devtools:
-// __kryptMockPacks.failNext() makes the next download fail with a checksum error; .installAll() / .reset().
-
 import type { KryptApi } from '@shared/types';
 import type { PackEntryState, PackStatus, PacksState } from '@shared/packs/types';
 import { PACKS } from '@shared/packs/catalog';
@@ -12,7 +8,6 @@ const MB = 1024 * 1024;
 
 type Base = Omit<PackEntryState, 'status' | 'progress' | 'error'>;
 
-/** Stand-ins for the browser mock only (never shipped as data): what a card looks like before the catalog lands. */
 const DEMO: Base[] = [
   {
     id: 'demo-grand',

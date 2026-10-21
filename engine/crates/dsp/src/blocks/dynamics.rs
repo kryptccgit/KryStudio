@@ -1,6 +1,3 @@
-//! Envelope followers for dynamics processors (transient shaper, Squash,
-//! vocoder): rectified input, one-pole attack/release smoothing.
-
 use super::tc_coef;
 
 #[derive(Clone, Copy, Debug)]
@@ -28,7 +25,6 @@ impl Follower {
         self.rel = tc_coef(release_ms, sr);
     }
 
-    /// Feed a non-negative level (e.g. |x|); returns the envelope.
     #[inline]
     pub fn tick(&mut self, level: f32) -> f32 {
         let c = if level > self.env { self.att } else { self.rel };

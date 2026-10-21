@@ -1,28 +1,16 @@
-//! Section segmentation: beat-synchronous chroma + timbre features →
-//! self-similarity matrix → Foote checkerboard novelty (Foote, "Automatic
-//! audio segmentation using a measure of audio novelty", ICME 2000) →
-//! boundaries snapped to downbeats → labels by segment-to-segment similarity
-//! (repeated material shares a letter).
-
 use crate::features::{mean, std_dev};
 use crate::key::{cosine, Chroma};
 
 pub struct SegInput<'a> {
-    /// Frame boundaries in seconds (beat times, or a fixed grid); frames are
-    /// [grid[i], grid[i+1]).
     pub grid: &'a [f32],
-    /// Bar starts (downbeats) to snap boundaries to (may be empty).
     pub bars: &'a [f32],
-    /// Frames per bar-ish unit: 4 for beats, 2 for a 0.5 s grid (scales kernels).
     pub frames_per_bar: usize,
     pub chroma: &'a Chroma,
-    /// Onset-STFT log band energies (frames × bands) at `band_fps`.
     pub band_db: &'a [Vec<f32>],
     pub band_fps: f32,
     pub duration: f32,
 }
 
-/// (start_sec, end_sec, label)
 pub fn segment(inp: &SegInput) -> Vec<(f32, f32, String)> {
     let g = inp.grid;
     let dur = inp.duration;
@@ -31,7 +19,6 @@ pub fn segment(inp: &SegInput) -> Vec<(f32, f32, String)> {
         return whole();
     }
     let n = g.len() - 1;
-    // ── features per frame ──
     let nbands = inp.band_db.first().map(|r| r.len()).unwrap_or(0);
     let mut chroma_f: Vec<[f32; 12]> = Vec::with_capacity(n);
     let mut timbre: Vec<Vec<f32>> = Vec::with_capacity(n);
@@ -50,7 +37,6 @@ pub fn segment(inp: &SegInput) -> Vec<(f32, f32, String)> {
         }
         timbre.push(t);
     }
-    // z-normalise timbre per band across time (shape + level changes).
     for k in 0..nbands {
         let col: Vec<f32> = timbre.iter().map(|t| t[k]).collect();
         let (m, s) = (mean(&col), std_dev(&col).max(1e-3));
@@ -58,7 +44,6 @@ pub fn segment(inp: &SegInput) -> Vec<(f32, f32, String)> {
             t[k] = (t[k] - m) / s;
         }
     }
-    // Smooth features over ±1 frame.
     let smooth = |i: usize| -> (Vec<f32>, Vec<f32>) {
         let a = i.saturating_sub(1);
         let b = (i + 2).min(n);
@@ -75,7 +60,6 @@ pub fn segment(inp: &SegInput) -> Vec<(f32, f32, String)> {
         (c, t)
     };
     let feats: Vec<(Vec<f32>, Vec<f32>)> = (0..n).map(smooth).collect();
-    // ── self-similarity ──
     let mut ssm = vec![0f32; n * n];
     for i in 0..n {
         for j in i..n {
@@ -84,8 +68,7 @@ pub fn segment(inp: &SegInput) -> Vec<(f32, f32, String)> {
             ssm[j * n + i] = s;
         }
     }
-    // ── Foote novelty ──
-    let k = (inp.frames_per_bar * 4).min(n / 4).max(2) as i64; // ≈ 4 bars
+    let k = (inp.frames_per_bar * 4).min(n / 4).max(2) as i64;
     let mut nov = vec![0f32; n];
     for (i, nv) in nov.iter_mut().enumerate() {
         let mut s = 0.0;
@@ -105,7 +88,7 @@ pub fn segment(inp: &SegInput) -> Vec<(f32, f32, String)> {
         *nv = s.max(0.0);
     }
     let thr = mean(&nov) + 0.5 * std_dev(&nov);
-    let min_dist = (inp.frames_per_bar * 4).max(4); // ≥ 4 bars between boundaries
+    let min_dist = (inp.frames_per_bar * 4).max(4);
     let mut cand: Vec<usize> = (1..n - 1)
         .filter(|&i| {
             let a = i.saturating_sub(min_dist / 2);
@@ -124,7 +107,6 @@ pub fn segment(inp: &SegInput) -> Vec<(f32, f32, String)> {
         }
     }
     bounds.sort_unstable();
-    // Boundary times, snapped to the nearest bar start within half a bar.
     let bar_len = if inp.bars.len() >= 2 { (inp.bars[inp.bars.len() - 1] - inp.bars[0]) / (inp.bars.len() - 1) as f32 } else { 0.0 };
     let mut times: Vec<f32> = bounds
         .iter()
@@ -144,7 +126,6 @@ pub fn segment(inp: &SegInput) -> Vec<(f32, f32, String)> {
     let mut edges = vec![0.0f32];
     edges.extend(times.into_iter().filter(|&t| t > 1.0 && t < dur - 1.0));
     edges.push(dur);
-    // ── labels ──
     let frame_of = |t: f32| -> usize { g.partition_point(|&x| x <= t).saturating_sub(1).min(n - 1) };
     let segs: Vec<(usize, usize)> = edges.windows(2).map(|w| (frame_of(w[0]), frame_of(w[1] - 1e-3) + 1)).collect();
     let block_sim = |a: (usize, usize), b: (usize, usize)| -> f32 {

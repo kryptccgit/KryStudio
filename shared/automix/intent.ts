@@ -1,20 +1,9 @@
-// ──────────────────────────────────────────────────────────────────────
-// Prompt → AutoMixIntent (research/20 §2), the built-in keyword parser.
-// Pure and forgiving: English mixing talk ("vocals on top, punchy, not
-// harsh, streaming loud", "too much bass", "a bit brighter", "-9 LUFS")
-// becomes small adjustments (-2..2) on top of a preset card. The AI path
-// (electron/automix/ai.ts) returns the same shape; clampIntent() makes
-// either safe.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { AutoMixIntent } from './types';
 import { AUTO_MIX_PRESETS, presetForGenre } from './presets';
 
-/** The adjustable dimensions of an intent (all -2..2). */
 export const INTENT_KEYS = ['louder', 'brighter', 'warmer', 'punchier', 'wider', 'bassier', 'vocalsForward', 'vocalSpace', 'lessHarsh', 'cleaner'] as const;
 export type IntentKey = (typeof INTENT_KEYS)[number];
 
-/** Loudness targets a prompt may ask for (LUFS). */
 export const LUFS_RANGE = { min: -24, max: -5 } as const;
 
 const WORDS: Record<IntentKey, { up: string; down: string }> = {
@@ -37,7 +26,6 @@ const clampStep = (v: unknown): number | undefined => {
   return r === 0 ? undefined : r;
 };
 
-/** A safe intent from anything (the AI's JSON, a renderer payload): unknown fields dropped, values clamped. */
 export function clampIntent(raw: unknown, source: AutoMixIntent['source']): AutoMixIntent {
   const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const out: AutoMixIntent = { summary: '', source };
@@ -54,7 +42,6 @@ export function clampIntent(raw: unknown, source: AutoMixIntent['source']): Auto
   return out;
 }
 
-/** Plain words for what an intent asks ("louder, brighter, vocals forward"). */
 export function summarizeIntent(i: Omit<AutoMixIntent, 'summary' | 'source'>): string {
   const parts: string[] = [];
   if (i.presetId) parts.push(AUTO_MIX_PRESETS.find((p) => p.id === i.presetId)?.name ?? i.presetId);
@@ -68,36 +55,26 @@ export function summarizeIntent(i: Omit<AutoMixIntent, 'summary' | 'source'>): s
   return parts.join(', ');
 }
 
-// ── The keyword parser ────────────────────────────────────────────────
-
 interface Rule {
   key: IntentKey;
-  /** Matched against a normalised clause (lower case, single spaces, padded with spaces). */
   re: RegExp;
-  /** Direction when the word appears plainly ("brighter" +1, "dull" -1 on brighter). */
   sign: 1 | -1;
-  /** A complaint word ("harsh", "muddy", "buried"): "not X" / "too X" / "X" all ask for the fix (sign). */
   complaint?: boolean;
-  /** Only in a clause that talks about the vocals. */
   vocal?: boolean;
-  /** Never in a clause that talks about the vocals (the word means something else there). */
   noVocal?: boolean;
 }
 
 const VOCAL_WORDS = /\b(vocals?|vox|voice|voices|singer|singing|rap|rapper|rapping|lyrics|acapella|a cappella|verse vocals?|lead vocals?|ad ?libs?)\b/;
 
 const RULES: Rule[] = [
-  // vocals (checked first: "vocals louder" is not "louder")
   { key: 'vocalsForward', vocal: true, sign: 1, re: /\b(louder|up|forward|on top|in front|upfront|up front|front|clear|clearer|audible|hear|stand out|pop out|cut through|present|presence)\b/ },
   { key: 'vocalsForward', vocal: true, sign: 1, complaint: true, re: /\b(buried|drowned|lost|hidden|too quiet|too low|too soft|can ?t hear|cannot hear|hard to hear)\b/ },
   { key: 'vocalsForward', vocal: true, sign: -1, re: /\b(quieter|down|back|tuck|tucked|behind|sit in|sits in|blend|blended|softer|lower)\b/ },
   { key: 'vocalsForward', vocal: true, sign: -1, complaint: true, re: /\b(too loud|too hot|too much|on top of everything|sticks? out)\b/ },
   { key: 'vocalSpace', sign: 1, re: /\b(reverb|reverby|verb|wet|wetter|space|spacious|ambient|ambience|echo|echoes|echoey|delay|delays|lush|hall|plate|atmospheric|dreamy|big room sound)\b/ },
   { key: 'vocalSpace', sign: -1, re: /\b(dry|drier|dryer|intimate|close|in your face|no reverb|no delay)\b/ },
-  // loudness
   { key: 'louder', noVocal: true, sign: 1, re: /\b(louder|loud|loudness|slam|slammed|hot|hotter|maximi[sz]ed?|competitive|push it|pushed|volume up|crank)\b/ },
   { key: 'louder', noVocal: true, sign: -1, re: /\b(quieter|quiet|softer overall|dynamic|dynamics|breathe|breathing|turn it down|volume down|not squashed|less squashed)\b/ },
-  // tone
   { key: 'brighter', sign: 1, re: /\b(brighter|bright|crisp|crisper|airy|air|sparkle|sparkly|shine|shiny|open|clarity|sizzle|top end)\b/ },
   { key: 'brighter', sign: -1, re: /\b(darker|dark|dull|duller|mellow|muffled|rolled off|vintage top)\b/ },
   { key: 'warmer', sign: 1, re: /\b(warmer|warm|warmth|analog|analogue|tape|tube|saturated|saturation|rich|fat|fatter|body)\b/ },
@@ -116,12 +93,9 @@ const RULES: Rule[] = [
   { key: 'cleaner', sign: -1, re: /\b(aggressive|crushed|crush|distorted|distortion|dirty|gritty|grit|grimy|slammed|smashed|raw|lo ?fi grit)\b/ },
 ];
 
-/** Intensity words before / around a match. */
 const STRONG = /\b(very|much|way|really|super|lots|a lot|extremely|heavily|massively|seriously|a ton|tons|way more)\b/;
 const MILD = /\b(a bit|a little|slightly|bit|little|touch|tad|somewhat|kinda|kind of)\b/;
-/** "less X", "not X", "no X", "without X", "reduce X", "lower X", "tame X", "cut X", "fewer X". */
 const NEGATE = /\b(less|not|no|without|reduce|reduced|lower|tame|cut|fewer|don ?t|dont|never|remove|kill|lose|minus|turn down)\b/;
-/** "too X", "too much X", "overly X" (X is the problem, so the fix goes the other way). */
 const TOO = /\b(too|overly|excessively|too much|so much)\b/;
 
 function norm(s: string): string {
@@ -134,13 +108,12 @@ function norm(s: string): string {
     .trim()} `;
 }
 
-/** "-9 LUFS", "lufs -9", "−9", "streaming", "spotify", "club" → a LUFS target. */
 export function lufsInText(text: string): number | null {
   const t = text.toLowerCase().replace(/[−–—]/g, '-');
   const m = t.match(/(-?\d{1,2}(?:\.\d)?)\s*(?:lufs|lu\b|db ?lufs)/) ?? t.match(/lufs\s*(?:of|at|to|=|:)?\s*(-?\d{1,2}(?:\.\d)?)/);
   if (m) {
     let v = Number(m[1]);
-    if (v > 0) v = -v; // "9 LUFS" means -9
+    if (v > 0) v = -v;
     if (Number.isFinite(v)) return Math.max(LUFS_RANGE.min, Math.min(LUFS_RANGE.max, v));
   }
   const n = norm(text);
@@ -151,7 +124,6 @@ export function lufsInText(text: string): number | null {
   return null;
 }
 
-/** Does the prompt ask for pitch correction (Krypt Tune)? Returns the style or null. */
 export function tuneInText(text: string): 'natural' | 'pop' | 'hard' | null {
   const n = norm(text);
   const hit = n.match(/\b(no|without|don ?t|not)\s+(?:\w+\s+){0,2}(tune|tuning|pitch correction|autotune|auto tune)\b/);
@@ -161,7 +133,6 @@ export function tuneInText(text: string): 'natural' | 'pop' | 'hard' | null {
   return null;
 }
 
-/** Does the prompt name a card? (a genre, or a card's own name: "lofi", "podcast", "club"). */
 export function presetInText(text: string): string | null {
   const n = norm(text);
   const named: Array<[RegExp, string]> = [
@@ -182,11 +153,6 @@ export function presetInText(text: string): string | null {
   return g?.id ?? null;
 }
 
-/**
- * The keyword parser. Clauses are split on , ; . "and" "but" "with"; within a clause a negation ("less", "not",
- * "no", "reduce") flips a plain word, "too X" asks for the opposite of X, and complaint words ("harsh", "muddy",
- * "buried") always ask for their fix. "very / much / a lot" doubles, "a bit / slightly" keeps 1.
- */
 export function parseIntent(prompt: string): AutoMixIntent {
   const text = String(prompt ?? '').slice(0, 2000);
   const acc: Partial<Record<IntentKey, number>> = {};
@@ -204,13 +170,11 @@ export function parseIntent(prompt: string): AutoMixIntent {
       if (r.noVocal && vocal) continue;
       const m = clause.match(r.re);
       if (!m) continue;
-      // The words before the match decide its direction.
       const before = clause.slice(0, m.index ?? 0);
       let sign: number = r.sign;
       if (r.complaint) sign = r.sign;
       else if (TOO.test(before) || / too$/.test(before.trim()) || /\btoo much\b/.test(clause)) sign = -r.sign;
       else if (NEGATE.test(before)) sign = -r.sign;
-      // "louder" in a "vocals louder" clause was taken by vocalsForward; "loud" in "too loud" is a complaint.
       const plain = clause.replace(/\b(too|so) much\b/g, ' ');
       const strong = STRONG.test(plain) && !MILD.test(plain);
       const mag = strong ? 2 : 1;
@@ -228,13 +192,11 @@ export function parseIntent(prompt: string): AutoMixIntent {
     const v = clampStep(acc[k]);
     if (v !== undefined) out[k] = v;
   }
-  // "club" / "streaming" set the target; don't also read them as louder / quieter.
   if (out.targetLufs !== undefined && out.louder !== undefined && /\b(streaming|spotify|club|lufs)\b/.test(norm(text)) && !/\b(louder|slam|maximi)/.test(norm(text))) delete out.louder;
   out.summary = summarizeIntent(out) || (text.trim() ? 'nothing specific: the preset as it is' : '');
   return out;
 }
 
-/** Intent adjustments merged onto a request's overrides: the explicit LUFS wins over the prompt's. */
 export function mergeIntents(a: AutoMixIntent | null, b: AutoMixIntent | null): AutoMixIntent | null {
   if (!a) return b;
   if (!b) return a;

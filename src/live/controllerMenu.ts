@@ -1,6 +1,3 @@
-// "Link to controller…" (FL Remote control / MIDI-learn) items for every
-// parameter's right-click menu (src/controls/ParamKnob.tsx paramMenuItems).
-
 import { Cable, Unlink } from 'lucide-react';
 import { midiSettings } from '@shared/live/recording';
 import type { MenuItem } from '../components/Menu';

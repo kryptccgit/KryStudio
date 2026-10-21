@@ -1,7 +1,3 @@
-// Editing what is already arranged, through the MCP tools (electron/mcp/tools/arrange.ts): edit_clips (move, lanes,
-// length, left trim, mute / color / gain, split, duplicate, clone / make unique), edit_automation (replace / add /
-// update / remove points, retarget, rename) and set_tempo's loop / metronome / master volume. Each call is one undo
-// step; nothing-to-do calls fail with "No change:".
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -48,7 +44,6 @@ test('edit_clips: move, change lanes together, resize, trim the left edge; one u
   assert.equal(doc.getHistory().length, v + 1, 'one undo step');
   assert.equal((await call('edit_clips', { ids: [a], to_bar: 9, length_bars: 2 })).ok, true);
   assert.deepEqual([clip(a).start, clip(a).length], [BAR * 8, BAR * 2]);
-  // Left trim: start and offset move together, the end stays.
   assert.equal((await call('edit_clips', { ids: [b], trim_start_bars: 1 })).ok, true);
   assert.deepEqual([clip(b).start, clip(b).offset, clip(b).length], [BAR * 7, BAR, BAR * 3]);
   assert.equal((await call('edit_clips', { ids: [b], trim_start_bars: -5 })).ok, true, 'reveals no further than the source start');
@@ -101,10 +96,8 @@ test('edit_automation: replace, add, update, remove points at song positions; re
   const autId = (made.data as { automationId: string }).automationId;
   const pts = () => Object.values(doc.project.automations[autId].points).sort((a, b) => a.tick - b.tick);
   assert.deepEqual(pts().map((p) => p.tick), [0, BAR * 4]);
-  // Song positions are read through the clip at bar 5: bar 7 = 2 bars into the automation.
   const r = await call('edit_automation', { automation: autId, add: [{ at: 7, value: 0.5, curve: 'exp' }], update: [{ index: 2, value: 0.25 }] });
   assert.equal(r.ok, true, r.message);
-  // Numbers are in the parameter's units (volume: linear gain), so compare positions, curve, and that point 2 moved down.
   assert.deepEqual(pts().map((p) => [p.tick, p.tension]), [[0, 0], [BAR * 2, -0.5], [BAR * 4, 0]]);
   assert.ok(pts()[2].value < 1 && pts()[2].value > 0, 'updated value');
   assert.equal((await call('edit_automation', { automation: autId, remove_bars: '7' })).ok, true);
@@ -143,7 +136,6 @@ test('set_tempo: loop region by bars, loop off / on, metronome, master volume; n
   assert.equal((await call('set_tempo', { master_volume_db: -6 })).ok, true);
   assert.ok(Math.abs(t().masterVolume - 0.501) < 0.001);
   assert.match((await call('set_tempo', { metronome: true })).message!, /^No change:/);
-  // A meter change and a loop in one call: the bars are read in the new meter.
   assert.equal((await call('set_tempo', { time_signature: '3/4', loop: '1-2' })).ok, true);
   assert.deepEqual([t().loop.start, t().loop.end], [0, PPQ * 6]);
 });

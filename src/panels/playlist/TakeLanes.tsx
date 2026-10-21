@@ -1,7 +1,3 @@
-// Take lanes in the playlist header column (Wave 12.2b): the expand arrow on
-// a track that has take groups, and one header per take lane under it.
-// Click a lane header = use that whole take; right-click = lane menu.
-
 import { memo } from 'react';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Layers, ListChecks, Scissors, Trash2, Waves } from 'lucide-react';
 import { takeGroupsOnTrack } from '@shared/schema/takes';
@@ -16,7 +12,6 @@ import { takeLaneH } from './takesLayout';
 
 type LaneTake = { groupId: string; takeId: string; pass: number };
 
-/** Expand / collapse arrow, shown only on tracks with take groups. */
 export function TakesToggle({ trackId }: { trackId: string }) {
   const groups = useDocStore((s) => (s.project ? takeGroupsOnTrack(s.project, trackId).length : 0));
   const open = useTakeLanes((s) => !!s.open[trackId]);
@@ -90,10 +85,8 @@ function laneMenu(trackId: string, k: number, count: number, label: string, take
   ];
 }
 
-/** The lane headers under one track (nothing when collapsed or without takes). */
 export const TakeLaneHeaders = memo(function TakeLaneHeaders({ trackId, scale, onMenu }: { trackId: string; scale: number; onMenu: (m: { x: number; y: number; items: MenuItem[] }) => void }) {
   const open = useTakeLanes((s) => !!s.open[trackId]);
-  // A primitive key so unrelated document edits don't re-render the headers.
   const key = useDocStore((s) => (s.project && open ? JSON.stringify(laneHeaderInfo(s.project, trackId)) : ''));
   if (!open || !key) return null;
   const lanes = JSON.parse(key) as ReturnType<typeof laneHeaderInfo>;

@@ -1,6 +1,3 @@
-// Discrete controls: Toggle (LED button / pill), Select (dropdown with
-// wheel stepping), StepButton (presentational step-sequencer cell).
-
 import { useRef, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { toggleMenuAt, type MenuItem } from '../components/Menu';
@@ -156,7 +153,6 @@ export function Select<T extends string | number>({
   );
 }
 
-/** One step-sequencer cell (purely presentational; the rack row owns the pointer logic). */
 export function StepButton({
   on,
   accent,
@@ -170,7 +166,6 @@ export function StepButton({
   accent?: boolean;
   vel?: number;
   color: string;
-  /** Alternate beat-group shading (FL-style 4-step blocks). */
   shade: boolean;
   width: number;
   height: number;

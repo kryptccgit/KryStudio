@@ -1,6 +1,3 @@
-// Small deterministic statistics helpers for the reference library
-// (percentiles, weighted percentiles, seeded RNG, string hashing). Pure.
-
 import type { Percentiles } from './types';
 
 export function isNum(x: unknown): x is number {
@@ -20,7 +17,6 @@ export function mod(n: number, m: number): number {
   return ((n % m) + m) % m;
 }
 
-/** Quantile q (0..1) of an ascending-sorted array, linear interpolation (type 7). */
 export function quantileSorted(sorted: readonly number[], q: number): number {
   const n = sorted.length;
   if (!n) return NaN;
@@ -48,18 +44,12 @@ export function mean(values: readonly number[]): number {
   return n ? s / n : NaN;
 }
 
-/** p10/p25/median/p75/p90 of the finite values (NaN-filled when empty). */
 export function percentiles(values: readonly number[], decimals = 2): Percentiles {
   const v = values.filter(isNum).sort((a, b) => a - b);
   const q = (p: number) => round(quantileSorted(v, p), decimals);
   return { p10: q(0.1), p25: q(0.25), median: q(0.5), p75: q(0.75), p90: q(0.9) };
 }
 
-/**
- * Weighted percentiles: each item counts with its weight (e.g. 1/notes of
- * its track, so every track weighs the same). Midpoint convention, linear
- * between neighbouring values.
- */
 export function weightedPercentiles(items: ReadonlyArray<{ v: number; w: number }>, decimals = 2): Percentiles {
   const xs = items.filter((x) => isNum(x.v) && isNum(x.w) && x.w > 0).sort((a, b) => a.v - b.v);
   const total = xs.reduce((s, x) => s + x.w, 0);
@@ -87,9 +77,7 @@ export function weightedPercentiles(items: ReadonlyArray<{ v: number; w: number 
   return { p10: q(0.1), p25: q(0.25), median: q(0.5), p75: q(0.75), p90: q(0.9) };
 }
 
-/** Sample a value from a percentile summary (u uniform 0..1), linear between the knots. */
 export function sampleFromPercentiles(p: Percentiles, u: number): number {
-  // Extrapolate the tails a little beyond p10/p90 (to p0/p100 ≈ p10 - (p25-p10)…).
   const knots: Array<[number, number]> = [
     [0, p.p10 - (p.p25 - p.p10) * 0.5],
     [0.1, p.p10],
@@ -110,7 +98,6 @@ export function sampleFromPercentiles(p: Percentiles, u: number): number {
   return knots[knots.length - 1][1];
 }
 
-/** Deterministic PRNG (mulberry32): returns uniform floats in [0, 1). */
 export function seededRng(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -122,7 +109,6 @@ export function seededRng(seed: number): () => number {
   };
 }
 
-/** FNV-1a 32-bit over a string's UTF-16 code units. */
 export function hashString(s: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
@@ -132,7 +118,6 @@ export function hashString(s: string): number {
   return h >>> 0;
 }
 
-/** Linear resample of a curve to n points by segment means. */
 export function segmentMeans(values: readonly number[], n: number): number[] {
   const out: number[] = [];
   const len = values.length;

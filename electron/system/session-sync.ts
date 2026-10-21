@@ -2,16 +2,6 @@ import RPC from 'discord-rpc';
 import { resolveClientContext, isDebug } from './context';
 import { logger } from './logger';
 
-/**
- * Discord Rich Presence (kryptguidelines §8), best-effort and never
- * blocking: Discord may not be running, which is not an error. Always on.
- * The text is "Using Krypt Studio" over a live line ("Editing MySong",
- * "Playing MySong · AI agent") and
- * pushes are throttled (Discord rate-limits activity updates ~5 per 20 s).
- * Identity comes from the coupled runtime context; a tampered context means
- * we simply never connect (degraded, not crashing). Never throws.
- */
-
 const ctx = resolveClientContext();
 
 let client: RPC.Client | null = null;
@@ -39,7 +29,7 @@ export async function startSessionSync(): Promise<void> {
     c = fresh;
     client = fresh;
     fresh.on('ready', () => {
-      if (client !== fresh) return; // a client stopSessionSync already dropped
+      if (client !== fresh) return;
       connected = true;
       lastPushed = '';
       schedulePush();
@@ -84,7 +74,6 @@ export function stopSessionSync(): void {
   void closeRpcClient(c as unknown as RpcClientLike | null, { clear: true });
 }
 
-/** The parts of discord-rpc's client that closing touches (its IPC transport keeps `socket` null until connected). */
 export interface RpcClientLike {
   transport?: { socket?: { destroy?(): void } | null } | null;
   clearActivity?(): Promise<unknown>;
@@ -93,14 +82,6 @@ export interface RpcClientLike {
 
 const CLOSE_TIMEOUT_MS = 2000;
 
-/**
- * Close a presence client without ever leaking a rejection. discord-rpc's destroy() is async and calls
- * transport.close(), whose Promise executor writes to `this.socket`. When the connection never opened (Discord
- * isn't running) the socket is null, the write throws INSIDE that promise, and the rejection escaped as
- * `unhandledRejection: TypeError: Cannot read properties of null (reading 'write') at IPCTransport.send`.
- * A client that never connected has nothing to close. Otherwise destroy() is awaited, bounded (its close promise
- * waits for a 'close' event that may never come), and every failure is swallowed. Never throws, never rejects.
- */
 export async function closeRpcClient(c: RpcClientLike | null | undefined, opts: { clear?: boolean; timeoutMs?: number } = {}): Promise<void> {
   if (!c) return;
   let socket: { destroy?(): void } | null | undefined;
@@ -109,18 +90,16 @@ export async function closeRpcClient(c: RpcClientLike | null | undefined, opts: 
   } catch {
     socket = null;
   }
-  if (!socket) return; // never connected: destroy() would only throw inside its own promise
+  if (!socket) return;
   const wait = opts.timeoutMs ?? CLOSE_TIMEOUT_MS;
   if (opts.clear && typeof c.clearActivity === 'function') await Promise.race([settle(() => c.clearActivity!()), delay(wait)]);
   await Promise.race([settle(() => c.destroy()), delay(wait)]);
   try {
     socket.destroy?.();
   } catch {
-    /* already gone */
   }
 }
 
-/** Run fn and resolve when its promise settles, whatever happens (sync throws and rejections included). */
 function settle(fn: () => Promise<unknown>): Promise<void> {
   try {
     return Promise.resolve(fn()).then(
@@ -139,7 +118,6 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-/** Update the live text; pushed when connected, throttled. */
 export function syncRuntimeState(details: string, state: string): void {
   current = { details: details.slice(0, 120), state: state.slice(0, 120) };
   schedulePush();

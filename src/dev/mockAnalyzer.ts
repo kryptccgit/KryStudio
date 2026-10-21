@@ -1,16 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Browser-mock analyzer (npm run dev:web): window.krypt.analyzer with fake
-// but realistic models, jobs, progress and results, so every Model Manager
-// / dialog / status-bar state can be exercised without Electron.
-//
-//   Models: Basic Pitch + Beat This (installed, built in), HT-Demucs
-//   (available), plus "(demo)" entries that are downloading, failed and
-//   unavailable. Install / cancel / import / remove all animate.
-//   Jobs: analyze ~2 s, separate ~6 s, transcribe ~2 s, each cancellable.
-//   Results land in the real in-page DocHost as one undo group, like main.
-//   A file path containing "fail" makes analysis fail (error states).
-// ──────────────────────────────────────────────────────────────────────
-
 import { USER, type DocHost } from '@shared/doc/DocHost';
 import { MODEL_CATALOG, type ModelDef } from '@shared/analyzer/models';
 import type { AudioAnalysis, StemName, TranscribeMode } from '@shared/analyzer/protocol';
@@ -25,7 +12,6 @@ type AnalyzerApi = KryptApi['analyzer'];
 const MODELS_DIR = 'C:\\Users\\you\\AppData\\Roaming\\Krypt Studio\\models';
 const MB = 1024 * 1024;
 
-/** Demo-only catalog entries (never shipped): they exist to show every model state. */
 const DEMO_MODELS: ModelDef[] = [
   {
     id: 'beat-this-small',
@@ -96,8 +82,6 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const baseName = (p: string) => (p.split(/[\\/:]/).pop() ?? p).replace(/\.[a-z0-9]+$/i, '');
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-// ── Fake analysis ─────────────────────────────────────────────────────
-
 const ONE_SHOT = /kick|snare|clap|hat|rim|perc|tom|crash|808/i;
 const KEYS: Array<[string, 'major' | 'minor']> = [
   ['F#', 'minor'],
@@ -116,7 +100,6 @@ export function fakeAnalysis(path: string, durationSec: number, sampleRate = 480
   const [tonic, mode] = KEYS[Math.floor(r() * KEYS.length)];
   const hop = dur > 20 ? 0.5 : 0.05;
 
-  // Song form when long enough: A intro, B verse, C chorus, D bridge.
   const form = dur > 40 ? ['A', 'B', 'C', 'B', 'C', 'D', 'C', 'A'] : dur > 12 ? ['A', 'B', 'A', 'B'] : [];
   const weights = form.map((l) => (l === 'A' ? 0.6 : l === 'D' ? 0.8 : 1));
   const wsum = weights.reduce((a, b) => a + b, 0) || 1;
@@ -183,14 +166,6 @@ export function fakeAnalysis(path: string, durationSec: number, sampleRate = 480
   };
 }
 
-// ── Provisional Audio Clip stretch params (browser mock only) ─────────
-
-/**
- * Until catalog.gen.json is regenerated with the engine's time-stretch
- * params, give the in-page catalog provisional specs with the agreed ids
- * (pitch, formant, tempo_sync, src_bpm, stretch) so the mock can show the
- * Follow-tempo UI. A no-op once the real catalog has them.
- */
 export function ensureAudioClipStretchParams(): void {
   const d = pluginById('krypt.audioclip');
   if (!d || d.params.some((p) => p.id === 'tempo_sync')) return;
@@ -206,11 +181,8 @@ export function ensureAudioClipStretchParams(): void {
   console.info('[krypt] mock: provisional Audio Clip stretch params added (catalog.gen.json not regenerated yet).');
 }
 
-// ── The mock API ──────────────────────────────────────────────────────
-
 export function createMockAnalyzer(host: DocHost): AnalyzerApi {
   const catalog: ModelDef[] = [...MODEL_CATALOG.map((d) => ({ ...d })), ...DEMO_MODELS.filter((d) => !MODEL_CATALOG.some((c) => c.id === d.id))];
-  // The real catalog's download entries are filled in during Wave 3A; give the mock a size to show.
   for (const d of catalog) if (!d.bundled && !d.files.length && d.id === 'htdemucs') d.files = [{ name: 'htdemucs.onnx', url: 'https://example.com/models/htdemucs.onnx', sha256: 'demo', bytes: 84 * MB }];
 
   const initial: Record<string, Partial<ModelState>> = {
@@ -218,7 +190,6 @@ export function createMockAnalyzer(host: DocHost): AnalyzerApi {
     'roformer-vocals-demo': { status: 'unavailable', message: 'No download is published for this model yet. If you already have its files, use Install from folder.' },
   };
   const st: AnalyzerState = {
-    // Already awake (the mock library's queue is running), so Home can show the GPU.
     available: true,
     running: true,
     pid: 4242,
@@ -245,7 +216,6 @@ export function createMockAnalyzer(host: DocHost): AnalyzerApi {
     Object.assign(st, { running: true, pid: 4242, version: '0.1.0-mock', devices: ['cpu', 'directml'] });
   };
 
-  // ── jobs ──
   let seq = 0;
   const cancelled = new Set<string>();
   function runJob(kind: AnalyzerJobInfo['kind'], label: string, stages: Array<{ stage: string; ms: number; indeterminate?: boolean }>): Promise<boolean> {
@@ -277,7 +247,6 @@ export function createMockAnalyzer(host: DocHost): AnalyzerApi {
     });
   }
 
-  // ── downloads ──
   const dlCancel = new Set<string>();
   async function download(id: string, totalMs: number): Promise<ActionResult<AnalyzerState>> {
     const m = model(id)!;
@@ -310,10 +279,8 @@ export function createMockAnalyzer(host: DocHost): AnalyzerApi {
     emit();
     return { ok: true, message: `${m.def.name} installed`, data: snapshot() };
   }
-  // One model is mid-download when the mock starts (a slow one, so it can be seen and cancelled).
   if (model('mdx-net-demo')) void download('mdx-net-demo', 45000);
 
-  // ── targets → audio ──
   function resolve(t: AudioTarget): { path: string; name: string; seconds: number; sampleRate: number } | { error: string } {
     const p = host.project;
     if ('path' in t) {

@@ -1,7 +1,3 @@
-// Clip-menu entries for audio fades (Wave 12.2b): crossfade with the clip
-// touching from the left, remove fades. The commands live in
-// shared/commands/fades.ts; the drag handles in fades.ts.
-
 import { Blend, Eraser } from 'lucide-react';
 import type { Clip } from '@shared/schema/project';
 import { previousTouching } from '@shared/commands/fades';

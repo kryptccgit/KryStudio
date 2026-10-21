@@ -1,14 +1,7 @@
-//! ITU-R BS.1770-4 K-weighted 100 ms block powers, from which the energy
-//! curve (short-term, 3 s) and per-section integrated loudness (gated) are
-//! read. Filter design per BS.1770 (pre-filter shelf + RLB high-pass),
-//! re-derived for any sample rate. Mono is measured as dual-mono, matching
-//! `krypt_studio_dsp::analysis` (the engine's render analysis).
-
 pub const LUFS_FLOOR: f32 = -70.0;
 
 pub struct Loudness {
     pub block_sec: f32,
-    /// Channel-summed K-weighted mean square per 100 ms block.
     pub blocks: Vec<f64>,
 }
 
@@ -31,7 +24,6 @@ impl Biquad {
 
 fn k_filters(rate: f64) -> (Biquad, Biquad) {
     use std::f64::consts::PI;
-    // Stage 1: high shelf (+4 dB above ~1.7 kHz).
     let f0 = 1681.974450955533;
     let g = 3.999843853973347;
     let q = 0.7071752369554196;
@@ -44,7 +36,6 @@ fn k_filters(rate: f64) -> (Biquad, Biquad) {
         a: [1.0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0],
         z: [0.0; 2],
     };
-    // Stage 2: RLB high-pass (~38 Hz).
     let f0 = 38.13547087602444;
     let q = 0.5003270373238773;
     let k = (PI * f0 / rate).tan();
@@ -92,7 +83,6 @@ impl Loudness {
         Loudness { block_sec: 0.1, blocks }
     }
 
-    /// Short-term loudness (3 s window centred on i·hop) for i = 0..n.
     pub fn short_term_curve(&self, hop_sec: f32, duration: f32) -> Vec<f32> {
         let n = ((duration / hop_sec).ceil() as usize).max(1);
         let nb = self.blocks.len();
@@ -109,8 +99,6 @@ impl Loudness {
             .collect()
     }
 
-    /// Gated integrated loudness of [t0, t1) seconds (BS.1770 gating with
-    /// 400 ms blocks, 75 % overlap).
     pub fn integrated(&self, t0: f32, t1: f32) -> f32 {
         let nb = self.blocks.len();
         let a = ((t0 / self.block_sec).round().max(0.0) as usize).min(nb);

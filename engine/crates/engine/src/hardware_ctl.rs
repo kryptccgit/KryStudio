@@ -1,8 +1,3 @@
-//! Control-thread side of MIDI out, clock out and sync in (docs/ENGINE_PROTOCOL.md
-//! §14): the protocol commands, output list events, sync transitions and the
-//! launcher-state events main turns into grid LEDs. Hooked into control.rs by
-//! call sites marked `hardware:` (field, dispatch arm, tick, shutdown).
-
 use crate::clock::ClockShared;
 use crate::compile::Session;
 use crate::core::Shared;
@@ -16,7 +11,6 @@ use std::sync::Arc;
 
 pub const HARDWARE_COMMANDS: [&str; 5] = ["listMidiOutputs", "setMidiOutputs", "setMidiClock", "midiSend", "setMidiSync"];
 
-/// Clock offset range (ms).
 pub const MAX_OFFSET_MS: f64 = 100.0;
 
 pub struct HardwareCtl {
@@ -88,7 +82,6 @@ impl HardwareCtl {
         }
     }
 
-    /// Handle a hardware command; `None` = not ours.
     pub fn dispatch(&mut self, cmd: &str, v: &Value) -> Option<Result<Value, String>> {
         let r = match cmd {
             "listMidiOutputs" => self.mgr.rescan().map(|l| json!(l)),
@@ -99,7 +92,6 @@ impl HardwareCtl {
             "setMidiClock" => {
                 let ports = strings(v.get("ports"));
                 let offset = v.get("offsetMs").and_then(|x| x.as_f64()).filter(|x| x.is_finite()).unwrap_or(self.offset_ms).clamp(-MAX_OFFSET_MS, MAX_OFFSET_MS);
-                // Ports leaving the clock set get a Stop so their sequencers don't hang mid-song.
                 for p in self.clock_ports.iter().filter(|p| !ports.contains(p)) {
                     if self.mgr.is_open(p) {
                         self.mgr.send(p.clone(), vec![vec![crate::clock::MIDI_STOP]]);
@@ -143,8 +135,6 @@ impl HardwareCtl {
         Some(r)
     }
 
-    /// Called from the control loop (≤ 10 ms). Returns the transport state
-    /// when the sync input started or stopped it (control keeps `playing` in step).
     pub fn tick(&mut self, session: &Session, core: &Shared, out: &Out) -> Option<bool> {
         let mut latest = None;
         while let Ok(l) = self.outputs_rx.try_recv() {
@@ -165,7 +155,6 @@ impl HardwareCtl {
         } else if running != self.last_running {
             self.last_running = running;
             out.event(json!({ "event": "midiSync", "running": running, "bpm": self.shared.bpm().map(|b| (b * 100.0).round() / 100.0) }));
-            // A running sync plays (the audio thread may not have published `playing` yet); a stop pauses.
             ret = Some(running);
         }
         let dropped = self.shared.out_dropped.load(Relaxed);
@@ -178,7 +167,6 @@ impl HardwareCtl {
             self.last_late_log = late;
             out.log("warn", format!("{late} MIDI clock messages left more than 1 ms late (a busy CPU, or a negative clock offset larger than the output latency)"));
         }
-        // Launcher state for grid LEDs (on change only; progress excluded).
         let tel = crate::launcher::telemetry(&core.launch, &session.names.launch);
         let state = match &tel {
             Some(t) => json!({ "playing": t.playing, "queued": t.queued, "overridden": t.overridden, "recording": t.recording }),

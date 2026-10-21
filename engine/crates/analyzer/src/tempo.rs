@@ -1,17 +1,3 @@
-//! Tempo, beat grid, downbeats and swing from onset envelopes.
-//!
-//! * Tempo: autocorrelation of the spectral-flux envelope, scored by a comb
-//!   over the first four multiples of each candidate period, times a
-//!   log-normal tempo prior (centre 115 BPM, σ 1.1 octaves) that picks the
-//!   metrical level. Half/double readings are returned as alternatives.
-//! * Beats: dynamic-programming tracker (Ellis, "Beat Tracking by Dynamic
-//!   Programming", JNMR 2007) on the envelope, then sub-frame refinement and
-//!   a least-squares fit for a precise BPM.
-//! * Downbeats (DSP fallback when no beat model): the bar phase whose beats
-//!   carry the strongest low-frequency onsets and harmonic changes.
-//! * Swing: beat-synchronous onset profile; delay of the odd 16ths relative to
-//!   the even ones, on the transport scale (delay = swing × half a 16th).
-
 use crate::features::{autocorr, lerp_at, mean, median, moving_average, parabolic, std_dev};
 
 pub const PRIOR_CENTER_BPM: f32 = 115.0;
@@ -22,9 +8,7 @@ pub const MAX_BPM: f32 = 250.0;
 #[derive(Debug, Clone)]
 pub struct TempoEstimate {
     pub bpm: f32,
-    /// 0..1 pulse clarity at the chosen period.
     pub confidence: f32,
-    /// Plausible other readings (half/double time), most plausible first.
     pub alternatives: Vec<f32>,
 }
 
@@ -33,7 +17,6 @@ fn prior(bpm: f32) -> f32 {
     (-0.5 * o * o).exp()
 }
 
-/// Normalised, unbiased autocorrelation of the detrended envelope.
 fn envelope_acf(env: &[f32], fps: f32, max_lag: usize) -> Vec<f32> {
     let trend = moving_average(env, (fps * 1.0) as usize);
     let d: Vec<f32> = env.iter().zip(&trend).map(|(a, b)| a - b).collect();
@@ -65,21 +48,15 @@ fn comb(acf: &[f32], lag: f32, k_max: usize) -> f32 {
     }
 }
 
-/// Global tempo from an onset envelope at `fps` frames per second.
-/// None when there is no clear periodicity.
-/// `onsets` is the number of detected onsets in the file.
 pub fn estimate_tempo(env: &[f32], fps: f32, onsets: usize) -> Option<TempoEstimate> {
     if env.len() < (fps * 4.0) as usize || std_dev(env) < 1e-6 {
         return None;
     }
-    // A pulse needs real onsets: at least ~0.75 per second (a 45 BPM quarter
-    // pulse). Slow chord changes, pads (amplitude beating) and noise fail here.
     if (onsets as f32) < 0.75 * env.len() as f32 / fps {
         return None;
     }
     let max_lag = ((60.0 * fps / MIN_BPM) * 4.0).ceil() as usize + 2;
     let acf = envelope_acf(env, fps, max_lag.min(env.len() - 1));
-    // Coarse grid in BPM.
     let mut grid = Vec::new();
     let mut b = MIN_BPM;
     while b <= MAX_BPM {
@@ -89,7 +66,6 @@ pub fn estimate_tempo(env: &[f32], fps: f32, onsets: usize) -> Option<TempoEstim
     let raw: Vec<f32> = grid.iter().map(|&b| comb(&acf, 60.0 * fps / b, 4)).collect();
     let scored: Vec<f32> = grid.iter().zip(&raw).map(|(&b, &c)| c.max(0.0) * prior(b)).collect();
     let (bi, _) = scored.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1))?;
-    // Fine refinement ±1 BPM with more multiples (sharper peak).
     let mut best = grid[bi];
     let mut best_s = f32::MIN;
     let mut f = grid[bi] - 1.0;
@@ -118,8 +94,6 @@ pub fn estimate_tempo(env: &[f32], fps: f32, onsets: usize) -> Option<TempoEstim
     Some(TempoEstimate { bpm: best, confidence, alternatives: alts.into_iter().map(|a| a.0).collect() })
 }
 
-/// Dynamic-programming beat tracker. `period` in frames. Returns refined
-/// (fractional) beat positions in frames.
 pub fn track_beats(env: &[f32], period: f32, tightness: f32) -> Vec<f32> {
     let n = env.len();
     if n < 4 || period.is_nan() || period <= 2.0 {
@@ -127,7 +101,6 @@ pub fn track_beats(env: &[f32], period: f32, tightness: f32) -> Vec<f32> {
     }
     let sd = std_dev(env).max(1e-9);
     let norm: Vec<f32> = env.iter().map(|v| v / sd).collect();
-    // Local score: envelope smoothed by a narrow Gaussian (σ = period / 32).
     let half = period.round() as i64;
     let sigma = (period / 32.0).max(0.5);
     let win: Vec<f32> = (-half..=half).map(|k| (-0.5 * (k as f32 / sigma).powi(2)).exp()).collect();
@@ -173,7 +146,6 @@ pub fn track_beats(env: &[f32], period: f32, tightness: f32) -> Vec<f32> {
             first = false;
         }
     }
-    // Last beat: last local max of cum above half the median local max.
     let maxima: Vec<usize> = (1..n.saturating_sub(1)).filter(|&i| cum[i] > cum[i - 1] && cum[i] >= cum[i + 1]).collect();
     if maxima.is_empty() {
         return Vec::new();
@@ -187,13 +159,11 @@ pub fn track_beats(env: &[f32], period: f32, tightness: f32) -> Vec<f32> {
         i = back[i as usize];
     }
     beats.reverse();
-    // Trim weak leading/trailing beats (silence before/after the music).
     let rms = (beats.iter().map(|&b| local[b] * local[b]).sum::<f32>() / beats.len() as f32).sqrt();
     let th = 0.5 * rms;
     let start = beats.iter().position(|&b| local[b] >= th).unwrap_or(0);
     let end = beats.iter().rposition(|&b| local[b] >= th).map(|e| e + 1).unwrap_or(beats.len());
     let beats = &beats[start..end.max(start)];
-    // Sub-frame refinement: nearest envelope peak within ±2 frames.
     beats
         .iter()
         .map(|&b| {
@@ -214,8 +184,6 @@ pub fn track_beats(env: &[f32], period: f32, tightness: f32) -> Vec<f32> {
         .collect()
 }
 
-/// Precise tempo from beat times (seconds): least-squares slope when the
-/// tempo is steady, otherwise the median inter-beat interval.
 pub fn bpm_from_beats(times: &[f32]) -> Option<f32> {
     if times.len() < 4 {
         return None;
@@ -225,7 +193,6 @@ pub fn bpm_from_beats(times: &[f32]) -> Option<f32> {
     if med <= 0.0 {
         return None;
     }
-    // Index beats by the median interval so dropped/extra beats don't break the fit.
     let mut idx = Vec::with_capacity(times.len());
     let mut k = 0f64;
     idx.push(0f64);
@@ -254,14 +221,6 @@ pub fn bpm_from_beats(times: &[f32]) -> Option<f32> {
     }
 }
 
-/// Make a beat list (seconds) a continuous grid at `period`:
-/// * interior gaps that are a whole number of periods (within 20 % of one
-///   period overall) get the missing beats, evenly spaced. This repairs
-///   stretches where a tracker fell to half time or lost the pulse in a
-///   sparse section;
-/// * the grid is extended past the first / last beat while the predicted
-///   beats keep landing on onsets (`onsets`, seconds, ±60 ms); it stops after
-///   4 unsupported beats in a row and keeps only up to the last supported one.
 pub fn regularize_beats(beats: &[f32], period: f32, onsets: &[f32], duration: f32) -> Vec<f32> {
     if beats.len() < 2 || period.is_nan() || period <= 0.05 {
         return beats.to_vec();
@@ -312,10 +271,6 @@ pub fn regularize_beats(beats: &[f32], period: f32, onsets: &[f32], duration: f3
     head
 }
 
-/// Smooth beat times: each beat moves onto the least-squares line through
-/// its ±`half` neighbours (by beat index). Removes tracker jitter (Beat This!
-/// works on 20 ms frames) while still following tempo changes over a couple
-/// of bars.
 pub fn smooth_beats(times: &[f32], half: usize) -> Vec<f32> {
     let n = times.len();
     if n < 3 {
@@ -339,10 +294,6 @@ pub fn smooth_beats(times: &[f32], half: usize) -> Vec<f32> {
         .collect()
 }
 
-/// DSP downbeat estimate: choose the bar length (4, else 3) and phase whose
-/// beats carry the strongest low-band onsets and harmonic changes.
-/// `low` is the low-band flux (frames), `change[i]` the harmonic change at
-/// beat i (0..1). Returns (downbeat indices into `beats`, beats per bar).
 pub fn downbeats_dsp(beats_frames: &[f32], low: &[f32], env: &[f32], change: &[f32]) -> (Vec<usize>, u32) {
     let nb = beats_frames.len();
     if nb < 4 {
@@ -384,8 +335,6 @@ pub fn downbeats_dsp(beats_frames: &[f32], low: &[f32], env: &[f32], change: &[f
     ((phase..nb).step_by(m).collect(), m as u32)
 }
 
-/// Beats per bar from model downbeats: the most common beat count between
-/// consecutive downbeats (2..=7), default 4.
 pub fn beats_per_bar(beats: &[f32], downbeats: &[f32]) -> u32 {
     let mut counts = [0u32; 8];
     for w in downbeats.windows(2) {
@@ -402,9 +351,6 @@ pub fn beats_per_bar(beats: &[f32], downbeats: &[f32]) -> u32 {
     }
 }
 
-/// 16th swing on the transport scale (0 straight, ≈0.67 triplet feel, 1 =
-/// odd 16ths delayed by half a 16th). None when the off-beat 16ths carry no
-/// clear onsets (nothing to measure).
 pub fn swing(env: &[f32], fps: f32, beats_frames: &[f32]) -> Option<f32> {
     if beats_frames.len() < 8 {
         return None;
@@ -426,11 +372,8 @@ pub fn swing(env: &[f32], fps: f32, beats_frames: &[f32]) -> Option<f32> {
     if count < 6 {
         return None;
     }
-    // Light circular smoothing (≈ 1/96 beat).
     let sm: Vec<f32> = (0..BINS).map(|k| (prof[(k + BINS - 1) % BINS] + 2.0 * prof[k] + prof[(k + 1) % BINS]) / 4.0).collect();
     let base = median(&sm);
-    // Highest interior local maximum (fractional position in beats, height)
-    // inside [lo, hi) of the beat; None when the window has no peak.
     let g = |j: i64| sm[j.rem_euclid(BINS as i64) as usize];
     let peak_in = |lo: f32, hi: f32| -> Option<(f32, f32)> {
         let a = (lo * BINS as f32).floor() as i64;
@@ -451,12 +394,8 @@ pub fn swing(env: &[f32], fps: f32, beats_frames: &[f32]) -> Option<f32> {
     if even_h <= 0.0 {
         return None;
     }
-    // Odd 16ths: straight at 0.25 / 0.75, at most half a 16th late (0.375 / 0.875).
     let o1 = peak_in(0.18, 0.42).filter(|p| p.1 - base >= 0.08 * even_h);
     let o3 = peak_in(0.68, 0.92).filter(|p| p.1 - base >= 0.08 * even_h);
-    // A 32nd-note grid (hat rolls, or 16ths under a half-time beat reading)
-    // puts hits at 1/8 of the beat, where swung 16ths never land; then the
-    // late window holds straight 32nds, not swing: nothing to measure.
     let odd_h = [o1, o3].iter().flatten().map(|p| p.1 - base).fold(0f32, f32::max);
     let t32 = [peak_in(0.08, 0.17), peak_in(0.58, 0.67)].iter().flatten().map(|p| p.1 - base).fold(0f32, f32::max);
     if odd_h > 0.0 && t32 >= 0.5 * odd_h {
@@ -475,9 +414,7 @@ pub fn swing(env: &[f32], fps: f32, beats_frames: &[f32]) -> Option<f32> {
     if den <= 0.0 {
         return None;
     }
-    // Delay of the odd 16ths in 16ths, relative to the preceding even 16th.
     let d = num / den;
-    // Transport: delay = swing × 0.5 sixteenth.
     let s = (d / 0.5).clamp(0.0, 1.0);
     Some(if s < 0.03 { 0.0 } else { s })
 }

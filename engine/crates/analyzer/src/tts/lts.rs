@@ -1,20 +1,3 @@
-//! Letter-to-sound rules for words CMUdict doesn't know (names, slang,
-//! made-up words): ordered grapheme rules with simple contexts, then a
-//! stress heuristic. Output is ARPAbet with stress digits, like CMUdict, so
-//! it goes through the same ARPAbet → Kokoro mapping. Krypt-original rule set
-//! (written for this project in the style of classic context rules; no GPL
-//! G2P such as eSpeak is used or consulted).
-//!
-//! Context symbols (left context is matched right-to-left from the letter):
-//! - `#` one or more vowels (a e i o u y)
-//! - `:` zero or more consonants
-//! - `^` exactly one consonant
-//! - `.` one voiced consonant (b d g j l m n r v w z)
-//! - `+` one front vowel (e i y)
-//! - `%` (right only) a suffix then the word end: e, es, ed, er, ers, ely, ing, en, y
-//! - ` ` the word boundary
-//! - letters match themselves
-
 struct Rule {
     left: &'static str,
     g: &'static str,
@@ -26,9 +9,7 @@ const fn r(left: &'static str, g: &'static str, right: &'static str, out: &'stat
     Rule { left, g, right, out }
 }
 
-/// First matching rule wins; rules are grouped by first letter (longest graphemes first).
 const RULES: &[Rule] = &[
-    // a
     r(" ", "are", " ", "AA R"),
     r("", "air", "", "EH R"),
     r("", "ar", "#", "EH R"),
@@ -45,11 +26,9 @@ const RULES: &[Rule] = &[
     r("", "a", "^%", "EY"),
     r("", "a", " ", "AH"),
     r("", "a", "", "AE"),
-    // b
     r("m", "b", " ", ""),
     r("", "bb", "", "B"),
     r("", "b", "", "B"),
-    // c
     r("", "chr", "", "K R"),
     r("", "ch", "", "CH"),
     r("", "ck", "", "K"),
@@ -60,11 +39,9 @@ const RULES: &[Rule] = &[
     r("", "cian", "", "SH AH N"),
     r("", "c", "+", "S"),
     r("", "c", "", "K"),
-    // d
     r("", "dge", "", "JH"),
     r("", "dd", "", "D"),
     r("", "d", "", "D"),
-    // e
     r("#:", "e", " ", ""),
     r("#:", "es", " ", "Z"),
     r("", "eau", "", "OW"),
@@ -80,10 +57,8 @@ const RULES: &[Rule] = &[
     r("", "e", " ", "IY"),
     r("", "e", "^%", "IY"),
     r("", "e", "", "EH"),
-    // f
     r("", "ff", "", "F"),
     r("", "f", "", "F"),
-    // g
     r(" ", "gh", "", "G"),
     r("", "gh", "", ""),
     r(" ", "gn", "", "N"),
@@ -91,10 +66,8 @@ const RULES: &[Rule] = &[
     r("", "gg", "", "G"),
     r("", "g", "+", "JH"),
     r("", "g", "", "G"),
-    // h
     r("#", "h", " ", ""),
     r("", "h", "", "HH"),
-    // i
     r("", "igh", "", "AY"),
     r("", "ie", " ", "IY"),
     r("", "ie", "", "IY"),
@@ -105,24 +78,18 @@ const RULES: &[Rule] = &[
     r("", "i", "^%", "AY"),
     r("", "i", "#", "IY"),
     r("", "i", "", "IH"),
-    // j
     r("", "j", "", "JH"),
-    // k
     r(" ", "kn", "", "N"),
     r("", "k", "", "K"),
-    // l
     r("", "ll", "", "L"),
     r("", "l", "", "L"),
-    // m
     r("", "mm", "", "M"),
     r("", "m", "", "M"),
-    // n
     r("", "nn", "", "N"),
     r("", "ng", "#", "NG G"),
     r("", "ng", "", "NG"),
     r("", "nk", "", "NG K"),
     r("", "n", "", "N"),
-    // o
     r("", "ook", "", "UH K"),
     r("", "oo", "", "UW"),
     r("", "ought", "", "AO T"),
@@ -141,19 +108,15 @@ const RULES: &[Rule] = &[
     r("", "o", " ", "OW"),
     r("", "o", "ld", "OW"),
     r("", "o", "", "AA"),
-    // p
     r("", "ph", "", "F"),
     r(" ", "ps", "", "S"),
     r("", "pp", "", "P"),
     r("", "p", "", "P"),
-    // q
     r("", "qu", "", "K W"),
     r("", "q", "", "K"),
-    // r
     r("", "rr", "", "R"),
     r("", "rh", "", "R"),
     r("", "r", "", "R"),
-    // s
     r("", "sch", "", "S K"),
     r("", "sh", "", "SH"),
     r("", "ssion", "", "SH AH N"),
@@ -164,7 +127,6 @@ const RULES: &[Rule] = &[
     r(".", "s", " ", "Z"),
     r("#", "s", "#", "Z"),
     r("", "s", "", "S"),
-    // t
     r("", "tion", "", "SH AH N"),
     r("", "tial", "", "SH AH L"),
     r("", "ture", "", "CH ER"),
@@ -172,7 +134,6 @@ const RULES: &[Rule] = &[
     r("", "th", "", "TH"),
     r("", "tt", "", "T"),
     r("", "t", "", "T"),
-    // u
     r("", "ue", " ", "UW"),
     r("", "ui", "", "UW"),
     r("", "ur", "#", "UH R"),
@@ -181,25 +142,20 @@ const RULES: &[Rule] = &[
     r("", "u", "^%", "UW"),
     r("", "u", " ", "UW"),
     r("", "u", "", "AH"),
-    // v
     r("", "v", "", "V"),
-    // w
     r(" ", "wr", "", "R"),
     r("", "wh", "", "W"),
     r("", "war", "", "W AO R"),
     r("", "wor", "", "W ER"),
     r("", "w", "", "W"),
-    // x
     r(" ", "x", "", "Z"),
     r("", "x", "", "K S"),
-    // y
     r(" ", "y", "#", "Y"),
     r("#:", "y", " ", "IY"),
     r("", "y", " ", "AY"),
     r("", "y", "^%", "AY"),
     r("", "y", "#", "Y"),
     r("", "y", "", "IH"),
-    // z
     r("", "zz", "", "Z"),
     r("", "z", "", "Z"),
 ];
@@ -218,7 +174,6 @@ fn is_voiced(c: u8) -> bool {
 
 const SUFFIXES: [&str; 9] = ["ers", "ely", "ing", "es", "ed", "er", "en", "e", "y"];
 
-/// Match `pat` forward against `w[pos..]` (`w` is padded with spaces on both ends).
 fn match_right(pat: &[u8], w: &[u8], mut pos: usize) -> bool {
     let mut i = 0;
     while i < pat.len() {
@@ -271,7 +226,6 @@ fn match_right(pat: &[u8], w: &[u8], mut pos: usize) -> bool {
     true
 }
 
-/// Match `pat` backward: its last symbol against `w[pos - 1]`, and so on.
 fn match_left(pat: &[u8], w: &[u8], pos: usize) -> bool {
     let mut p = pos as isize - 1;
     let at = |p: isize| if p >= 0 { w.get(p as usize).copied().unwrap_or(b' ') } else { b' ' };
@@ -326,10 +280,8 @@ pub fn is_vowel_phone(p: &str) -> bool {
     VOWELS.contains(&p.trim_end_matches(|c: char| c.is_ascii_digit()))
 }
 
-/// Unstressed prefixes: stress moves to the next syllable ("believe", "record").
 const UNSTRESSED_PREFIXES: [&str; 10] = ["be", "de", "re", "con", "com", "ex", "pre", "pro", "per", "a"];
 
-/// ARPAbet (with stress digits) for a lowercase a–z word.
 pub fn word_to_arpabet(word: &str) -> Vec<String> {
     let w: Vec<u8> = word.bytes().filter(|c| c.is_ascii_lowercase()).collect();
     let mut phones: Vec<String> = Vec::new();
@@ -346,16 +298,14 @@ pub fn word_to_arpabet(word: &str) -> Vec<String> {
             }
         }
         if !matched {
-            pos += 1; // unreachable for a–z (every letter has a catch-all rule)
+            pos += 1;
         }
     }
-    // Two identical consonant phones in a row (from "ck" + "k" etc.) collapse.
     phones.dedup_by(|a, b| a == b && !is_vowel_phone(a));
     assign_stress(word, &mut phones);
     phones
 }
 
-/// Primary stress on one vowel, the rest unstressed (reduced vowels → AH0).
 fn assign_stress(word: &str, phones: &mut [String]) {
     let vowels: Vec<usize> = (0..phones.len()).filter(|&i| is_vowel_phone(&phones[i])).collect();
     if vowels.is_empty() {
@@ -410,7 +360,6 @@ mod tests {
         assert_eq!(s("happy"), "HH AE1 P IY0");
         assert_eq!(s("station"), "S T EY1 SH AH0 N");
         assert_eq!(s("dogs"), "D AA1 G Z");
-        // Every vowel gets a stress digit, exactly one primary.
         for w in ["zorblax", "kryptonite", "flimflam", "brrrap", "skrrt"] {
             let p = word_to_arpabet(w);
             assert!(p.iter().filter(|x| x.ends_with('1')).count() <= 1, "{w}: {p:?}");

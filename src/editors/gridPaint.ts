@@ -1,7 +1,3 @@
-// Shared painters for time grids + rulers (piano roll, playlist, lanes).
-// Pure functions of (ctx, view, size, timeSig, opts) so they can move to a
-// worker/OffscreenCanvas later without changes.
-
 import { TICKS_PER_STEP, ticksPerBar, ticksPerBeat, type TimeSig } from '@shared/schema/time';
 import { tickToX, xToTick, type TimeView } from './viewport';
 import { vline, hline } from './layer';
@@ -11,17 +7,14 @@ export interface GridLevels {
   bar: number;
   beat: number;
   step: number;
-  /** Draw only every Nth bar line when zoomed far out. */
   barEvery: number;
-  /** Finest line spacing actually drawn, in ticks. */
   unit: number;
 }
 
-/** Which grid lines are dense enough to draw at this zoom (min ~7 px apart). */
 export function gridLevels(pxPerTick: number, ts: TimeSig): GridLevels {
   const bar = ticksPerBar(ts);
   const beat = ticksPerBeat(ts);
-  const step = Math.min(TICKS_PER_STEP, beat); // 16ths in every meter (the Channel Rack's steps)
+  const step = Math.min(TICKS_PER_STEP, beat);
   let barEvery = 1;
   while (bar * barEvery * pxPerTick < 12 && barEvery < 4096) barEvery *= 2;
   const unit = step * pxPerTick >= 7 ? step : beat * pxPerTick >= 7 ? beat : bar * barEvery;
@@ -29,11 +22,8 @@ export function gridLevels(pxPerTick: number, ts: TimeSig): GridLevels {
 }
 
 export interface TimeGridOpts {
-  /** Snap grid in ticks; drawn faintly when it doesn't coincide with steps (triplets). */
   snapGrid?: number;
-  /** Shade every other bar (piano-roll readability). */
   shadeAltBars?: boolean;
-  /** Content end (pattern length): darken everything after it. */
   endTick?: number | null;
 }
 
@@ -121,14 +111,12 @@ export function paintRuler(ctx: CanvasRenderingContext2D, v: TimeView, w: number
   }
 
   const tEnd = xToTick(v, w);
-  // beat ticks
   if (L.beat * p >= 6) {
     ctx.fillStyle = 'rgba(255,255,255,0.16)';
     for (let t = Math.floor(v.scrollTick / L.beat) * L.beat; t <= tEnd; t += L.beat) {
       if (t % L.bar !== 0) vline(ctx, tickToX(v, t), h - 5, h, dpr);
     }
   }
-  // bar lines + numbers
   let labelEvery = L.barEvery;
   while (L.bar * labelEvery * p < 34 && labelEvery < 4096) labelEvery *= 2;
   const barSpan = L.bar * L.barEvery;

@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Auto Mashup (research/18), the pure part of the dialog: the form state
-// and its reducer, form → MashupRequest, the tempo-reading chips, the score
-// tone, the shift labels, the plan timeline layout, the suggestion → option
-// mapping, the progress stages and the failure messages. No React, no
-// window: unit-tested in test/mashup-ui.test.ts.
-// ──────────────────────────────────────────────────────────────────────
-
 import type {
   MashupAnchor,
   MashupCheck,
@@ -27,22 +19,14 @@ export type TuneChoice = NonNullable<MashupRequest['tune']>;
 
 export const SONG_LABEL: Record<Song, string> = { a: 'A', b: 'B' };
 
-// ── The two songs ─────────────────────────────────────────────────────
-
-/** What fills a song slot: a file on this PC, a track of the reference library (also a file), or an audio clip of the open project. */
 export interface SongSlot {
   kind: 'file' | 'library' | 'clip';
-  /** Shown in the slot ("Midnight City", "Vocal (track 3)"). */
   name: string;
-  /** file / library */
   path?: string;
-  /** clip */
   clipId?: string;
-  /** Second line ("C:\Music\…", "Track 2 · bar 1", "Reference library"). */
   detail?: string;
 }
 
-/** "song.mp3" from a full path. */
 export function fileName(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
@@ -59,14 +43,11 @@ export function sourceOf(slot: SongSlot): MashupSource {
   return slot.kind === 'clip' ? { clipId: slot.clipId ?? '' } : { path: slot.path ?? '' };
 }
 
-/** Same song in both slots (same clip, or same file). */
 export function sameSource(a: SongSlot | null, b: SongSlot | null): boolean {
   if (!a || !b) return false;
   if (a.kind === 'clip' || b.kind === 'clip') return a.kind === b.kind && a.clipId === b.clipId;
   return !!a.path && (a.path ?? '').toLowerCase() === (b.path ?? '').toLowerCase();
 }
-
-// ── The form ──────────────────────────────────────────────────────────
 
 export interface MashupForm {
   a: SongSlot | null;
@@ -74,10 +55,8 @@ export interface MashupForm {
   style: MashupStyle;
   vocalFrom: 'a' | 'b' | 'auto';
   stems: StemPick;
-  /** 'auto' = sent as no anchor: the beat keeps its key, the tempo meets half way when keeping the beat would stretch the vocal audibly. */
   anchor: MashupAnchor | 'auto';
   tune: TuneChoice;
-  /** null = automatic (the instrumental's arranged length, capped at 128). */
   bars: number | null;
   newProject: boolean;
   transitions: boolean;
@@ -88,7 +67,6 @@ export interface MashupForm {
 export const STEMS: readonly MashupStem[] = ['vocals', 'drums', 'bass', 'other'];
 export const STEM_LABEL: Record<MashupStem, string> = { vocals: 'Vocals', drums: 'Drums', bass: 'Bass', other: 'Other' };
 
-/** A's vocal on B's instrumental: the classic, and a good start for the grid. */
 export const DEFAULT_STEMS: StemPick = { vocals: 'a', drums: 'b', bass: 'b', other: 'b' };
 
 export const BARS_MIN = 8;
@@ -109,7 +87,6 @@ export const DEFAULT_FORM: MashupForm = {
   factorB: 1,
 };
 
-/** The options a patch (a suggestion, a control) may change: everything but the songs and the stem grid. */
 export type FormOptions = Omit<MashupForm, 'a' | 'b' | 'stems'>;
 
 export type FormAction =
@@ -129,7 +106,6 @@ export function clampBars(n: number): number {
 export function formReducer(f: MashupForm, act: FormAction): MashupForm {
   switch (act.type) {
     case 'setSlot': {
-      // A new song starts on its detected tempo reading.
       const factor = act.song === 'a' ? { factorA: 1 as TempoFactor } : { factorB: 1 as TempoFactor };
       return { ...f, [act.song]: act.slot, ...factor };
     }
@@ -155,7 +131,6 @@ export function formReducer(f: MashupForm, act: FormAction): MashupForm {
   }
 }
 
-/** Why the form can't be checked / built yet, or null. */
 export function formError(f: MashupForm): string | null {
   if (!f.a && !f.b) return 'Pick two songs';
   if (!f.a) return 'Pick song A';
@@ -169,7 +144,6 @@ export function formError(f: MashupForm): string | null {
   return null;
 }
 
-/** The request `check` and `build` get; null while the form isn't complete. Only the fields the style uses are sent. */
 export function buildRequest(f: MashupForm): MashupRequest | null {
   if (formError(f) || !f.a || !f.b) return null;
   const req: MashupRequest = { a: sourceOf(f.a), b: sourceOf(f.b), style: f.style, ...(f.anchor !== 'auto' ? { anchor: f.anchor } : {}), newProject: f.newProject, transitions: f.transitions };
@@ -182,7 +156,6 @@ export function buildRequest(f: MashupForm): MashupRequest | null {
   return req;
 }
 
-/** A stable key for a request (re-check only when it changes). */
 export function requestKey(req: MashupRequest | null): string | null {
   if (!req) return null;
   const order = ['a', 'b', 'style', 'vocalFrom', 'stems', 'anchor', 'bpm', 'key', 'factorA', 'factorB', 'tune', 'bars', 'newProject', 'transitions'] as const;
@@ -191,9 +164,6 @@ export function requestKey(req: MashupRequest | null): string | null {
   return JSON.stringify(out);
 }
 
-// ── Readings ──────────────────────────────────────────────────────────
-
-/** 128 → "128", 127.94 → "127.9". */
 export function fmtBpm(bpm: number | null | undefined): string {
   if (bpm === null || bpm === undefined || !Number.isFinite(bpm) || bpm <= 0) return '?';
   return Math.abs(bpm - Math.round(bpm)) < 0.05 ? String(Math.round(bpm)) : bpm.toFixed(1);
@@ -207,10 +177,6 @@ export interface TempoChip {
   active: boolean;
 }
 
-/**
- * The tempo readings to offer as chips: the detected one (factor 1) plus the half / double-time alternatives the
- * analyzer found worth offering. `reading.bpm` is the as-detected tempo; an alternative maps to 0.5 / 2 by ratio.
- */
 export function tempoChips(r: Pick<MashupSongReading, 'bpm' | 'bpmAlternatives'>, factor: TempoFactor): TempoChip[] {
   if (r.bpm === null || !(r.bpm > 0)) return [];
   const chips: TempoChip[] = [{ factor: 1, bpm: r.bpm, label: fmtBpm(r.bpm), title: 'As detected', active: factor === 1 }];
@@ -221,7 +187,6 @@ export function tempoChips(r: Pick<MashupSongReading, 'bpm' | 'bpmAlternatives'>
     if (f === null || chips.some((c) => c.factor === f)) continue;
     chips.push({ factor: f, bpm: alt, label: fmtBpm(alt), title: f === 0.5 ? 'Half time' : 'Double time', active: factor === f });
   }
-  // A factor chosen earlier that the analyzer no longer offers still shows, so it can be undone.
   if (factor !== 1 && !chips.some((c) => c.factor === factor)) {
     const bpm = r.bpm * factor;
     chips.push({ factor, bpm, label: fmtBpm(bpm), title: factor === 0.5 ? 'Half time' : 'Double time', active: true });
@@ -229,7 +194,6 @@ export function tempoChips(r: Pick<MashupSongReading, 'bpm' | 'bpmAlternatives'>
   return chips.sort((x, y) => x.bpm - y.bpm);
 }
 
-/** "Mostly vocal" / "Some vocal" / "Instrumental" from 0..1. */
 export function vocalLabel(presence: number): string {
   if (!Number.isFinite(presence)) return 'Not clear';
   if (presence >= 0.45) return 'Vocal through most of it';
@@ -248,8 +212,6 @@ export function fmtDuration(sec: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// ── Score ─────────────────────────────────────────────────────────────
-
 export type ScoreTone = 'good' | 'ok' | 'poor';
 
 export function scoreTone(score: number): ScoreTone {
@@ -261,33 +223,26 @@ export function scoreLabel(score: number): string {
   return t === 'good' ? 'These fit well' : t === 'ok' ? 'Workable, with some stretching or pitching' : 'A hard match: expect audible changes';
 }
 
-/** Ring geometry: the stroke-dasharray for a circle of radius r filled to score %. */
 export function ringDash(score: number, r: number): { dash: number; gap: number } {
   const c = 2 * Math.PI * r;
   const f = Math.max(0, Math.min(100, Number.isFinite(score) ? score : 0)) / 100;
   return { dash: c * f, gap: c * (1 - f) };
 }
 
-// ── Shifts ────────────────────────────────────────────────────────────
-
-/** "+2 st", "−1.5 st" (a real minus sign). */
 export function fmtSt(semitones: number): string {
   const r = Math.round(semitones * 10) / 10;
   const n = Number.isInteger(r) ? String(Math.abs(r)) : Math.abs(r).toFixed(1);
   return `${r > 0 ? '+' : r < 0 ? '−' : '±'}${n} st`;
 }
 
-/** "×1.04" (two decimals). */
 export function fmtStretch(stretch: number): string {
   return `×${stretch.toFixed(2)}`;
 }
 
-/** A stretch outside ×0.85–×1.18 is audible (research/18). */
 export function stretchAudible(stretch: number): boolean {
   return stretch < 0.85 || stretch > 1.18;
 }
 
-/** "+2 st, ×1.04", or '' when the song is played untouched. */
 export function fmtShift(s: { stretch: number; semitones: number }): string {
   const parts: string[] = [];
   if (Math.abs(s.semitones) >= 0.05) parts.push(fmtSt(s.semitones));
@@ -295,7 +250,6 @@ export function fmtShift(s: { stretch: number; semitones: number }): string {
   return parts.join(', ');
 }
 
-/** What a song is in the mashup: "vocal" / "beat" (vocal over beat), its stems (stem blend), or "A" / "B". */
 export function songRole(plan: Pick<MashupPlanSummary, 'style' | 'vocalFrom'>, song: Song, stems?: StemPick): string {
   if (plan.style === 'vocalOverBeat' && plan.vocalFrom) return plan.vocalFrom === song ? 'vocal' : 'beat';
   if (plan.style === 'stemBlend' && stems) {
@@ -305,28 +259,19 @@ export function songRole(plan: Pick<MashupPlanSummary, 'style' | 'vocalFrom'>, s
   return `song ${SONG_LABEL[song]}`;
 }
 
-/** "vocal +2 st, ×1.04" for one song, or '' when it is untouched. */
 export function shiftLabel(plan: MashupPlanSummary, song: Song, stems?: StemPick): string {
   const s = fmtShift(song === 'a' ? plan.shiftA : plan.shiftB);
   return s ? `${songRole(plan, song, stems)} ${s}` : '';
 }
 
-/** "128 BPM · F#m · 64 bars". */
 export function planLine(plan: Pick<MashupPlanSummary, 'bpm' | 'key' | 'bars'>): string {
   return [`${fmtBpm(plan.bpm)} BPM`, plan.key ?? 'key not clear', `${plan.bars} bars`].join(' · ');
 }
 
-// ── Plan timeline ─────────────────────────────────────────────────────
-
-/** The bit of a song's name the planner's `uses` text is sure to contain (it shortens names to about 24 characters). */
 function nameKey(name: string | undefined): string {
   return (name ?? '').replace(/…$/, '').slice(0, 20).trim().toLowerCase();
 }
 
-/**
- * Which songs a section's `uses` names. The planner writes the songs' (shortened) names ("Midnight City
- * instrumental + Hello vocal (Chorus)"); letters ("A vocal + B beat") and "both" count too.
- */
 export function usesSongs(uses: string, names?: { a?: string; b?: string }): { a: boolean; b: boolean } {
   const both = /\bboth\b/i.test(uses);
   const low = uses.toLowerCase();
@@ -341,21 +286,14 @@ export interface TimelineBlock {
   key: string;
   name: string;
   uses: string;
-  /** 1-based first bar on the mashup grid, and the length in bars. */
   firstBar: number;
   bars: number;
-  /** 0..1 of the whole width. */
   left: number;
   width: number;
   tone: 'a' | 'b' | 'both' | 'none';
-  /** The shifts of the songs it uses ("vocal +2 st, ×1.04 · beat ×1.02"); '' = untouched. */
   shift: string;
 }
 
-/**
- * The plan's sections as blocks on one bar line. Section bars may start at 0 or 1 (the planner's grid is 1-based):
- * the first section's start is the origin either way. `ticks` are offsets in bars from the origin.
- */
 export function timelineLayout(plan: MashupPlanSummary, stems?: StemPick, names?: { a?: string; b?: string }): { total: number; blocks: TimelineBlock[]; ticks: number[] } {
   const secs = (plan.sections ?? []).filter((s) => s.bars > 0);
   const origin = secs.length ? Math.min(...secs.map((s) => s.startBar)) : 0;
@@ -386,12 +324,6 @@ export function timelineLayout(plan: MashupPlanSummary, stems?: StemPick, names?
   return { total, blocks, ticks };
 }
 
-// ── Suggestions → options ─────────────────────────────────────────────
-
-/**
- * A suggestion the planner makes ("Use B at half time: stretch ×1.02 instead of ×0.51") → the options it means, or
- * null when it doesn't map to a control (it is then shown as plain advice).
- */
 export function suggestionPatch(text: string): Partial<FormOptions> | null {
   const t = text.replace(/[’']/g, "'");
   const patch: Partial<FormOptions> = {};
@@ -405,13 +337,11 @@ export function suggestionPatch(text: string): Partial<FormOptions> | null {
   }
   const vocal = /\bvocals?\s+(?:from|of)\s+(?:song\s+)?([AB])\b/i.exec(t) ?? /\b([AB])'s\s+vocals?\b/.exec(t) ?? /\b(?:song\s+)?([AB])\s+(?:as|for)\s+the\s+vocals?\b/i.exec(t);
   if (vocal && /\b(use|take|try|swap|switch|put)\b/i.test(t)) patch.vocalFrom = vocal[1].toLowerCase() as Song;
-  // The planner writes `Anchor "middle": …`; people write "meet in the middle".
   const anchor = /\banchor\s*[:=]?\s*"?(beat|vocal|middle)\b/i.exec(t);
   if (anchor) patch.anchor = anchor[1].toLowerCase() as MashupAnchor;
   else if (/\bkeep the beat\b/i.test(t)) patch.anchor = 'beat';
   else if (/\bkeep the vocal\b/i.test(t)) patch.anchor = 'vocal';
   else if (/\bmeet (?:in the middle|half ?way)\b/i.test(t)) patch.anchor = 'middle';
-  // Styles in words ("Back & forth") or as the request names them ("the backAndForth style").
   if (/\bback[- ]?(?:and|&)[- ]?forth\b/i.test(t)) patch.style = 'backAndForth';
   else if (/\bstem ?blend\b/i.test(t)) patch.style = 'stemBlend';
   else if (/\bvocal ?over ?(?:the )?beat\b/i.test(t)) patch.style = 'vocalOverBeat';
@@ -424,18 +354,14 @@ export function suggestionPatch(text: string): Partial<FormOptions> | null {
   return Object.keys(patch).length ? patch : null;
 }
 
-/** True when applying the patch would change the form. */
 export function patchChanges(f: MashupForm, patch: Partial<FormOptions> | null): boolean {
   if (!patch) return false;
   return (Object.keys(patch) as Array<keyof FormOptions>).some((k) => f[k] !== patch[k]);
 }
 
-/** A blocking problem that installing the stem model fixes. */
 export function needsStemModel(problem: string): boolean {
   return /\b(stem|stems|demucs|model manager)\b/i.test(problem);
 }
-
-// ── Building: stages, progress, outcome ───────────────────────────────
 
 export type JobPhase = 'idle' | 'running' | 'cancelling' | 'done' | 'failed' | 'cancelled';
 export type StageState = 'pending' | 'active' | 'done' | 'failed' | 'stopped';
@@ -461,7 +387,6 @@ export function stageStates(phase: JobPhase, current: MashupStage | null): Stage
   });
 }
 
-/** 0..1 for the bar, or -1 (indeterminate). */
 export function barFraction(phase: JobPhase, p: MashupProgress | null): number {
   if (phase === 'done') return 1;
   if (!p || !(p.fraction >= 0)) return -1;
@@ -476,12 +401,9 @@ export function doneToast(o: MashupOutcome): string {
   return `"${o.name}" is ready: ${planLine(o.plan)}, ${o.tracks} track${o.tracks === 1 ? '' : 's'}`;
 }
 
-/** The check's headline for the toast after Build ("Score 78 · 128 BPM · F#m · 64 bars"). */
 export function checkLine(c: Pick<MashupCheck, 'score' | 'plan'>): string {
   return `Fit ${Math.round(c.score)} · ${planLine(c.plan)}`;
 }
-
-// ── Failures ──────────────────────────────────────────────────────────
 
 export const NOT_AVAILABLE =
   "Auto Mashup isn't available in this build yet: the mashup service didn't answer. Restart Krypt Studio after updating it, or build one by hand: Separate stems, then Match key & tempo.";
@@ -497,9 +419,6 @@ export function isCancelMessage(m: string | undefined): boolean {
   return /cancel/i.test(m ?? '');
 }
 
-// ── Picking a song from the project ───────────────────────────────────
-
-/** Library tracks worth offering (analysed or waiting, not missing / failed). */
 export function libraryTrackCount(collections: ReadonlyArray<{ counts: { total: number; missing: number; failed: number } }> | null | undefined): number {
   return (collections ?? []).reduce((n, c) => n + Math.max(0, c.counts.total - c.counts.missing - c.counts.failed), 0);
 }

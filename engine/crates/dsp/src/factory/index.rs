@@ -1,10 +1,5 @@
-//! `index.json` (FactoryIndex in shared/sounds/types.ts), written by hand so
-//! the DSP crate needs no JSON dependency. Output is stable byte for byte.
-
-/// One FactorySample.
 #[derive(Clone, Debug)]
 pub struct IndexEntry {
-    /// 'factory:<rel>' with forward slashes.
     pub path: String,
     pub name: String,
     pub kind: String,
@@ -36,7 +31,6 @@ fn esc(s: &str) -> String {
     o
 }
 
-/// Fixed-decimals number without trailing zeros ("3.75", "-1", "0.4123").
 pub(crate) fn num(v: f64, decimals: usize) -> String {
     let s = format!("{v:.decimals$}");
     let s = if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };

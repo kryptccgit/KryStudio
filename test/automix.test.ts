@@ -1,6 +1,3 @@
-// Auto Mix pure modules: the preset cards (against the playbooks), the prompt
-// keyword parser, role detection and the planner (synthetic measurements,
-// applied to a real DocHost through applyPlan).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { AUTO_MIX_PRESETS, autoPreset, presetById, presetForGenre } from '@shared/automix/presets';
@@ -13,8 +10,6 @@ import { clampToSpec } from '@shared/plugins/types';
 import type { AutoMixIntent, AutoMixMode } from '@shared/automix/types';
 import type { DocHost } from '@shared/doc/DocHost';
 import { automixCatalog, measure, mixDoc } from './automix-fixtures';
-
-// ── Presets ─────────────────────────────────────────────────────────────
 
 test('presets: the eleven cards, unique ids, numbers inside their genres\' playbook targets', () => {
   assert.equal(AUTO_MIX_PRESETS.length, 11);
@@ -34,7 +29,6 @@ test('presets: the eleven cards, unique ids, numbers inside their genres\' playb
       }
     }
   }
-  // every genre with a playbook maps to exactly one card
   const all = AUTO_MIX_PRESETS.flatMap((p) => p.genres);
   assert.equal(new Set(all).size, all.length, 'no genre on two cards');
 });
@@ -50,8 +44,6 @@ test('presets: lookup by id / name / genre alias, auto pick from the genre then 
   assert.equal(autoPreset(null, { lufs: -18, subVsMid: 2, highVsMid: -18 }).preset.id, 'lofi');
   assert.equal(autoPreset(undefined).preset.id, 'balanced');
 });
-
-// ── Intent ──────────────────────────────────────────────────────────────
 
 test('intent: the plan\'s example prompt', () => {
   const i = parseIntent('vocals on top, punchy, not harsh, streaming loud');
@@ -125,8 +117,6 @@ test('intent: clampIntent makes any JSON safe', () => {
   assert.equal(clampIntent('junk', 'keywords').source, 'keywords');
 });
 
-// ── Roles ───────────────────────────────────────────────────────────────
-
 test('roles: names, the drum bus, stem origin and a voice by its sound', () => {
   const { doc, ids } = mixDoc({ drumBus: true });
   const roles = detectRoles(doc.project, doc.catalog);
@@ -140,9 +130,7 @@ test('roles: names, the drum bus, stem origin and a voice by its sound', () => {
   assert.equal(roles[ids['Drum Bus']].role, 'bus');
   assert.ok(roles[ids['Drum Bus']].drumBus);
   assert.equal(roles[ids.Kick].topLevel, false, 'the kick feeds the bus');
-  // the request's own list
   assert.ok(detectRoles(doc.project, doc.catalog, { vocalInserts: ['Lead'] })[ids.Lead].vocal);
-  // an unnamed audio channel that sounds like a voice; a stem sample with origin "vocals"
   const ex = <T>(cmd: string, args: unknown): T => doc.exec<T>(cmd, args, { actor: { kind: 'user' } }).data as T;
   const track = doc.project.playlist.trackOrder[0];
   const a = ex<{ insertId: string; channelId: string; sampleId: string }>('playlist.addAudio', { path: 'C:\\x\\Take 3.wav', trackId: track, start: 0 });
@@ -151,15 +139,12 @@ test('roles: names, the drum bus, stem origin and a voice by its sound', () => {
   const r2 = detectRoles(doc.project, doc.catalog, { sound });
   assert.ok(r2[a.insertId].vocal);
   assert.equal(r2[a.insertId].why, 'sound');
-  // a full mix / instrumental bed with a vocal-like spectrum is the bed, never a vocal (an Auto Mashup's beat track)
   const bed = ex<{ insertId: string }>('playlist.addAudio', { path: 'C:/x/lemezia 2.wav', trackId: track, start: 0 });
   ex('mixer.setInsert', { id: bed.insertId, name: 'lemezia 2 · Full mix' });
   const r3 = detectRoles(doc.project, doc.catalog, { sound: { ...sound, [bed.insertId]: sound[a.insertId] } });
   assert.equal(r3[bed.insertId].vocal, false);
   assert.equal(r3[bed.insertId].role, 'other');
 });
-
-// ── Planner ─────────────────────────────────────────────────────────────
 
 function io(doc: DocHost): ApplyIO {
   return {
@@ -188,11 +173,9 @@ const kslot = (doc: DocHost, insertId: string, kind: Parameters<typeof findKrypt
 
 test("plan master: a first pass never lowers the ceiling for the unlimited song's peaks; a later pass corrects our own overshoot", () => {
   const { doc, ids } = mixDoc();
-  // a loud, already-limited song: its own peaks are over the ceiling, but no Krypt limiter made them
   const loud = measure(ids, { master: { lufs: -10.3, truePeak: -0.06 } });
   applyPlan(planAutoMix(input(doc, 'master', loud, { target: { lufs: -9.6, truePeak: -1 } })), io(doc), { keepUserFx: true });
   assert.equal(kslot(doc, doc.project.mixer.masterId, 'limiter')!.params.ceiling, -1.1, 'first pass: the ceiling sits just under the target');
-  // pass 2 measures our limiter's output: 0.3 dB over → the ceiling comes down by that
   const over = measure(ids, { master: { lufs: -9.6, truePeak: -0.7 } });
   applyPlan(planAutoMix(input(doc, 'master', over, { target: { lufs: -9.6, truePeak: -1 }, pass: 2 })), io(doc), { keepUserFx: true });
   assert.equal(kslot(doc, doc.project.mixer.masterId, 'limiter')!.params.ceiling, -1.5);
@@ -255,7 +238,6 @@ test('plan vocals: buried vocals are raised against the beat, a loud one is lowe
     applyPlan(plan, io(doc), { keepUserFx: true });
     const after = gainToDb(doc.project.mixer.inserts[ids.Vocals].volume);
     assert.ok(dir > 0 ? after > before + 3 : after < before - 3, `vocal ${vl}: ${before} → ${after}`);
-    // the vocal chain: EQ, de-esser, comp, sends
     assert.ok(kslot(doc, ids.Vocals, 'eq') && kslot(doc, ids.Vocals, 'deesser') && kslot(doc, ids.Vocals, 'comp'));
     const rev = doc.project.mixer.insertOrder.find((i) => doc.project.mixer.inserts[i].name === 'Auto Reverb');
     assert.ok(rev && doc.project.mixer.inserts[ids.Vocals].routes[rev] > 0, 'reverb send');
@@ -293,7 +275,6 @@ test('plan: a re-run adjusts the Krypt slots instead of stacking new ones; on ta
   applyPlan(planAutoMix(input(doc, 'full', m1)), io(doc), { keepUserFx: true });
   const n1 = count();
   const inserts1 = doc.project.mixer.insertOrder.length;
-  // louder render, harsher top: the same slots move
   const lim = () => kslot(doc, doc.project.mixer.masterId, 'limiter')!.params.inputGain;
   const g1 = lim();
   const m2 = measure(ids, { master: { lufs: -11, tone: { sub: 3.5, low: 6.5, lowMid: -1.5, mid: 0, highMid: 2, high: -7.5 } } });
@@ -302,7 +283,6 @@ test('plan: a re-run adjusts the Krypt slots instead of stacking new ones; on ta
   assert.equal(doc.project.mixer.insertOrder.length, inserts1, 'no new send inserts');
   assert.ok(r2.edits > 0);
   assert.ok(lim() > g1, 'the same limiter is driven harder toward -9 from -11');
-  // a third run on a mix that already measures on target: nothing to do
   const onTarget = measure(ids, { master: { lufs: -9, truePeak: -1.2, tone: { sub: 3.5, low: 6.5, lowMid: -1.5, mid: 0, highMid: -5, high: -7.5 } } });
   onTarget.inserts = m2.inserts;
   const plan3 = planAutoMix(input(doc, 'master', onTarget, { pass: 3 }));
@@ -320,7 +300,6 @@ test('plan: keepUserFx never touches the user\'s slots; without it the user\'s l
   const m1 = master(doc);
   assert.deepEqual(m1.slots[userLim], userParams, 'the user limiter is exactly as it was');
   assert.ok(m1.slotOrder.filter((s) => m1.slots[s].type === 'krypt.limiter').length === 2, 'Krypt adds its own limiter after it');
-  // keepUserFx false: the user limiter becomes the one Auto Mix drives
   const b = mixDoc();
   const ul = master(b.doc).slotOrder[0];
   applyPlan(planAutoMix(input(b.doc, 'master', measure(b.ids), { keepUserFx: false })), io(b.doc), { keepUserFx: false });
@@ -333,19 +312,15 @@ test('plan: convergence maths — the secant slope, the crest guard and the true
   const { doc, ids } = mixDoc();
   applyPlan(planAutoMix(input(doc, 'master', measure(ids, { master: { lufs: -14 } }))), io(doc), { keepUserFx: true });
   const limId = master(doc).slotOrder.find((s) => isKryptSlot(master(doc).slots[s], 'limiter'))!;
-  // +5 dB drive gave only +2.5 LU (slope 0.5): the next step doubles
   const p2 = planAutoMix(input(doc, 'master', measure(ids, { master: { lufs: -11.5 } }), { pass: 2, loudHistory: [{ drive: 0, lufs: -14 }, { drive: 5, lufs: -11.5 }] }));
   assert.equal(p2.drive, 10, `drive ${p2.drive}`);
-  // the limiter already works 6 dB on average: loudness is capped and said so
   const p3 = planAutoMix(input(doc, 'master', measure(ids, { master: { lufs: -11 }, gr: [{ insertId: doc.project.mixer.masterId, slotId: limId, avgDb: 4.2, maxDb: 9, active: 0.9 }] }), { pass: 2 }));
   assert.ok(p3.notes.some((n) => /^Loudness capped at -11 LUFS/.test(n)), p3.notes.join(' | '));
   assert.ok(p3.drive !== null && p3.drive <= 5, 'not pushed further');
   assert.ok(p3.converged, 'capped and peak-safe: stop refining');
-  // a true peak over the ceiling lowers the limiter ceiling by the excess
   const p4 = planAutoMix(input(doc, 'master', measure(ids, { master: { lufs: -9, truePeak: -0.4 } }), { pass: 2 }));
   const limOp = p4.ops.find((o) => o.op === 'slot' && o.kind === 'limiter') as Extract<(typeof p4.ops)[number], { op: 'slot' }>;
   assert.ok(limOp.params.ceiling <= -1.6, `ceiling ${limOp.params.ceiling}`);
-  // meetsTargets: ±0.5 LU and the true peak
   const base = { mode: 'master' as const, target: { lufs: -9, truePeak: -1 }, roles: {}, preset: presetById('pop-polish')!, intent: null };
   assert.ok(meetsTargets({ ...base, measure: measure(ids, { master: { lufs: -9.4, truePeak: -1.1 } }) }).ok);
   assert.ok(!meetsTargets({ ...base, measure: measure(ids, { master: { lufs: -9.6, truePeak: -1.1 } }) }).ok);

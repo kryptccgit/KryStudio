@@ -1,9 +1,3 @@
-// OS file drops (Windows Explorer → app). window.krypt.app.pathForFile maps
-// a dropped File to its absolute path (empty in the browser mock).
-//   audio      → a sampler channel (or the target channel's sample)
-//   .kstudio   → open the project
-//   .mid/.midi → import MIDI
-
 import { toast } from './notify';
 import { importMidi, openProject } from './actions';
 import { AUDIO_FILE_RE } from '@shared/audio/formats';
@@ -16,7 +10,6 @@ export function hasFiles(e: { dataTransfer: DataTransfer | null }): boolean {
   return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
 }
 
-/** Absolute paths of dropped OS files ('' entries removed). */
 export function droppedPaths(dt: DataTransfer): string[] {
   const out: string[] = [];
   for (const f of Array.from(dt.files)) {
@@ -32,10 +25,6 @@ export function droppedPaths(dt: DataTransfer): string[] {
   return out;
 }
 
-/**
- * Handle dropped OS files. `onAudio` decides what audio does in this
- * context (rack: new sampler; sampler row: replace its sample).
- */
 export async function handleOsDrop(dt: DataTransfer, onAudio: (paths: string[]) => Promise<unknown> | unknown): Promise<void> {
   const paths = droppedPaths(dt);
   if (!paths.length) return;

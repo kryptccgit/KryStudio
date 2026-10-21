@@ -1,7 +1,3 @@
-// Grid-controller LED feedback (shared/live/gridLeds.ts) and the MIDI-out
-// settings helpers (shared/live/midiOut.ts): the view per state, the LED
-// messages per layout, change-only updates, palette approximation, Launchpad
-// SysEx, and pairing the grid's input with an output port.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -30,7 +26,6 @@ import { DEFAULT_MIDI_OUT, mergeMidiOut, midiOutSettings, outputsToOpen, syncTem
 import type { LauncherLedState } from '@shared/engine/protocol';
 import type { LaunchGridSettings } from '@shared/types';
 
-/** 3 tracks, 2 scenes; red clip A at (T1, S1), clip B (pattern colour) at (T3, S2), clip C at (T2, S2). */
 function rig() {
   const host = new DocHost(createDefaultProject('Leds'), CATALOG, { strict: true });
   const ex = <T = any>(cmd: string, args: unknown): T => {
@@ -75,11 +70,9 @@ test('view: pad states from the launcher state (empty, clip, queued, playing, re
   assert.equal(pad(v, 0, 0).state, 'recording');
   v = gridView(p, on(), st({ playing: { [g.t[0]]: g.a }, queued: { [g.t[0]]: 'stop' } }));
   assert.equal(pad(v, 0, 0).state, 'stopping');
-  // another clip queued on the same track: the playing one is on its way out
   v = gridView(p, on(), st({ playing: { [g.t[2]]: g.b }, queued: { [g.t[2]]: 'lc_other' } }));
   assert.equal(pad(v, 1, 2).state, 'stopping');
   assert.equal(v.scenes[1].state, 'has', 'only one of the row plays');
-  // scrolled window: track offset 1 → column 0 is track 2
   v = gridView(p, on({ trackOffset: 1 }), EMPTY_LAUNCHER_STATE);
   assert.equal(pad(v, 1, 0).state, 'clip');
   assert.equal(pad(v, 0, 0).state, 'empty');
@@ -128,7 +121,6 @@ test('apc mini: velocities 0..6 on pads, single LEDs on scene and track buttons;
   m = ledMap(s, gridView(p, s, st({ playing: { [g.t[0]]: g.a }, queued: { [g.t[0]]: 'stop' } })));
   assert.deepEqual(m.n56, [[0x90, 56, APC.yellowBlink]]);
   assert.deepEqual(m.n64, [[0x90, 64, 2]]);
-  // generic, base note 36, channel 10 (index 9)
   const gs = on({ layout: 'generic', baseNote: 36, channel: 9 });
   m = ledMap(gs, gridView(p, gs, EMPTY_LAUNCHER_STATE));
   assert.deepEqual(m.n36, [[0x99, 36, 0]], 'a stopped clip stays dark');
@@ -148,7 +140,6 @@ test('only changed controls are sent; vanished controls go dark; ledOff clears a
   assert.deepEqual(ledChanges(a, a), [], 'nothing changed: nothing sent');
   const b = ledMap(s, gridView(p, s, st({ playing: { [g.t[0]]: g.a } })));
   assert.deepEqual(ledChanges(a, b), [[0x92, 81, LP_GREEN], [0xb0, 89, LP_GREEN], [0xb0, 98, LP_RED]]);
-  // a scene removed: its controls are switched off
   const fewer = { ...a };
   delete fewer.c79;
   assert.deepEqual(ledChanges(a, fewer), [[0xb0, 79, 0]]);

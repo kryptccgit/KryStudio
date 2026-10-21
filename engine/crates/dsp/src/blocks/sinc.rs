@@ -1,30 +1,17 @@
-//! Kaiser-windowed sinc interpolation for the sampler.
-//!
-//! 24 taps at or below the original rate; when pitching UP the kernel is
-//! stretched (cutoff scaled to the new Nyquist) so the sampler does not
-//! alias, up to 2 octaves (96 taps). A finely sampled table + linear
-//! interpolation evaluates the kernel at arbitrary positions.
-
 use super::oversample::bessel_i0;
 
-/// Zero crossings on each side at full bandwidth.
 pub const HALF_WIDTH: usize = 12;
 const RES: usize = 512;
 const BETA: f64 = 8.0;
-/// Bandwidth relative to the source Nyquist (slightly below 1 to keep the
-/// transition band out of the image region).
 pub const BANDWIDTH: f32 = 0.96;
-/// Lowest cutoff scale (= 2 octaves up); beyond that we accept aliasing.
 pub const MIN_CUTOFF: f32 = 0.25;
 pub const MAX_TAPS: usize = 2 * ((HALF_WIDTH as f32 / (MIN_CUTOFF * BANDWIDTH)) as usize + 2);
 
-/// Phases of the precomputed full-bandwidth polyphase table.
 const PHASES: usize = 512;
 
 #[derive(Clone, Debug)]
 pub struct SincTable {
     table: Vec<f32>,
-    /// Normalized full-bandwidth kernels: (PHASES + 1) rows of `poly_taps`.
     poly: Vec<f32>,
     poly_taps: usize,
     poly_hw: usize,
@@ -53,7 +40,6 @@ impl SincTable {
             })
             .collect();
         let mut t = Self { table, poly: Vec::new(), poly_taps: 0, poly_hw: 0 };
-        // polyphase rows for playback at or below the original rate (c = BANDWIDTH)
         let c = BANDWIDTH;
         let hw = (HALF_WIDTH as f32 / c).ceil() as usize;
         let taps = 2 * hw;
@@ -75,7 +61,6 @@ impl SincTable {
         t
     }
 
-    /// Kernel value at |u| (in zero-crossing units).
     #[inline]
     fn k(&self, u: f32) -> f32 {
         let p = u.abs() * RES as f32;
@@ -88,12 +73,9 @@ impl SincTable {
         a + (self.table[i + 1] - a) * f
     }
 
-    /// Compute normalized weights for reading at `pos` with playback `step`
-    /// (source samples per output sample). Returns (first source index, tap count).
     #[inline]
     pub fn weights(&self, pos: f64, step: f64, w: &mut [f32; MAX_TAPS]) -> (i64, usize) {
         if step <= 1.0 {
-            // fast path: interpolate between two precomputed normalized rows
             let i0 = pos.floor();
             let x = ((pos - i0) * PHASES as f64) as f32;
             let p = (x as usize).min(PHASES - 1);
@@ -127,8 +109,6 @@ impl SincTable {
     }
 }
 
-/// Dot product of weights with `data[first..first+n]`. Out-of-range taps
-/// read silence, or wrap within `[lo, hi)` when looping.
 #[inline]
 pub fn apply(data: &[f32], first: i64, w: &[f32], wrap: Option<(i64, i64)>) -> f32 {
     let len = data.len() as i64;
@@ -157,11 +137,6 @@ pub fn apply(data: &[f32], first: i64, w: &[f32], wrap: Option<(i64, i64)>) -> f
     acc
 }
 
-/// Offline resampling of a whole buffer from `from` Hz to `to` Hz with the
-/// sampler's kernel (export paths, e.g. MP3 at 44.1 / 48 kHz). The kernel
-/// is anti-aliased down to a quarter of the source rate; larger reductions
-/// (384 kHz → 48 kHz) first halve the rate in steps. Output length is
-/// `round(len × to / from)`, time-aligned (output 0 = input 0).
 pub fn resample(x: &[f32], from: u32, to: u32) -> Vec<f32> {
     if x.is_empty() || from == 0 || to == 0 || from == to {
         return x.to_vec();
@@ -177,12 +152,9 @@ pub fn resample(x: &[f32], from: u32, to: u32) -> Vec<f32> {
     resample_stage(&table, staged.as_deref().unwrap_or(x), rate / target)
 }
 
-/// One pass at a constant `step` (source samples per output sample).
 fn resample_stage(table: &SincTable, x: &[f32], step: f64) -> Vec<f32> {
     let n = (x.len() as f64 / step).round().max(1.0) as usize;
     let mut out = Vec::with_capacity(n);
-    // A rational step p/q (q ≤ 64: every common rate pair) cycles through
-    // the same q kernels: compute them once.
     if let Some(q) = (1..=64usize).find(|&q| {
         let v = step * q as f64;
         (v - v.round()).abs() < 1e-9
@@ -216,7 +188,6 @@ mod tests {
     #[test]
     fn integer_positions_are_exact() {
         let t = SincTable::new();
-        // band-limited test signal (content below 0.8 x Nyquist)
         let data: Vec<f32> = (0..100)
             .map(|i| {
                 let t = i as f32;
@@ -234,7 +205,7 @@ mod tests {
     #[test]
     fn resampled_sine_is_clean() {
         let t = SincTable::new();
-        let f = 0.05f64; // cycles per source sample
+        let f = 0.05f64;
         let data: Vec<f32> = (0..2000).map(|i| (2.0 * std::f64::consts::PI * f * i as f64).sin() as f32).collect();
         let mut w = [0.0f32; MAX_TAPS];
         let mut pos = 100.0f64;
@@ -261,17 +232,13 @@ mod tests {
 
     #[test]
     fn offline_resample_keeps_tones_and_removes_aliases() {
-        // Integer, rational (cached kernels) and irrational-looking (per-sample kernels) steps.
         for (from, to) in [(96_000u32, 48_000u32), (88_200, 44_100), (192_000, 48_000), (384_000, 48_000), (352_800, 44_100), (64_000, 48_000), (50_000, 48_000), (47_999, 48_000), (48_007, 44_100), (22_050, 44_100), (16_000, 48_000), (8_000, 48_000), (11_025, 44_100)] {
             let n = from as usize / 2;
             let y = resample(&sine(1000.0, from, n), from, to);
             assert_eq!(y.len(), (n as f64 * to as f64 / from as f64).round() as usize, "{from}->{to} length");
-            // Passband: level and frequency (phase-aligned with the ideal tone).
             let ideal = sine(1000.0, to, y.len());
             let err = y[y.len() / 4..y.len() * 3 / 4].iter().zip(&ideal[y.len() / 4..]).map(|(a, b)| (a - b).abs()).fold(0f32, f32::max);
             assert!(err < 5e-3, "{from}->{to}: max error {err} vs the ideal tone");
-            // Stopband: a tone above the new Nyquist (that the source can
-            // hold) is removed, not folded down.
             if from > to && to as f64 * 0.6 < from as f64 / 2.0 {
                 let z = resample(&sine(to as f64 * 0.6, from, n), from, to);
                 assert!(rms(&z) < 0.5 / 2f32.sqrt() * 0.01, "{from}->{to}: alias rms {}", rms(&z));

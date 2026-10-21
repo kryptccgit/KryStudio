@@ -1,10 +1,3 @@
-// electron-builder afterPack hook (package.json build.afterPack): re-signs the macOS app ad-hoc.
-//
-// Builds are not signed with an Apple Developer ID yet. Packaging still breaks the signature Electron ships
-// with, and Apple Silicon refuses a bundle whose seal is broken ("is damaged and can't be opened", which
-// clearing the quarantine flag can't fix). Signing ad-hoc, nested binaries first (the engine, the MCP shim,
-// the analyzer and libonnxruntime.dylib in Resources/resources/bin), gives a bundle that opens after the
-// usual right-click > Open. Skipped when a real identity is configured; no-op on Windows and Linux.
 const { execFileSync, spawnSync } = require('node:child_process');
 const { readdirSync, statSync } = require('node:fs');
 const { join } = require('node:path');

@@ -1,8 +1,3 @@
-// Krypt Voice planning (pure): the English syllabifier and lyric markup
-// (shared/voice/syllables.ts), "Sing my notes" planning (shared/voice/
-// singplan.ts: melody, syllable ↔ note mapping, spans, segments), the WAV
-// joiner (electron/voice/wav.ts) and the Fish helpers that are pure
-// (consent-line check, human error sentences).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { countSyllables, parseLyrics, syllabifyWord } from '@shared/voice/syllables';
@@ -10,8 +5,6 @@ import { buildSegments, equalSpans, fitSpans, mapSyllables, mappingRows, melodyF
 import { CONSENT_LINE } from '@shared/voice/types';
 import { concatWav, parseWav, silentWav } from '../electron/voice/wav';
 import { consentHeard, fishErrorMessage } from '../electron/voice/fish';
-
-// ── Syllabifier ─────────────────────────────────────────────────────────
 
 test('syllabifyWord: common song words split where singers split them', () => {
   const cases: Record<string, string> = {
@@ -66,8 +59,6 @@ test('syllabifyWord keeps the original letters and case', () => {
   assert.deepEqual(syllabifyWord('2'), ['2'], 'a number is one sung unit');
 });
 
-// ── Lyric markup ────────────────────────────────────────────────────────
-
 test('parseLyrics: "-" splits exactly, "_" holds, lines, spoken text keeps punctuation', () => {
   const p = parseLyrics('Hel-lo, my baby_ _\nI love you__ so / beau_ti-ful');
   assert.equal(p.lines.length, 3);
@@ -94,16 +85,14 @@ test('parseLyrics: punctuation-only tokens and blank lines vanish; a leading "_"
   assert.deepEqual(parseLyrics('').syllables, []);
 });
 
-// ── Melody ──────────────────────────────────────────────────────────────
-
 test('melodyFromNotes: the highest note of a chord, overlaps trimmed, muted notes skipped, a bar range clipped', () => {
   const m = melodyFromNotes([
     { tick: 0, dur: 960, key: 60 },
     { tick: 0, dur: 960, key: 64 },
-    { tick: 0, dur: 960, key: 67 }, // chord → 67
+    { tick: 0, dur: 960, key: 67 },
     { tick: 960, dur: 1920, key: 62 },
-    { tick: 1920, dur: 960, key: 69 }, // higher: cuts the held 62 at 1920
-    { tick: 2400, dur: 960, key: 55 }, // lower under the 69 (ends 2880): sounds from 2880
+    { tick: 1920, dur: 960, key: 69 },
+    { tick: 2400, dur: 960, key: 55 },
     { tick: 4000, dur: 480, key: 70, mute: true },
   ]);
   assert.deepEqual(m, [
@@ -117,8 +106,6 @@ test('melodyFromNotes: the highest note of a chord, overlaps trimmed, muted note
   const ranged = melodyFromNotes([{ tick: 0, dur: 960, key: 60 }, { tick: 3840, dur: 7680, key: 62 }, { tick: 8000, dur: 100, key: 64 }], { start: 3840, end: 7680 });
   assert.deepEqual(ranged, [{ tick: 3840, dur: 3840, key: 62 }], 'starts inside the range, clipped at its end');
 });
-
-// ── Mapping ─────────────────────────────────────────────────────────────
 
 const syl = (...xs: Array<string | [string, number]>) => xs.map((x) => (typeof x === 'string' ? { text: x, hold: 0 } : { text: x[0], hold: x[1] }));
 
@@ -145,8 +132,6 @@ test('mapSyllables: extra syllables squeeze onto the last note; a hold past the 
   assert.deepEqual(mapSyllables(syl('a'), 0).groups, []);
 });
 
-// ── Spans ───────────────────────────────────────────────────────────────
-
 test('equalSpans / fitSpans: exactly the expected count, merged or split, sorted', () => {
   assert.deepEqual(equalSpans(2, 0, 1), [{ startSec: 0, endSec: 0.5 }, { startSec: 0.5, endSec: 1 }]);
   const detected = [{ startSec: 0.5, endSec: 0.6 }, { startSec: 0, endSec: 0.2 }, { startSec: 0.62, endSec: 0.7 }, { startSec: 1, endSec: 1.4 }];
@@ -170,8 +155,6 @@ test('wordSpans: each word\'s timing split over its syllables by letters; a word
   assert.deepEqual(spans!.map((s) => Math.round(s.startSec * 100) / 100), [0, 0.6, 1.1], 'hel (3 letters) / lo (2)');
   assert.equal(wordSpans(line.syllables, line.words, [{ text: 'hello', startSec: 0, endSec: 1 }]), null);
 });
-
-// ── Segments ────────────────────────────────────────────────────────────
 
 test('buildSegments: notes → seconds at the project tempo, octave shift, held syllables split over their notes', () => {
   const melody: MelodyNote[] = [
@@ -205,8 +188,6 @@ test('mappingRows: one row per note, held notes show "_"; patternBarRange parses
   assert.ok('error' in (patternBarRange('x', 3840) as object));
 });
 
-// ── WAV ─────────────────────────────────────────────────────────────────
-
 test('wav: parse, join with silence (offsets), streamed sizes, mismatched formats refused', () => {
   const a = silentWav(1, 24000);
   const b = silentWav(0.5, 24000);
@@ -225,8 +206,6 @@ test('wav: parse, join with silence (offsets), streamed sizes, mismatched format
   assert.ok('error' in concatWav([a, silentWav(1, 44100)]));
   assert.ok('error' in parseWav(new Uint8Array(10)));
 });
-
-// ── Fish helpers ────────────────────────────────────────────────────────
 
 test('consentHeard: the consent line (with ASR slips) at the start, not something else', () => {
   assert.ok(consentHeard(`${CONSENT_LINE} Here is some more of me talking.`));

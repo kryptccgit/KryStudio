@@ -1,9 +1,3 @@
-//! Tiny-model inference on rten (pure-Rust ONNX runtime, no native DLLs).
-//! Used for the bundled models: Basic Pitch and Beat This! small. The
-//! `beat-this` crate's pipeline is generic over its `Model` trait; we run it
-//! on rten 0.27 through [`RtenModel`] so the whole sidecar shares one runtime
-//! and every model call is a cancellation checkpoint.
-
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -12,7 +6,6 @@ use rten_tensor::Layout;
 
 use crate::{JobCtx, JobError};
 
-/// Named model outputs: name → (shape, row-major data).
 pub type Outputs = HashMap<String, (Vec<usize>, Vec<f32>)>;
 
 pub struct RtenModel {
@@ -21,20 +14,17 @@ pub struct RtenModel {
     outputs: Vec<(NodeId, String)>,
     label: String,
     ctx: Option<JobCtx>,
-    /// Called before every run with the run index (progress reporting).
     on_run: Option<Box<dyn FnMut(usize) + Send>>,
     runs: usize,
 }
 
 impl RtenModel {
-    /// Load an ONNX file. `label` names the model in error messages.
     pub fn load(path: &Path, label: &str) -> Result<Self, JobError> {
         if !path.is_file() {
             let dir = path.parent().map(|p| p.display().to_string()).unwrap_or_default();
             let file = path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
             return Err(JobError::Failed(format!("{label} model not found in {dir} ({file})")));
         }
-        // (Weight prepacking was measured slower for these small models.)
         let model = ModelOptions::with_all_ops().load_file(path).map_err(|e| JobError::Failed(format!("Cannot load the {label} model {}: {e}", path.display())))?;
         let inputs = model
             .input_ids()
@@ -45,7 +35,6 @@ impl RtenModel {
         Ok(Self { model, inputs, outputs, label: label.to_string(), ctx: None, on_run: None, runs: 0 })
     }
 
-    /// Make every run a cancellation checkpoint for `ctx`.
     pub fn with_ctx(mut self, ctx: &JobCtx) -> Self {
         self.ctx = Some(ctx.clone());
         self
@@ -60,7 +49,6 @@ impl RtenModel {
         self.outputs.iter().map(|o| o.1.clone()).collect()
     }
 
-    /// Run with named inputs; returns every output as (shape, data).
     pub fn run_named(&mut self, inputs: &[(&str, &[usize], &[f32])]) -> Result<Outputs, JobError> {
         if let Some(ctx) = &self.ctx {
             ctx.check()?;
@@ -86,8 +74,6 @@ impl RtenModel {
     }
 }
 
-/// Marker error so a cancel inside the beat-this pipeline maps back to
-/// `JobError::Cancelled`.
 #[derive(Debug)]
 pub struct CancelledInModel;
 

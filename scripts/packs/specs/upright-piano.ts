@@ -1,12 +1,7 @@
-// Upright piano: sampled by Simon Dalzell (Ivy Audio) for Versilian Studios' VS Chamber Orchestra 2: Community
-// Edition (CC0 1.0), pinned to a commit of github.com/sgossner/VSCO-2-CE. Three dynamics, every major third from A0
-// (the upstream MappingChart.txt: file index n sounds at MIDI 21 + 2n, the last file at 108). WAV files; our mapping
-// peak-normalises each dynamic, skips leading silence and trims the long bass notes with a fade.
-
 import { melodic, type InstrumentSpec, type PackSpec, type SampleRef, type Zone } from '../lib';
 
 const SHA = '440300901dfe9275fd84e0b7763af1f8443ae62e';
-const INDICES = Array.from({ length: 23 }, (_, i) => i * 2); // 000, 002 … 044
+const INDICES = Array.from({ length: 23 }, (_, i) => i * 2);
 const rootOf = (n: number) => (n === 44 ? 108 : 21 + 2 * n);
 const file = (dyn: number, n: number) => `Player_dyn${dyn}_rr1_${String(n).padStart(3, '0')}.wav`;
 

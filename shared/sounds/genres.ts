@@ -1,12 +1,7 @@
-// The genres Krypt Studio knows by name: preset tags, factory sample tags,
-// playbooks (shared/playbooks) and the beat prompt all use these ids. Pure TS.
-
 export interface GenreInfo {
   id: GenreId;
   name: string;
-  /** Other names users type ("big room", "uk drill" …), normalised with genreKey(). */
   aliases: string[];
-  /** Broad family, used when a genre has no exact match (a preset tagged 'house' suits 'tech-house'). */
   family: 'hip-hop' | 'house' | 'bass' | 'pop' | 'retro' | 'world';
 }
 
@@ -54,7 +49,6 @@ export const GENRES: readonly GenreInfo[] = [
   { id: 'synthwave', name: 'Synthwave', aliases: ['retrowave', 'outrun', '80s', 'darksynth', 'vaporwave'], family: 'retro' },
 ];
 
-/** "Big Room!" → "bigroom": compare user text with ids and aliases. */
 export function genreKey(s: string): string {
   return s.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
 }
@@ -66,13 +60,11 @@ for (const g of GENRES) {
   for (const a of g.aliases) BY_KEY.set(genreKey(a), g.id);
 }
 
-/** A genre id for a name or alias, or null. */
 export function resolveGenre(name: string | null | undefined): GenreId | null {
   if (!name) return null;
   return BY_KEY.get(genreKey(name)) ?? null;
 }
 
-/** The first genre named anywhere in free text ("make a dark uk drill beat" → 'drill'); longest alias wins. */
 export function genreInText(text: string): GenreId | null {
   const t = ` ${text.toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ')} `;
   let best: { id: GenreId; len: number } | null = null;
@@ -89,7 +81,6 @@ export function genreInfo(id: GenreId): GenreInfo {
   return GENRES.find((g) => g.id === id)!;
 }
 
-/** Same family, for "close enough" matches (tech-house ↔ house). */
 export function sameFamily(a: GenreId, b: GenreId): boolean {
   return genreInfo(a).family === genreInfo(b).family;
 }

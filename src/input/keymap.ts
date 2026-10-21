@@ -1,25 +1,15 @@
-// ──────────────────────────────────────────────────────────────────────
-// FL-default keymap as data + the matcher. Physical keys (F-keys, Space,
-// numpad) match by KeyboardEvent.code; letters match by the produced key so
-// AZERTY/QWERTZ users get the letters they expect.
-// ──────────────────────────────────────────────────────────────────────
-
 import { normalizeKeys, type KeymapOverrides } from '@shared/keymap';
 
 export { normalizeKeys };
 export type { KeymapOverrides };
 
-/** Editors that own context-scoped shortcuts (their root carries data-editor="<context>"). */
 export type KeyContext = 'pianoRoll' | 'playlist' | 'channelRack';
 
 export interface KeyBinding {
   keys: string;
   command: string;
-  /** Fire even while typing in an input (Save). */
   allowInInputs?: boolean;
-  /** Repeat while held (undo). */
   repeat?: boolean;
-  /** Only while keyboard focus is inside this editor; wins over a global binding of the same keys. */
   context?: KeyContext;
 }
 
@@ -36,8 +26,7 @@ export const DEFAULT_KEYMAP: KeyBinding[] = [
   { keys: 'Ctrl+Shift+S', command: 'file.saveAs', allowInInputs: true },
   { keys: 'Ctrl+O', command: 'file.open' },
   { keys: 'Ctrl+Shift+O', command: 'file.openAudioProject' },
-  { keys: 'Ctrl+N', command: 'file.new' }, // a new project TAB (research/19)
-  // Project tabs (research/19; browser conventions, none are FL bindings). Ctrl+T stays the typing piano.
+  { keys: 'Ctrl+N', command: 'file.new' },
   { keys: 'Ctrl+Tab', command: 'tabs.next', allowInInputs: true },
   { keys: 'Ctrl+Shift+Tab', command: 'tabs.prev', allowInInputs: true },
   { keys: 'Ctrl+1', command: 'tabs.goto1' },
@@ -58,16 +47,13 @@ export const DEFAULT_KEYMAP: KeyBinding[] = [
   { keys: 'F7', command: 'view.toggle.pianoRoll' },
   { keys: 'F9', command: 'view.toggle.mixer' },
   { keys: 'Alt+F8', command: 'view.toggle.browser' },
-  // Session view (clip launcher, Wave 12.2): not an FL binding; F3 is free in FL's defaults.
   { keys: 'F3', command: 'view.toggle.session' },
   { keys: 'F4', command: 'pattern.nextEmpty' },
   { keys: 'NumpadAdd', command: 'pattern.next', repeat: true },
   { keys: 'NumpadSubtract', command: 'pattern.prev', repeat: true },
   { keys: 'Ctrl+T', command: 'input.toggleTypingPiano' },
-  // Home hub + Guides (not FL bindings: FL has no launcher; F1 is FL's help key).
   { keys: 'Ctrl+Shift+H', command: 'view.home' },
   { keys: 'F1', command: 'help.guides' },
-  // Piano roll tools (FL defaults where FL has one). Registered by src/panels/pianoRoll/commands.ts.
   { keys: 'Alt+Q', command: 'pianoRoll.quantize', context: 'pianoRoll' },
   { keys: 'Alt+G', command: 'pianoRoll.generate', context: 'pianoRoll' },
   { keys: 'Ctrl+U', command: 'pianoRoll.quickChop', context: 'pianoRoll' },
@@ -96,7 +82,6 @@ const CODE_NAMES: Record<string, string> = {
   NumpadSubtract: 'NumpadSubtract',
 };
 
-/** Normalize an event to a binding string like "Ctrl+Shift+S" / "F5" / "Space". */
 export function eventToKeys(e: KeyboardEvent): string | null {
   if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return null;
   let name: string;
@@ -114,17 +99,13 @@ export function eventToKeys(e: KeyboardEvent): string | null {
   return [...mods, name].join('+');
 }
 
-/** Display label for a binding ("Ctrl+Shift+S", "Num +"). */
 export function prettyKeys(keys: string): string {
   return keys.replace('NumpadAdd', 'Num +').replace('NumpadSubtract', 'Num −');
 }
 
-// ── Overrides (Settings → Shortcuts) ──────────────────────────────────
-
 export const KEY_CONTEXTS: KeyContext[] = ['pianoRoll', 'playlist', 'channelRack'];
 export const CONTEXT_LABELS: Record<KeyContext, string> = { pianoRoll: 'Piano roll', playlist: 'Playlist', channelRack: 'Channel Rack' };
 
-/** Scope of a command's shortcuts: its default binding's context, else inferred from the id prefix ("pianoRoll.glue"). */
 export function contextForCommand(command: string, defaults: KeyBinding[] = DEFAULT_KEYMAP): KeyContext | undefined {
   const d = defaults.find((b) => b.command === command);
   if (d) return d.context;
@@ -132,12 +113,6 @@ export function contextForCommand(command: string, defaults: KeyBinding[] = DEFA
   return KEY_CONTEXTS.find((c) => c === prefix);
 }
 
-/**
- * defaults ⊕ user overrides. A command listed in `overrides` loses ALL its
- * default bindings and gets exactly the listed combos ([] = unbound); its
- * context / repeat / allowInInputs flags come from its default binding.
- * Every resulting `keys` is canonical (normalizeKeys).
- */
 export function applyKeymapOverrides(defaults: KeyBinding[], overrides?: KeymapOverrides | null): KeyBinding[] {
   const ov = overrides ?? {};
   const has = (c: string): boolean => Object.prototype.hasOwnProperty.call(ov, c) && Array.isArray(ov[c]);
@@ -166,15 +141,9 @@ export function applyKeymapOverrides(defaults: KeyBinding[], overrides?: KeymapO
 
 export interface KeyConflict {
   binding: KeyBinding;
-  /**
-   * 'same-scope': the combo already does something else in the same scope (hard conflict).
-   * 'shadows': the new contextual binding hides a global one inside its editor.
-   * 'shadowed': the new global binding is hidden inside an editor that binds the same combo.
-   */
   kind: 'same-scope' | 'shadows' | 'shadowed';
 }
 
-/** What binding `keys` to `command` (in `context`) would collide with in `map`. */
 export function findKeyConflicts(map: KeyBinding[], keys: string, command: string, context?: KeyContext | null): KeyConflict[] {
   const k = normalizeKeys(keys);
   if (!k) return [];
@@ -188,16 +157,10 @@ export function findKeyConflicts(map: KeyBinding[], keys: string, command: strin
   return out;
 }
 
-/** Current combos of a command in a keymap. */
 export function keysForCommand(map: KeyBinding[], command: string): string[] {
   return map.filter((b) => b.command === command).map((b) => b.keys);
 }
 
-/**
- * The overrides after binding `command` to exactly `keys` (null = unbind) and,
- * when `replace` is set, removing that combo from every same-scope conflicting
- * command. An override equal to the defaults is dropped (back to "default").
- */
 export function rebindOverrides(
   defaults: KeyBinding[],
   overrides: KeymapOverrides | null | undefined,
@@ -215,7 +178,6 @@ export function rebindOverrides(
     }
   }
   next[command] = k ? [k] : [];
-  // drop overrides that equal the defaults
   for (const c of Object.keys(next)) {
     const def = keysForCommand(applyKeymapOverrides(defaults, null), c);
     const cur = next[c];
@@ -243,12 +205,10 @@ export function setKeymap(next: KeyBinding[]): void {
   byKeys = indexKeymap(next);
 }
 
-/** The active keymap (defaults + user overrides). */
 export function getKeymap(): KeyBinding[] {
   return keymap;
 }
 
-/** Binding for a key combo: the focused editor's contextual binding first, then the global one. */
 export function bindingFor(keys: string, context?: string | null): KeyBinding | undefined {
   const list = byKeys.get(keys) ?? byKeys.get(normalizeKeys(keys));
   if (!list) return undefined;
@@ -256,7 +216,6 @@ export function bindingFor(keys: string, context?: string | null): KeyBinding | 
 }
 
 let suspended = 0;
-/** Pause the global keymap (e.g. while the Shortcuts editor captures a key combo). Calls nest. */
 export function setKeymapSuspended(on: boolean): void {
   suspended = Math.max(0, suspended + (on ? 1 : -1));
 }
@@ -266,11 +225,6 @@ export function isKeymapSuspended(): boolean {
 }
 
 let bareBlocked = false;
-/**
- * While a full-window view (the Home hub) covers the main window, bare keys
- * belong to it: Space / Enter activate its buttons, letters don't play the
- * typing piano. Shortcuts with Ctrl / Alt and the F-keys keep working.
- */
 export function setBareKeysBlocked(on: boolean): void {
   bareBlocked = on;
 }
@@ -279,14 +233,12 @@ export function areBareKeysBlocked(): boolean {
   return bareBlocked;
 }
 
-/** A combo without Ctrl / Alt that isn't an F-key: "Space", "L", "Shift+M", "NumpadAdd". */
 export function isBareCombo(keys: string): boolean {
   const parts = keys.split('+');
   if (parts.includes('Ctrl') || parts.includes('Alt')) return false;
   return !/^F\d{1,2}$/.test(parts[parts.length - 1] ?? '');
 }
 
-/** First shortcut bound to a command (for menus and hints). */
 export function shortcutFor(command: string): string | undefined {
   const b = keymap.find((k) => k.command === command);
   return b ? prettyKeys(b.keys) : undefined;

@@ -1,31 +1,3 @@
-//! Note segmentation for LOW monophonic lines (bass, 808, sub): where the
-//! notes are. The pYIN track (pitch.rs) reads the pitch well, but its 93 ms
-//! window hears two notes at once around every change of a fast bass line,
-//! turns those frames unvoiced and leaves a gap of 40-90 ms on each side:
-//! a legato line comes out as short blips with holes (measured on a real
-//! HT-Demucs bass stem: 58% of the sounding time covered).
-//!
-//! Here the note boundaries come from two fast, robust readings every 10 ms:
-//! * the dominant partial 25..400 Hz (a 186 ms spectrum, parabolic peak, one
-//!   octave down when the sub-octave carries ≥ 30% of the peak), which flips
-//!   right where one note hands over to the next;
-//! * the level, as RMS over max(10 ms, 2.5 periods of that partial), so a
-//!   sub note's per-cycle ripple doesn't read as re-attacks (even when the
-//!   partial is the 2nd harmonic of a weak fundamental).
-//!
-//! Where pYIN has a confident reading of the same pitch class, its octave
-//! replaces the partial's (a weak fundamental makes the peak flicker between
-//! octaves); the partial fills pYIN's holes at the note changes.
-//!
-//! A note is a run of one partial pitch while the level is up, split where the
-//! partial moves > 0.7 semitone for ≥ 30 ms or the level jumps by the
-//! re-attack amount within 30 ms. Each note's KEY still comes from pYIN where
-//! it has voiced frames that agree on the pitch class (pYIN copes with a
-//! missing fundamental, the spectral peak doesn't); otherwise from the peak.
-//! Fragments shorter than the minimum note length join their neighbour
-//! instead of being dropped, so no sounding time goes silent.
-//! Krypt-original.
-
 use rustfft::num_complex::Complex32;
 use rustfft::FftPlanner;
 
@@ -37,14 +9,10 @@ use crate::{JobCtx, JobError};
 const WIN: usize = 4096;
 const LO_HZ: f32 = 25.0;
 const HI_HZ: f32 = 400.0;
-/// The sub-octave wins when it has this share of the peak's magnitude.
 const SUB_OCTAVE: f32 = 0.3;
-/// Sounding = within this many dB of the loudest frame.
 const RANGE_DB: f32 = 35.0;
-/// A pitch change must hold this many frames (10 ms each).
 const HOLD: usize = 3;
 
-/// Is this a low line? (the duration-weighted median pYIN note at or below G3).
 pub fn is_low(notes: &[TranscribedNote]) -> bool {
     let mut w: Vec<(u8, f32)> = notes.iter().map(|n| (n.key, n.dur_sec)).collect();
     if w.is_empty() {
@@ -66,7 +34,6 @@ fn midi(hz: f32) -> f32 {
     69.0 + 12.0 * (hz / 440.0).log2()
 }
 
-/// Notes of a low monophonic line (x at `sr`), keyed with the help of the pYIN track `tr`.
 pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx) -> Result<Vec<TranscribedNote>, JobError> {
     let hop = ((sr * 0.01).round() as usize).max(1);
     let n = x.len() / hop;
@@ -115,9 +82,6 @@ pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx)
             *pv = midi(f);
         }
     }
-    // The octave from pYIN wherever it has a confident reading of the same pitch class: a weak
-    // fundamental makes the peak flicker between octaves, which would split notes. The peak
-    // fills pYIN's holes (note changes), which is what this reader is for.
     for (i, pv) in part.iter_mut().enumerate() {
         if !pv.is_finite() {
             continue;
@@ -131,7 +95,6 @@ pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx)
             }
         }
     }
-    // Frames whose pitch pYIN confirms (voiced, same pitch class).
     let backed: Vec<bool> = (0..n)
         .map(|i| {
             let t = (((i * hop + hop / 2) as f32 / tr.hop as f32).round() as usize).min(tr.midi.len().saturating_sub(1));
@@ -139,7 +102,6 @@ pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx)
             part[i].is_finite() && y.is_finite() && tr.voiced_prob[t] >= p.voicing && (y - part[i]).abs() < 1.0
         })
         .collect();
-    // Level: RMS over max(10 ms, 2.5 periods of the partial, i.e. >= 1.25 periods of a fundamental an octave below), centred.
     let mut pre = vec![0f64; x.len() + 1];
     for (i, &v) in x.iter().enumerate() {
         pre[i + 1] = pre[i] + (v as f64) * (v as f64);
@@ -158,7 +120,6 @@ pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx)
         })
         .collect();
     let peak = lev.iter().cloned().fold(-120f32, f32::max);
-    // A 5 ms envelope: the long level window of a sub note would bridge a real gap.
     let fine = ((sr * 0.0025).round() as usize).max(1);
     let fine_db = |u: usize| -> f32 {
         let a = (u * fine).saturating_sub(fine);
@@ -170,7 +131,6 @@ pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx)
     };
     let n_fine = x.len() / fine;
     let fine_peak = (0..n_fine).map(fine_db).fold(-120f32, f32::max);
-    // Sounding: the level is up AND the 5 ms envelope is up somewhere within ±10 ms.
     let on: Vec<bool> = (0..n)
         .map(|i| {
             let (ua, ub) = ((i * hop).saturating_sub(hop) / fine, (((i + 2) * hop) / fine).min(n_fine));
@@ -178,9 +138,8 @@ pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx)
         })
         .collect();
     let reattack = p.reattack_db.clamp(3.0, 12.0);
-    let lag = 3; // 30 ms
+    let lag = 3;
 
-    // 1. Runs of one partial pitch while sounding, split at changes and re-attacks.
     let mut spans: Vec<(usize, usize)> = Vec::new();
     let mut i = 0;
     while i < n {
@@ -195,8 +154,6 @@ pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx)
             let r = median(&recent[recent.len().saturating_sub(8)..]);
             let moved = |q: usize| j + q < n && on[j + q] && (part[j + q] - r).abs() > 0.7;
             if (0..HOLD).all(moved) {
-                // An octave-only jump is real only if pYIN confirms the new octave within 150 ms
-                // (else it's the peak flickering onto a harmonic, e.g. a weak fundamental fading).
                 let d = part[j] - r;
                 let octave_only = (d / 12.0).round() != 0.0 && (d - 12.0 * (d / 12.0).round()).abs() < 0.7;
                 let confirmed = || (j..(j + 15).min(n)).any(|k| backed[k] && (part[k] - part[j]).abs() < 0.7);
@@ -216,9 +173,6 @@ pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx)
         spans.push((a, j));
         i = j;
     }
-    // 2. Fragments shorter than the minimum note join a touching neighbour (the
-    //    longer one), so nothing that sounds is left uncovered. An isolated short
-    //    note (a staccato blip, >= 30 ms) stays as it is; shorter crumbs go.
     let min_frames = ((p.min_note_sec.max(0.03) / 0.01).round() as usize).max(2);
     let mut kept = vec![false; spans.len()];
     loop {
@@ -226,7 +180,6 @@ pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx)
             break;
         };
         let (a, b) = spans[s];
-        // Neighbours within 20 ms count as touching (a frame or two below the level gate).
         let prev = (s > 0 && a - spans[s - 1].1 <= 2).then(|| s - 1);
         let next = (s + 1 < spans.len() && spans[s + 1].0 - b <= 2).then_some(s + 1);
         let into = match (prev, next) {
@@ -246,9 +199,6 @@ pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx)
         kept.remove(s);
     }
 
-    // 3. Edges next to silence: the level window (up to 1.25 periods) reaches past the
-    //    note, so snap the edge to where a 5 ms envelope crosses (body − 15 dB):
-    //    the start within ±50 ms, the end within −120..+50 ms (a merged tail crumb).
     let mut edges: Vec<(f32, f32)> = Vec::with_capacity(spans.len());
     for (s, &(a, b)) in spans.iter().enumerate() {
         let mut t0 = a as f32 * hop as f32 / sr;
@@ -271,7 +221,6 @@ pub fn segment(x: &[f32], sr: f32, tr: &PitchTrack, p: &SegParams, ctx: &JobCtx)
         edges.push((t0, t1));
     }
 
-    // 4. Keys: pYIN's voiced frames inside the note when they agree on the pitch class, else the partial.
     let fps_tr = tr.sr / tr.hop as f32;
     let mut out = Vec::with_capacity(spans.len());
     for (&(a, b), &(t0, t1)) in spans.iter().zip(&edges) {

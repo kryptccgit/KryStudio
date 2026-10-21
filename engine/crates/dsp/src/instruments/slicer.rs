@@ -1,21 +1,3 @@
-//! krypt.slicer — one sample chopped into slices, one slice per key from
-//! First key up (the classic loop-slicer workflow: chop a break, replay or
-//! rearrange it note by note at any tempo).
-//!
-//! The slice map is not a param: it lives on the channel's generator
-//! (`Generator.slices`, shared/schema/slicer.ts) and reaches the instrument
-//! through `set_slices`, off the audio thread, like the sample itself. No
-//! slices = the whole sample is slice 1.
-//!
-//! Every slice plays at its recorded pitch whatever its key (plus the channel
-//! pitch, the note's fine tune and the slice's own pitch), from its start to
-//! the next slice's start (or to the sample's end with Play to = Sample end),
-//! forwards, or backwards when the slice or Reverse all says so (End → Start,
-//! like the Sampler). A region edge inside the sample fades over End fade.
-//! One-shot ignores note length; Gate releases on note off. Cut previous
-//! (default on) makes each new slice choke the one sounding, so a replayed
-//! loop never smears into itself.
-
 use std::sync::Arc;
 
 use super::sampler::{reso_to_k, sanitize_sr, svf_typed};
@@ -28,7 +10,6 @@ use crate::params::{param_table, ParamBank};
 use crate::{Instrument, NoteExtras, PluginDescriptor, PluginKind, ProcessContext, SampleData};
 
 pub const PLUGIN_ID: &str = "krypt.slicer";
-/// Most slices one slicer holds (shared/schema/slicer.ts MAX_SLICER_SLICES).
 pub const MAX_SLICES: usize = 128;
 
 param_table! {
@@ -63,15 +44,11 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
-/// One slice: where it starts in the sample and how it plays.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Slice {
-    /// Start in the source file, seconds.
     pub start_sec: f64,
-    /// Semitones on top of the channel pitch.
     pub pitch: f32,
     pub reverse: bool,
-    /// Linear gain.
     pub gain: f32,
 }
 
@@ -81,14 +58,12 @@ impl Slice {
     }
 }
 
-/// A slicer's slice map: sorted by start, at most MAX_SLICES. Built off the audio thread.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SliceSet {
     slices: Vec<Slice>,
 }
 
 impl SliceSet {
-    /// Clean a slice list: finite starts >= 0, sorted, duplicates dropped, pitch / gain clamped, at most MAX_SLICES.
     pub fn new(slices: impl IntoIterator<Item = Slice>) -> Self {
         let mut v: Vec<Slice> = slices
             .into_iter()
@@ -134,7 +109,6 @@ pub(crate) struct SlicerShared {
     reso: f32,
 }
 
-/// What slice `idx` of `s` plays: (region start, region end) in frames, pitch, reverse, gain. None = nothing.
 fn slice_region(sh: &SlicerShared, s: &SampleData, idx: usize) -> Option<(f64, f64, f32, bool, f32)> {
     let len = usable_frames(s) as f64;
     let at = |sec: f64| (sec * s.sample_rate as f64).round().clamp(0.0, len);
@@ -228,7 +202,6 @@ impl Voice for SlicerVoice {
         if self.pos < lo - 1.0 || self.pos >= hi {
             return;
         }
-        // the slice sounds at its recorded pitch: only the offsets on top of the key move it
         let shift = (n.pitch - n.key as f32) + semis;
         self.step = s.sample_rate as f64 / self.sr as f64 * (shift as f64 / 12.0).exp2();
         self.dir = if reverse { -1.0 } else { 1.0 };
@@ -251,7 +224,6 @@ impl Voice for SlicerVoice {
             self.fadein = 0.0;
             self.fadein_step = 1.0 / (CHOKE_MS * 0.001 * self.sr);
         } else if extra > 0.5 {
-            // entering mid-slice (a song started inside the note): 1 ms fade-in, no click
             self.fadein = 0.0;
             self.fadein_step = 1.0 / (0.001 * self.sr);
         } else {
@@ -260,7 +232,6 @@ impl Voice for SlicerVoice {
         self.active = true;
     }
 
-    /// A slicer voice keeps its slice and pitch: slides and mono legato don't bend it.
     fn legato(&mut self, _sh: &SlicerShared, _pitch: f32, _glide_ms: f32) {}
 
     fn release(&mut self, sh: &SlicerShared) {
@@ -301,7 +272,6 @@ impl Voice for SlicerVoice {
         let ch1 = if s.channels.len() > 1 { Some(&s.channels[1][..len]) } else { None };
         let mut w = [0.0f32; MAX_TAPS];
         let (lo, hi, step) = (self.lo, self.hi, self.step);
-        // a region edge inside the sample fades out over End fade; the sample's own edge just ends
         let edge_fade = if self.dir > 0.0 { hi < len as f64 } else { lo > 0.0 };
         let fade_len = (sh.fade_ms.max(0.1) * 0.001 * self.sr) as f64;
         let (ct, rt) = self.filter_targets(sh);
@@ -448,7 +418,6 @@ impl Instrument for Slicer {
             self.update();
         }
         if self.cut {
-            // queued before the note at the same offset, so the old slice fades as the new one starts
             self.vm.choke(offset);
         }
         self.vm.note_on(offset, key, pitch, velocity, extras);
@@ -489,7 +458,6 @@ mod tests {
     const SR: f32 = 48000.0;
     const LEN: usize = 48000;
 
-    /// A ramp 0 → 1 over one second on both channels: the output value tells where the voice reads.
     fn ramp() -> Arc<SampleData> {
         let c: Vec<f32> = (0..LEN).map(|i| i as f32 / LEN as f32).collect();
         Arc::new(SampleData { sample_rate: SR, channels: vec![c.clone(), c], root_key: None })
@@ -511,7 +479,6 @@ mod tests {
         s
     }
 
-    /// (frame, key, note-off frame) → left channel.
     fn render(inst: &mut dyn Instrument, frames: usize, notes: &[(usize, u8, Option<usize>)]) -> Vec<f32> {
         let (mut l, mut r) = (vec![0.0f32; frames], vec![0.0f32; frames]);
         let mut at = 0;
@@ -532,7 +499,6 @@ mod tests {
         l
     }
 
-    /// Where the ramp is read (0..1 of the sample) from an output value, given the full-velocity gain.
     fn where_(v: f32) -> f32 {
         v / vel_gain(1.0)
     }
@@ -549,7 +515,6 @@ mod tests {
             let mut s = slicer(&[], &four());
             let out = render(&mut s, 24000, &[(0, 60 + i as u8, None)]);
             assert!((where_(out[100]) - (*start as f32 + 100.0 / LEN as f32)).abs() < 2e-3, "slice {i} reads at {}", where_(out[100]));
-            // a quarter of a second, then silence
             assert!(out[11000].abs() > 0.05, "slice {i} cut short");
             assert!(out[12000..].iter().all(|v| *v == 0.0), "slice {i} played past its end");
         }
@@ -577,10 +542,8 @@ mod tests {
         sl[1].reverse = true;
         let mut s = slicer(&[], &sl);
         let out = render(&mut s, 24000, &[(0, 61, None)]);
-        // slice 2 = 0.25 .. 0.5, played from 0.5 down
         assert!((where_(out[100]) - (0.5 - 101.0 / LEN as f32)).abs() < 2e-3, "{}", where_(out[100]));
         assert!(out[12000..].iter().all(|v| *v == 0.0));
-        // Reverse all flips it back
         let mut s = slicer(&[("reverse", 1.0)], &sl);
         let out = render(&mut s, 2000, &[(0, 61, None)]);
         assert!((where_(out[100]) - (0.25 + 100.0 / LEN as f32)).abs() < 2e-3);
@@ -592,7 +555,6 @@ mod tests {
         sl[0].pitch = 12.0;
         let mut s = slicer(&[], &sl);
         let out = render(&mut s, 12000, &[(0, 60, None)]);
-        // an octave up: the quarter-second slice lasts an eighth of a second
         assert!(out[5500].abs() > 0.05);
         assert!(out[6100..].iter().all(|v| *v == 0.0), "octave-up slice too long");
     }
@@ -615,7 +577,6 @@ mod tests {
 
     #[test]
     fn cut_previous_chokes_the_sounding_slice() {
-        // slice 1 (0 .. 0.25) then slice 3 at frame 2000: with Cut the first is gone ~2 ms later
         let notes = [(0usize, 60u8, None), (2000, 62, None)];
         let mut cut = slicer(&[], &four());
         let a = render(&mut cut, 6000, &notes);

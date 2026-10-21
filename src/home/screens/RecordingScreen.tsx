@@ -1,12 +1,3 @@
-// Home ▸ Recording Studio: set up vocal recording in four steps.
-//  1. Microphone: the input device and channel (mono for a voice), a mic test with a live level meter and advice
-//     (the engine opens the input for its meter only: record.setMeter).
-//  2. Hear yourself: input monitoring (headphones!), dry.
-//  3. Vocal chain: one undo step (recording.setupVocals) makes a "Vocals" insert with a factory vocal chain and a
-//     "Vocals" track, and makes them the recording target: every take plays through the chain and lands on the track.
-//  4. Record: count-in, then the Vocal Booth (src/booth) in the Studio: record, listen, redo, tune.
-// Settings changes save at once; every action confirms or toasts its failure.
-
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CircleDot, Headphones, Loader2, Mic, RefreshCw, SlidersHorizontal, Sparkles, X } from 'lucide-react';
 import type { DeviceInfo } from '@shared/engine/protocol';
@@ -55,7 +46,6 @@ function channelOptions(count: number): Array<{ value: string; label: string }> 
   return out;
 }
 
-/** What the last few seconds of peaks say about the mic gain. */
 function verdict(peakDb: number | null): { text: string; tone: string } {
   if (peakDb === null) return { text: 'Sing or talk at performance volume…', tone: 'text-krypt-muted' };
   if (peakDb > -1) return { text: 'Too hot: it clips. Turn the gain on your interface or mic down.', tone: 'text-rose-300' };
@@ -86,7 +76,6 @@ function MicTest() {
     }
   };
 
-  // Close the mic when the screen goes away.
   useEffect(() => () => void window.krypt.record.setMeter(false).catch(() => undefined), []);
 
   useEffect(() => {
@@ -102,7 +91,6 @@ function MicTest() {
       recent.push({ t: now, pk });
       recent = recent.filter((x) => now - x.t < 3000);
       const held = recent.reduce((m, x) => Math.max(m, x.pk), 0);
-      // dBFS on a -60..0 scale
       const pos = (v: number) => `${Math.max(0, Math.min(100, ((20 * Math.log10(Math.max(v, 1e-6)) + 60) / 60) * 100))}%`;
       if (fill.current) fill.current.style.width = pos(level);
       if (hold.current) hold.current.style.left = pos(held);
@@ -136,7 +124,6 @@ function MicTest() {
   );
 }
 
-/** Whether your voice really reaches the output while "Hear yourself" is on (engine telemetry monitorPeak). */
 function MonitorLine({ monitor }: { monitor: boolean }) {
   const input = useLiveInput((s) => s.record.input);
   const outRate = useEngineStatus((s) => s.status?.device?.sampleRate);

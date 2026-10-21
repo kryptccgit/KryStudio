@@ -1,16 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Krypt Studio main process bootstrap.
-//
-//   single-instance lock ─▶ DocHost (the ONE authoritative document)
-//     ─▶ ProjectService (files, autosave, crash recovery)
-//     ─▶ EngineSupervisor + bridge (Rust sidecar, NDJSON)
-//     ─▶ IPC (ipc.ts) ─▶ frameless main window (app:// when packaged)
-//     ─▶ MCP server + built-in agent (electron/mcp, electron/agent), with
-//        the File access policy for agent paths (mcp/consent.ts)
-//     ─▶ cover art + tagged exports (project/cover.ts, project/export.ts)
-//     ─▶ Discord presence (best-effort)
-// ──────────────────────────────────────────────────────────────────────
-
 import { app, BrowserWindow, Menu, nativeTheme, dialog, session } from 'electron';
 import path from 'node:path';
 import { DocHost } from '@shared/doc/DocHost';
@@ -60,12 +47,9 @@ import { EVENT } from './channels';
 
 const ctx = resolveClientContext();
 const BG = '#0A0A0F';
-/** Started by Windows startup (`--hidden`): no window until the tray icon or a second launch opens it. */
 const startHidden = launchedHidden();
-/** A real quit is under way (tray Quit, File ▸ Exit, shutdown): closing the window no longer hides it. */
 let quitting = false;
 
-// Must run before 'ready': the privileged app:// scheme for the packaged renderer.
 registerAppScheme();
 
 let mainWindow: BrowserWindow | null = null;
@@ -82,9 +66,6 @@ let analyzer: AnalyzerService | null = null;
 let library: LibraryService | null = null;
 let mcpClients = 0;
 
-// ── Single instance + file association ───────────────────────────────
-
-/** .kstudio paths from a process argv (drops the exe, flags and dev args). */
 function projectArgs(argv: string[], cwd = process.cwd()): string[] {
   return argv
     .slice(1)
@@ -108,7 +89,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', (_e, argv, cwd) => {
     showMainWindow();
-    deliverOpenFiles(projectArgs(argv, cwd)); // queued if the window isn't listening yet
+    deliverOpenFiles(projectArgs(argv, cwd));
   });
   queuedOpen.push(...projectArgs(process.argv));
   app.whenReady().then(bootstrap).catch((err) => {
@@ -117,8 +98,6 @@ if (!app.requestSingleInstanceLock()) {
     app.exit(1);
   });
 }
-
-// ── Windows ──────────────────────────────────────────────────────────
 
 const devUrl = process.env.VITE_DEV_SERVER_URL;
 const rendererOrigin = (): string => (devUrl ? new URL(devUrl).origin : APP_ORIGIN);
@@ -138,7 +117,6 @@ function securePrefs(): Electron.WebPreferences {
   };
 }
 
-/** dockview popouts: our own popout.html on the renderer's origin, nothing else. */
 function isPopoutUrl(url: string): boolean {
   try {
     const u = new URL(url);
@@ -152,7 +130,6 @@ function applyZoom(win: BrowserWindow, s: Settings = getSettings()): void {
   if (!win.isDestroyed()) win.webContents.setZoomFactor(Math.max(0.5, Math.min(2, s.ui.scale || 1)));
 }
 
-/** Navigation lock + devtools key (dev) for any of our windows. */
 function hardenContents(win: BrowserWindow): void {
   const wc = win.webContents;
   wc.on('will-navigate', (e, url) => {
@@ -172,7 +149,7 @@ function createMainWindow(): BrowserWindow {
     ...boundsOptions(st),
     minWidth: 960,
     minHeight: 600,
-    frame: false, // the renderer draws the title bar (-webkit-app-region: drag)
+    frame: false,
     backgroundColor: BG,
     title: ctx.productName,
     icon: iconPath(),
@@ -185,7 +162,7 @@ function createMainWindow(): BrowserWindow {
   hardenContents(win);
 
   const reveal = (): void => {
-    if (startHidden) return; // stays in the tray until opened
+    if (startHidden) return;
     if (!win.isDestroyed() && !win.isVisible()) {
       win.show();
       win.focus();
@@ -199,14 +176,13 @@ function createMainWindow(): BrowserWindow {
     reveal();
   });
   win.webContents.on('did-start-loading', () => {
-    rendererListening = false; // a reload re-subscribes and re-drains the queue
+    rendererListening = false;
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isPopoutUrl(url)) {
       return {
         action: 'allow',
-        // `frame=no` in window.open features is honoured (Electron parses features).
         overrideBrowserWindowOptions: {
           parent: win,
           backgroundColor: BG,
@@ -228,12 +204,8 @@ function createMainWindow(): BrowserWindow {
     wireWindowEvents(child);
   });
 
-  // Unsaved-changes guard (Alt+F4, taskbar close, and the renderer's close button). With project tabs, unsaved
-  // projects are kept for the next launch (userData/session) instead of asking; the question only comes back
-  // when they couldn't be written.
   let closeConfirmed = false;
   win.on('close', (e) => {
-    // Closing the window keeps Krypt Studio running in the tray; only a real quit goes on to the unsaved check.
     if (!quitting) {
       e.preventDefault();
       hideToTray(win);
@@ -272,7 +244,7 @@ function createMainWindow(): BrowserWindow {
   win.on('closed', () => {
     clearTimeout(revealTimer);
     if (mainWindow === win) mainWindow = null;
-    app.quit(); // closing the main window ends the session (popouts are its children)
+    app.quit();
   });
 
   if (devUrl) win.loadURL(devUrl).catch((err) => logger.error(`loadURL failed: ${err}`));
@@ -292,11 +264,8 @@ function showMainWindow(): BrowserWindow | null {
   return win;
 }
 
-// ── Background: the tray and the paused engine (electron/system/background.ts) ──
-
 const hiddenPopouts = new Set<number>();
 
-/** Close to the tray: playback stops, the windows hide, the first time a note says where it went. */
 function hideToTray(win: BrowserWindow): void {
   if (engine?.isPlaying()) void engine.request({ cmd: 'transport', action: 'stop' });
   for (const w of BrowserWindow.getAllWindows()) {
@@ -312,7 +281,6 @@ function hideToTray(win: BrowserWindow): void {
   }
 }
 
-/** A real quit from the tray menu, File ▸ Exit or a second "quit" request. */
 function quitApp(): void {
   quitting = true;
   app.quit();
@@ -321,7 +289,6 @@ function quitApp(): void {
 let enginePaused = false;
 let parkTimer: NodeJS.Timeout | null = null;
 
-/** Pause the audio engine while nothing needs it (an open audio stream keeps Windows awake); resume when something does. */
 function updateEnginePark(): void {
   if (!engine || quitting) return;
   const win = mainWindow;
@@ -348,20 +315,15 @@ function updateEnginePark(): void {
   parkTimer.unref?.();
 }
 
-// ── Presence + window title (fed by the same runtime context) ────────
-
 function refreshSession(): void {
   if (!project) return;
   const s = project.status();
-  // The active project tab ("Untitled 2", a song title …); the window title and Discord follow it.
   const name = tabs?.activeTitle() ?? s.name;
   const playing = engine?.isPlaying() ?? false;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(`${name}${s.dirty ? ' *' : ''} - ${ctx.productName}`);
-  // The shared Krypt Discord app doesn't name the tool: the first line does ("Using Krypt Studio", kryptguidelines §8).
   syncRuntimeState(`Using ${ctx.productName}`, `${playing ? 'Playing' : 'Editing'} ${name}${mcpClients > 0 ? ` · AI agent${mcpClients > 1 ? `s (${mcpClients})` : ''}` : ''}`);
 }
 
-/** MainDeps.broadcast: fan out to renderers, and watch MCP client counts for presence. */
 function broadcastFromModules(channel: string, payload: unknown): void {
   broadcast(channel, payload);
   if (channel === MCP_CHANNELS.status) {
@@ -374,13 +336,6 @@ function broadcastFromModules(channel: string, payload: unknown): void {
   }
 }
 
-// ── File access for agents (electron/mcp/consent.ts) ─────────────────
-
-/**
- * Dev-only e2e hook, ignored in packaged builds: KRYPT_TEST_CONSENT=file|folder|deny[@ms] shows the real
- * dialog, then closes it after ms (default 1500) with that answer; KRYPT_TEST_CONSENT=none leaves it unanswered.
- * KRYPT_CONSENT_TIMEOUT_MS shortens the 120 s answer window.
- */
 function consentTestHook(): { answer: ConsentChoice | null; afterMs: number } | null {
   if (app.isPackaged) return null;
   const m = /^(file|folder|deny|none)(?:@(\d+))?$/.exec(process.env.KRYPT_TEST_CONSENT ?? '');
@@ -392,7 +347,6 @@ function consentTimeoutMs(): number | undefined {
   return Number.isFinite(n) && n >= 1000 ? n : undefined;
 }
 
-/** Krypt Studio's own permission dialog (used when the agent's client can't ask through MCP elicitation). */
 async function askFileAccessInApp(req: ConsentRequest, signal: AbortSignal): Promise<ConsentChoice | null> {
   const t = consentText(req);
   const ac = new AbortController();
@@ -411,7 +365,7 @@ async function askFileAccessInApp(req: ConsentRequest, signal: AbortSignal): Pro
     const deny = t.choices.length - 1;
     const i = await dialogs.askPermission({ title: t.title, message: t.message, detail: t.detail, buttons: t.choices.map((c) => c.label), defaultId: deny, cancelId: deny, signal: ac.signal, win: mainWindow });
     if (hooked) return hooked;
-    if (signal.aborted || i === null) return null; // timed out (the consent gate reports it) or couldn't be shown
+    if (signal.aborted || i === null) return null;
     return t.choices[i]?.value ?? 'deny';
   } finally {
     clearTimeout(timer);
@@ -419,15 +373,12 @@ async function askFileAccessInApp(req: ConsentRequest, signal: AbortSignal): Pro
   }
 }
 
-// ── Bootstrap ────────────────────────────────────────────────────────
-
 async function bootstrap(): Promise<void> {
   nativeTheme.themeSource = 'dark';
-  // macOS routes Cmd+C / V / X / A / Q through the app menu: without one, text fields can't copy or paste.
   Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null);
   if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? 'cc.krypt.studio' : process.execPath);
   serveAppScheme(distDir(), guideVideosDir(), guideImagesDir());
-  denyWebMidi(session.defaultSession); // the engine owns MIDI devices (WinMM is single-client)
+  denyWebMidi(session.defaultSession);
   logger.info(`${ctx.productName} ${app.getVersion()} starting (${app.isPackaged ? 'packaged' : 'dev'}, mark ${ctx.mark})`);
 
   const userDataDir = app.getPath('userData');
@@ -435,7 +386,6 @@ async function bootstrap(): Promise<void> {
   const packsDir = path.join(userDataDir, 'packs');
 
   doc = new DocHost(createDefaultProject('Untitled'), CATALOG, { strict: !app.isPackaged });
-  // Third-party VST3/CLAP plugins: registers the scan cache into CATALOG before any project loads.
   const plugins = new PluginService({
     doc,
     userDataDir,
@@ -477,7 +427,6 @@ async function bootstrap(): Promise<void> {
   plugins.attachEngine(engine);
   const shimExePath = findBinary(SHIM_EXE);
 
-  // MIDI inputs, record arm, controller links, recorded takes → document.
   const liveInput = new LiveInputController({
     doc,
     engine,
@@ -494,7 +443,6 @@ async function bootstrap(): Promise<void> {
   });
   liveInput.start();
 
-  // Clip launcher runtime: launch / stop, launch recording → playlist, grid controller note map.
   const launcher = new SessionController({
     doc,
     engine,
@@ -506,7 +454,6 @@ async function bootstrap(): Promise<void> {
   });
   launcher.start();
 
-  // MIDI outputs, clock out, sync in, grid-controller LEDs (Wave 12.2b).
   const hardware = new HardwareController({
     doc,
     engine,
@@ -518,7 +465,6 @@ async function bootstrap(): Promise<void> {
   });
   hardware.start();
 
-  // On-device audio ML (krypt-studio-analyzer.exe, spawned on first use) + Model Manager.
   const eng = engine;
   analyzer = createAnalyzer({
     doc,
@@ -531,8 +477,6 @@ async function bootstrap(): Promise<void> {
   });
   const analyzerReady = analyzer.init().catch((err) => logger.error(`Model Manager start-up failed: ${(err as Error)?.message ?? err}`));
 
-  // Reference library (the user's own songs → features, style profiles, focus); shares the analyzer and starts once
-  // its models are verified. Queued analysis resumes a few seconds later.
   const lib = createLibrary({
     doc,
     userDataDir,
@@ -548,7 +492,6 @@ async function bootstrap(): Promise<void> {
   library = lib;
   void analyzerReady.then(() => lib.start());
 
-  // Vocals & mashups (import audio, match key & tempo, Krypt Tune): MCP tools and the clip menu share it.
   const vocals = new VocalsService({
     doc,
     userDataDir,
@@ -557,8 +500,6 @@ async function bootstrap(): Promise<void> {
     log: (level, m) => (level === 'debug' ? logger.debug(m) : logger.log(level, m)),
   });
 
-  // Krypt Voice (research/21): speech + "Sing my notes" (Local: Kokoro in the analyzer; Cloud: Fish Audio with the
-  // user's own key, stored with safeStorage). "My voice" only from this session's recorder takes.
   const voice = createVoice({
     doc,
     userDataDir,
@@ -573,7 +514,6 @@ async function bootstrap(): Promise<void> {
   });
   void voice.init().catch((err) => logger.warn(`Krypt Voice start-up cleanup failed: ${(err as Error)?.message ?? err}`));
 
-  // Cover art (bytes kept with the project, drawn by the main window on an agent's request) + tagged exports.
   const covers = new CoverService({
     project: proj,
     normalize: (bytes) => normalizeCoverImage(bytes),
@@ -592,7 +532,6 @@ async function bootstrap(): Promise<void> {
     log: (level, m) => logger.log(level, m),
   });
 
-  // Presets (factory + userData/presets) and the factory sample index: the preset UI and the MCP sound tools.
   const sounds = new SoundsService({
     doc,
     userDataDir,
@@ -600,7 +539,6 @@ async function bootstrap(): Promise<void> {
     getSettings,
     broadcast: (s) => broadcast(EVENT.soundsState, s),
     log: (level, m) => logger.log(level, m),
-    // Installed sample packs join the sample index (find_samples, load_sample, the playbook picks, add_transition).
     packSamples: () => packs.samples(),
     profileDirs: () => (['documents', 'music', 'desktop', 'downloads'] as const).map((k) => {
       try {
@@ -611,13 +549,11 @@ async function bootstrap(): Promise<void> {
     }),
   });
 
-  // Sound packs (userData/packs): downloaded only when the user clicks Download (IPC); agents read the status.
   const bridge = created.bridge;
   const packs = new PacksService({
     dir: packsDir,
     broadcast: (s) => broadcast(EVENT.packsState, s),
     log: (level, m) => (level === 'debug' ? logger.debug(m) : logger.log(level, m)),
-    // The engine got the pack's paths before the files existed: reload so channels using the pack play now.
     onInstalled: (id) => {
       const d = doc!;
       const uses = Object.values(d.project.samples).some((s) => s.path.startsWith(`pack:${id}/`));
@@ -626,8 +562,6 @@ async function bootstrap(): Promise<void> {
   });
   void packs.refresh();
 
-  // Project tabs (research/19-project-tabs.md): several projects open, one in the DocHost; switching away is refused
-  // while the active one is busy. New / Open / Audio → Project / Auto Mashup open tabs through the project service.
   const tabManager = new TabManager({
     doc,
     project: proj,
@@ -707,7 +641,6 @@ async function bootstrap(): Promise<void> {
     }
     if (s.autosaveSec !== prev.autosaveSec) proj.rescheduleAutosave();
     if (s.ui.scale !== prev.ui.scale) for (const w of BrowserWindow.getAllWindows()) applyZoom(w, s);
-    // The focus can also change through settings.update: keep LibraryState.focus in step.
     if (JSON.stringify(s.library?.focus ?? null) !== JSON.stringify(prev.library?.focus ?? null)) lib.notify();
   });
 
@@ -723,7 +656,6 @@ async function bootstrap(): Promise<void> {
   });
 
   await project.boot((crashed) => tabManager.restore(crashed));
-  // A hidden start (Windows startup) leaves the engine paused until the window opens or an agent connects.
   if (startHidden) {
     enginePaused = true;
     logger.info('Started in the tray (Windows startup); the audio engine starts when it is needed');
@@ -734,16 +666,13 @@ async function bootstrap(): Promise<void> {
     const r = syncStartWithWindows(getSettings().ui.startWithWindows !== false, ctx.productName);
     if (!r.ok) logger.warn(r.message ?? 'Windows startup entry not updated');
   }
-  // Incremental plugin rescan (changed/new files only) once the UI is up.
   setTimeout(() => void plugins.rescan({ quiet: true }), 3000).unref();
 
   project.onStatus(() => refreshSession());
   engine.onPlaying(() => refreshSession());
-  // Discord presence is always on (kryptguidelines §8); best effort, retried while Discord is closed.
   void startSessionSync();
   refreshSession();
 
-  // Agents asking for files outside the Browser folders: the client asks (MCP elicitation) or this dialog does.
   const consent = new PathConsent({
     getSettings,
     updateSettings,
@@ -753,7 +682,6 @@ async function bootstrap(): Promise<void> {
     timeoutMs: consentTimeoutMs(),
   });
 
-  // MCP server + built-in agent: never block the UI on them.
   const deps: MainDeps = {
     doc,
     engine,
@@ -794,12 +722,9 @@ async function bootstrap(): Promise<void> {
     try {
       broadcastFromModules(MCP_CHANNELS.status, mcp.status());
     } catch {
-      /* status is best-effort */
     }
   }
 }
-
-// ── Lifecycle ────────────────────────────────────────────────────────
 
 let shutdownDone = false;
 let shuttingDown = false;
@@ -809,29 +734,25 @@ async function shutdown(): Promise<void> {
   destroyTray();
   if (parkTimer) clearTimeout(parkTimer);
   const steps: Array<Promise<unknown>> = [];
-  // Quitting goes on regardless; a step that fails is logged so it can be found later.
   const failed = (what: string) => (err: unknown) => logger.warn(`Shutdown: ${what} failed to stop: ${(err as Error)?.message ?? err}`);
   if (mcp) steps.push(Promise.resolve().then(() => mcp!.stop()).catch(failed('MCP server')));
   if (engine) steps.push(engine.stop().catch(failed('audio engine')));
-  // The library cancels its analyzer jobs and deletes its temporary stems before the analyzer goes.
   const lib = library;
   const ears = analyzer;
   if (lib || ears) steps.push((lib ? lib.stop().catch(failed('library')) : Promise.resolve()).then(() => ears?.stop()).catch(failed('analyzer')));
   const timedOut = await Promise.race([Promise.all(steps).then(() => false), new Promise<boolean>((r) => setTimeout(() => r(true), 4000))]);
   if (timedOut) logger.warn('Shutdown: services took more than 4 s to stop; quitting anyway');
-  // Project tabs keep every open project for the next launch, then crash recovery ends (kept if that failed).
   if (tabs) await tabs.shutdown().catch((err) => logger.error(`Shutdown: keeping the open tabs failed: ${(err as Error)?.message ?? err}`));
   else await project?.shutdown(true);
   logger.info('Clean shutdown');
 }
 
 app.on('before-quit', () => {
-  quitting = true; // closing the windows now really closes them
+  quitting = true;
 });
 
 app.on('window-all-closed', () => app.quit());
 
-// macOS: clicking the Dock icon brings the window back from the tray / menu bar.
 app.on('activate', () => {
   if (app.isReady()) showMainWindow();
 });
@@ -849,7 +770,6 @@ app.on('will-quit', (e) => {
     });
 });
 
-// Crash diagnostics: log instead of dying silently (no telemetry; the log is the record).
 process.on('uncaughtException', (err) => logger.error(`uncaughtException: ${err?.stack ?? err}`));
 process.on('unhandledRejection', (reason) => logger.error(`unhandledRejection: ${(reason as Error)?.stack ?? String(reason)}`));
 
@@ -860,7 +780,6 @@ app.on('render-process-gone', (_e, wc, details) => {
   const now = Date.now();
   while (rendererCrashes.length && now - rendererCrashes[0] > 60_000) rendererCrashes.shift();
   rendererCrashes.push(now);
-  // The document lives in main, so a reload loses nothing.
   if (rendererCrashes.length <= 3) setTimeout(() => mainWindow?.webContents.reload(), 300);
 });
 app.on('child-process-gone', (_e, details) => {

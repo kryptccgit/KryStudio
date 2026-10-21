@@ -1,7 +1,3 @@
-// Small shared pieces of the meter / scope views in the plugin window
-// (Krypt EQ curve, Krypt Analyzer, GR meter): container width tracking,
-// the brand colours used on canvases, and the spectrum painter.
-
 import { useLayoutEffect, useState, type RefObject } from 'react';
 import { scopeBinHz } from '@shared/engine/meters';
 import { freqToX } from './eqResponse';
@@ -16,7 +12,6 @@ export const C = {
   amber: '#f59e0b',
 };
 
-/** Width of an element, tracked with a ResizeObserver (min 80 px). */
 export function useWidth(ref: RefObject<HTMLElement | null>, initial = 320): number {
   const [w, setW] = useState(initial);
   useLayoutEffect(() => {
@@ -31,7 +26,6 @@ export function useWidth(ref: RefObject<HTMLElement | null>, initial = 320): num
   return w;
 }
 
-/** The indigo → purple → pink accent across a width. */
 export function accentGradient(ctx: CanvasRenderingContext2D, width: number): CanvasGradient {
   const g = ctx.createLinearGradient(0, 0, width, 0);
   g.addColorStop(0, C.indigo);
@@ -40,10 +34,6 @@ export function accentGradient(ctx: CanvasRenderingContext2D, width: number): Ca
   return g;
 }
 
-/**
- * Paint spectrum bins (dBFS, log-spaced 20 Hz–20 kHz) as a filled area + an optional peak line.
- * `floorDb`..`topDb` map to the bottom..top of the box.
- */
 export function paintSpectrum(
   ctx: CanvasRenderingContext2D,
   bins: ArrayLike<number>,

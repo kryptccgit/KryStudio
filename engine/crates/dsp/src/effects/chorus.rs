@@ -1,10 +1,3 @@
-//! krypt.chorus — multi-voice chorus / ensemble. Up to six modulated delay
-//! voices per channel (cubic Hermite reads), spread over slightly different
-//! base delays and LFO rates so the ensemble never moves in lockstep. The
-//! right channel's LFOs are offset by Stereo spread, which turns a mono
-//! source wide. The wet path has its own low and high cut and an optional
-//! touch of feedback; the dry path is untouched (zero latency).
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::delay::DelayLine;
 use crate::blocks::filters::{Svf, SvfMode};
@@ -42,7 +35,6 @@ pub fn descriptor() -> PluginDescriptor {
 }
 
 const MAX_VOICES: usize = 6;
-/// Longest read: 40 ms base * 1.25 spread + 5 ms sweep, plus headroom.
 const MAX_DELAY_S: f32 = 0.075;
 const DELAY_MUL: [f32; MAX_VOICES] = [1.0, 1.12, 0.89, 1.21, 0.81, 1.05];
 const RATE_MUL: [f32; MAX_VOICES] = [1.0, 1.07, 0.93, 1.13, 0.88, 1.03];
@@ -63,7 +55,6 @@ pub struct Chorus {
     amp: Smooth,
     fb: Smooth,
     mix: Smooth,
-    /// voice fade-in/out gains so changing the voice count never clicks
     vgain: [Smooth; MAX_VOICES],
 }
 
@@ -100,7 +91,6 @@ impl Chorus {
         self.spread = p.get(P::Spread as usize);
         let base_ms = p.get(P::Delay as usize);
         self.base.set(base_ms * 0.001 * self.sr);
-        // sweep amplitude: never deeper than 80% of the base delay
         let amp_ms = p.get(P::Depth as usize) * (0.8 * base_ms).min(5.0);
         self.amp.set(amp_ms * 0.001 * self.sr);
         self.fb.set(p.get(P::Feedback as usize));
@@ -154,8 +144,6 @@ impl Effect for Chorus {
             self.snap();
         }
         let nv = MAX_VOICES;
-        // fixed per-voice patterns (independent of the voice count, so
-        // adding a voice never moves the others)
         let mut inc = [0.0f64; MAX_VOICES];
         let mut dmul = [[1.0f32; MAX_VOICES]; 2];
         let active = self.voices;
@@ -202,7 +190,6 @@ impl Effect for Chorus {
             }
             for ch in 0..2 {
                 let x = crate::blocks::finite(buf[ch][i]);
-                // bounded feedback (2·tanh(v/2) is ~identity for small v)
                 let fbv = if fb > 0.0 { 2.0 * tanh_fast(0.5 * fb * first[ch]) } else { 0.0 };
                 self.lines[ch].push(crate::blocks::flush(x + fbv));
                 let w = self.lp[ch].tick(self.hp[ch].tick(wet[ch] as f64)) as f32;

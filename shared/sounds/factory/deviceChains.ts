@@ -1,27 +1,17 @@
-// Factory effect-chain presets for the Wave 12.2 devices (Krypt Heat, Tape Echo, Grain, Glue).
-//
-// Part of CHAIN_PRESETS (./chains.ts). Params are PLAIN units exactly as engine/crates/dsp specs them (choice params are
-// option indexes, see the maps below). Heat has latency (35 samples at 2x), so it runs at slot
-// mix 1 and blends with its own phase-aligned Mix param instead.
-
 import type { ChainPreset, PresetFx } from '../types';
 
 const fx = (type: string, params: Record<string, number>, mix?: number): PresetFx => (mix === undefined ? { type, params } : { type, params, mix });
 const eq = (params: Record<string, number>): PresetFx => fx('krypt.eq', params);
 const chain = (c: Omit<ChainPreset, 'kind' | 'author'>): ChainPreset => ({ kind: 'chain', author: 'Krypt', ...c });
 
-/** krypt.heat band shapes. */
 const SHAPE = { soft: 0, tube: 1, tape: 2, hard: 3, fold: 4, rectify: 5, bitcrush: 6 } as const;
-/** krypt.tapeecho sync divisions (same list as krypt.delay). */
 const DIV = { '1/16': 3, '1/8T': 5, '1/8': 6, '1/8D': 7, '1/4T': 8, '1/4': 9, '1/4D': 10 } as const;
-/** krypt.glue switched values. */
 const RATIO = { '2:1': 0, '4:1': 1, '10:1': 2 } as const;
 const ATTACK = { '0.1ms': 0, '0.3ms': 1, '1ms': 2, '3ms': 3, '10ms': 4, '30ms': 5 } as const;
 const RELEASE = { '0.1s': 0, '0.3s': 1, '0.6s': 2, '1.2s': 3, auto: 4 } as const;
 const SC_HPF = { off: 0, '60': 1, '90': 2, '120': 3, '150': 4, '200': 5, '300': 6 } as const;
 
 export const DEVICE_CHAIN_PRESETS: readonly ChainPreset[] = [
-  // ── Krypt Heat ──
   chain({
     id: 'factory:chain/bass/heat-808-warmth',
     name: 'Heat 808 Warmth',
@@ -73,7 +63,6 @@ export const DEVICE_CHAIN_PRESETS: readonly ChainPreset[] = [
     genres: [],
     description: 'Harmonic exciter: only the top above 6 kHz is saturated and blended in, adding air and presence to vocals, pads or a dull mix without harshness.',
   }),
-  // ── Krypt Tape Echo ──
   chain({
     id: 'factory:chain/delay-send/tape-echo-dub',
     name: 'Dub Tape Echo',
@@ -107,7 +96,6 @@ export const DEVICE_CHAIN_PRESETS: readonly ChainPreset[] = [
     genres: ['trap', 'rnb', 'pop', 'house'],
     description: 'Eighth-note ping-pong tape echo on the vocal insert at 25% mix: worn repeats bounce left and right behind the dry voice. Raise Mix on line ends for throws.',
   }),
-  // ── Krypt Grain ──
   chain({
     id: 'factory:chain/pad/grain-shimmer-cloud',
     name: 'Grain Shimmer Cloud',
@@ -138,7 +126,6 @@ export const DEVICE_CHAIN_PRESETS: readonly ChainPreset[] = [
     genres: ['lofi', 'future-bass', 'synthwave'],
     description: 'Spectral smear return (100% wet): every frequency hangs on for a few seconds like an infinite, pitch-true reverb. Ambient pads, vocal tails, intros.',
   }),
-  // ── Krypt Glue ──
   chain({
     id: 'factory:chain/drum-bus/vca-glue',
     name: 'VCA Glue',

@@ -1,6 +1,3 @@
-// Tiny gain-reduction bar in a mixer FX slot row (dynamics effects only):
-// grows from the right while the effect reduces (TelemetryFrame.gr, §15).
-
 import { useEffect, useRef } from 'react';
 import { slotKey } from '@shared/engine/meters';
 import { onFrame, setupCanvas } from '../../render/frameLoop';

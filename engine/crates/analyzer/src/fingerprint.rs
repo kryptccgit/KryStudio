@@ -1,24 +1,3 @@
-//! `fingerprint`: timbre features of a sound or of segments of a file
-//! (research/15 §3.1; the result type is `SoundFingerprint` in
-//! shared/sound-match/types.ts). The file is decoded once at its own rate and
-//! every segment is measured on an in-memory slice, so hundreds of drum hits
-//! or notes cost a few milliseconds each.
-//!
-//! Per sound (after trimming leading / trailing silence):
-//! * levels: sample peak, RMS (a full-scale sine is −3 dB), crest = peak − RMS;
-//! * width: side / mid energy, clamped to 0..1 (0 for mono files);
-//! * envelope: 5 ms RMS windows every 1 ms → attack; 20 ms centred windows
-//!   → peak, decay (−20 dB), sustain;
-//! * spectrum: Hann STFT (≈85 ms frames, 50 % overlap) → power-weighted
-//!   centroid, 85 % rolloff, bands relative to the loudest, and the spectral
-//!   flatness per frame (bias-corrected so white noise reads ≈ 1),
-//!   energy-weighted over the frames;
-//! * pitch: YIN (de Cheveigné & Kawahara 2002) on the steady part, decimated
-//!   to ≈11–12 kHz: harmonicity = 1 − the CMNDF dip (energy-weighted over the
-//!   frames), f0 = median of the clearly periodic frames.
-//!
-//! Krypt-original implementation of textbook methods (no GPL sources).
-
 use std::sync::Arc;
 
 use krypt_studio_dsp::analysis::{Bands, BAND_EDGES};
@@ -29,37 +8,21 @@ use crate::audio;
 use crate::protocol::{FingerprintArgs, FingerprintResult, FingerprintSegment, SoundFingerprint};
 use crate::{JobCtx, JobError};
 
-/// Silence below this sample level (−60 dBFS) is trimmed from both ends.
 pub const TRIM_LEVEL: f32 = 0.001;
-/// Sounds quieter than −20 dBFS trim 40 dB below their own peak instead.
 pub const TRIM_REL: f32 = 0.01;
-/// Band levels are floored here (dB relative to the loudest band).
 pub const BAND_FLOOR_DB: f32 = -90.0;
-/// Levels (peak / RMS) floor (dBFS).
 pub const LEVEL_FLOOR_DB: f32 = -120.0;
-/// f0 is reported only when harmonicity reaches this.
 pub const F0_MIN_HARMONICITY: f32 = 0.4;
-/// Envelope: RMS window and hop (seconds).
 const ENV_WIN: f32 = 0.005;
 const ENV_HOP: f32 = 0.001;
-/// Smoothed envelope (peak / decay / sustain): centred RMS window (seconds).
 const ENV_SMOOTH: f32 = 0.02;
-/// YIN: absolute threshold for the first dip; frames whose dip is below
-/// `VOICED_APERIODICITY` vote for f0.
 const YIN_THRESHOLD: f32 = 0.15;
 const VOICED_APERIODICITY: f32 = 0.3;
-/// Lowest / highest f0 searched (A0 .. 2 kHz).
 const F0_MIN: f32 = 27.5;
 const F0_MAX: f32 = 2000.0;
-/// At most this many YIN frames per sound (spread over the steady part).
 const MAX_YIN_FRAMES: usize = 16;
-/// Longest steady span analysed for pitch (seconds; centred).
 const MAX_PITCH_SPAN: f32 = 12.0;
-/// Most segments in one request.
 pub const MAX_SEGMENTS: usize = 200_000;
-/// Euler–Mascheroni: E[ln X] = ln E[X] − γ for an exponential variable (a
-/// periodogram bin of white noise), so the raw geometric/arithmetic ratio of
-/// white noise is e^−γ ≈ 0.56. Multiplying by e^γ maps it to ≈ 1.
 const EULER_GAMMA: f64 = 0.577_215_664_901_532_9;
 
 pub fn run(args: &FingerprintArgs, ctx: &JobCtx) -> Result<FingerprintResult, JobError> {
@@ -76,7 +39,6 @@ pub fn run(args: &FingerprintArgs, ctx: &JobCtx) -> Result<FingerprintResult, Jo
     }
 }
 
-/// 4th-order Butterworth high-pass (two RBJ biquads, Q 0.5412 and 1.3066), run forward once.
 pub fn highpass(x: &[f32], sr: f32, hz: f32) -> Vec<f32> {
     let mut y: Vec<f32> = x.to_vec();
     for q in [0.541_196_1_f64, 1.306_563_f64] {
@@ -103,7 +65,6 @@ pub fn highpass(x: &[f32], sr: f32, hz: f32) -> Vec<f32> {
     y
 }
 
-/// Check the segment list; `None` = whole file (an empty list counts as none).
 fn validate(segs: Option<&[FingerprintSegment]>) -> Result<Option<Vec<(f64, f64)>>, JobError> {
     let Some(segs) = segs.filter(|s| !s.is_empty()) else { return Ok(None) };
     if segs.len() > MAX_SEGMENTS {
@@ -119,9 +80,6 @@ fn validate(segs: Option<&[FingerprintSegment]>) -> Result<Option<Vec<(f64, f64)
     Ok(Some(out))
 }
 
-/// Fingerprint decoded channels (1 or 2 used) at `sr`. `segments` in seconds
-/// (clipped to the audio; empty / inverted ones give a zeroed fingerprint);
-/// `None` fingerprints the whole signal into `whole`.
 pub fn fingerprint_channels(channels: &[Vec<f32>], sr: f32, segments: Option<&[(f64, f64)]>, pitch: bool, ctx: &JobCtx) -> Result<FingerprintResult, JobError> {
     let n = channels.iter().take(2).map(|c| c.len()).min().unwrap_or(0);
     let l: &[f32] = channels.first().map(|c| &c[..n]).unwrap_or(&[]);
@@ -177,7 +135,6 @@ fn fin(x: f32, lo: f32, hi: f32) -> f32 {
     }
 }
 
-/// Reusable FFT plans + scratch for one sample rate.
 pub struct Fingerprinter {
     sr: f32,
     n_fft: usize,
@@ -193,8 +150,6 @@ pub struct Fingerprinter {
 impl Fingerprinter {
     pub fn new(sr: f32) -> Self {
         let sr = if sr.is_finite() && sr >= 1000.0 { sr } else { 44_100.0 };
-        // ≈85 ms frames: 4096 at 44.1 / 48 kHz (11.7 Hz bins, so the sub band
-        // gets a few bins), 2048 at 22.05 kHz, 8192 at 96 kHz.
         let n_fft = ((sr * 0.085) as usize).next_power_of_two().clamp(512, 16_384);
         let mut planner = RealFftPlanner::<f32>::new();
         let fwd = planner.plan_fft_forward(n_fft);
@@ -205,7 +160,6 @@ impl Fingerprinter {
         Self { sr, n_fft, hop: n_fft / 2, window, planner, fwd, time, freq, scratch }
     }
 
-    /// Fingerprint one sound: `l` (and `r` for stereo, same length).
     pub fn measure(&mut self, l: &[f32], r: Option<&[f32]>, pitch: bool) -> SoundFingerprint {
         let n = r.map(|r| r.len().min(l.len())).unwrap_or(l.len());
         let l = &l[..n];
@@ -218,7 +172,6 @@ impl Fingerprinter {
                 None => a,
             }
         };
-        // ── Trim ────────────────────────────────────────────────────────
         let peak = (0..n).fold(0f32, |m, i| m.max(abs_at(i)));
         if peak < 1e-6 {
             return SoundFingerprint::empty();
@@ -231,9 +184,8 @@ impl Fingerprinter {
         let sr = self.sr;
         let length_sec = len as f32 / sr;
 
-        // ── Levels, width, mono ────────────────────────────────────────
         let mut mono = Vec::with_capacity(len);
-        let mut pow = Vec::with_capacity(len); // mean power of the channels
+        let mut pow = Vec::with_capacity(len);
         let (mut e_mid, mut e_side, mut e_sum) = (0f64, 0f64, 0f64);
         for i in 0..len {
             let a = clean(l[i]);
@@ -268,12 +220,6 @@ impl Fingerprinter {
             fin((e_side / e_mid) as f32, 0.0, 1.0)
         };
 
-        // ── Envelope ───────────────────────────────────────────────────
-        // env5: 5 ms RMS windows starting every 1 ms (attack). envS: 20 ms
-        // windows centred every 1 ms (peak, decay, sustain): 5 ms windows
-        // ripple on low notes and beating pads, which would make the "peak" a
-        // ripple crest. Windows cut short by the ends count only when at
-        // least half full (a few loud samples at the edge are not the peak).
         let hop = ((ENV_HOP * sr).round() as usize).max(1);
         let mut pre = Vec::with_capacity(len + 1);
         pre.push(0f64);
@@ -302,10 +248,7 @@ impl Fingerprinter {
         let env = rms_env(win_s, true);
         let peak5 = env5.iter().cloned().fold(0f32, f32::max);
         let env_peak = env.iter().cloned().fold(0f32, f32::max);
-        // Attack: first 5 ms window within 1 dB of the loudest one.
         let k_att = env5.iter().position(|&v| v >= peak5 * 0.891).unwrap_or(0);
-        // The peak (decay start): first smoothed window within 1 dB of the
-        // loudest (a held sound's slow drift doesn't move its "peak" to the end).
         let k_pk = env.iter().position(|&v| v >= env_peak * 0.891).unwrap_or(0);
         let t_of = |k: usize| (k * hop) as f32 / sr;
         let attack_ms = t_of(k_att) * 1000.0;
@@ -318,16 +261,12 @@ impl Fingerprinter {
         let tail: Vec<f32> = env.iter().enumerate().filter(|(k, &v)| k * hop >= half && v > 0.0).map(|(_, &v)| v).collect();
         let sustain = if env_peak <= 0.0 || tail.is_empty() { 0.0 } else { tail.iter().sum::<f32>() / tail.len() as f32 / env_peak };
 
-        // ── Spectrum ───────────────────────────────────────────────────
         let spec = self.spectrum(&mono);
 
-        // ── Pitch ──────────────────────────────────────────────────────
-        // Steady part: from 5 ms after the attack to the last window above −20 dB.
         let last_loud = env.iter().rposition(|&v| v >= env_peak * 0.1).unwrap_or(n_env - 1);
         let s0 = (k_att * hop + (0.005 * sr) as usize).min(len);
         let s1 = (last_loud * hop + win_s / 2).min(len);
         let (s0, s1) = if s1 > s0 + (0.02 * sr) as usize { (s0, s1) } else { (0, len) };
-        // Long sounds: the centred MAX_PITCH_SPAN seconds.
         let max_span = (MAX_PITCH_SPAN * sr) as usize;
         let (s0, s1) = if s1 - s0 > max_span {
             let c = (s0 + s1) / 2;
@@ -366,7 +305,6 @@ impl Fingerprinter {
         let half = (n_fft / 2) as i64;
         let mut total = vec![0f64; bins];
         let mut frame_pow = vec![0f32; bins];
-        // Flatness over 20 Hz .. min(16 kHz, 0.95 × Nyquist), skipping DC.
         let fl_lo = ((20.0 / bin_hz).ceil() as usize).max(1);
         let fl_hi = (((16_000f32).min(nyq * 0.95) / bin_hz).floor() as usize).min(bins - 2).max(fl_lo);
         let (mut flat_num, mut flat_den) = (0f64, 0f64);
@@ -387,7 +325,6 @@ impl Fingerprinter {
                 total[k] += p as f64;
                 e += p as f64;
             }
-            // Spectral flatness of this frame (geometric / arithmetic mean).
             let band = &frame_pow[fl_lo..=fl_hi];
             let mean = band.iter().map(|&p| p as f64).sum::<f64>() / band.len() as f64;
             if mean > 0.0 {
@@ -405,7 +342,6 @@ impl Fingerprinter {
             }
         }
         let flatness = if flat_den > 0.0 { (flat_num / flat_den) as f32 } else { 0.0 };
-        // Centroid / rolloff over 20 Hz .. 20 kHz of the summed power spectrum.
         let k_lo = ((20.0 / bin_hz).ceil() as usize).max(1);
         let k_hi = ((20_000f32.min(nyq) / bin_hz).floor() as usize).min(bins - 1).max(k_lo);
         let sum: f64 = total[k_lo..=k_hi].iter().sum();
@@ -421,7 +357,6 @@ impl Fingerprinter {
                 }
             }
         }
-        // Bands (same edges as the engine's Analysis), relative to the loudest.
         let mut band_p = [0f64; 6];
         for (k, &p) in total.iter().enumerate() {
             let f = k as f32 * bin_hz;
@@ -442,14 +377,11 @@ impl Fingerprinter {
         Spec { centroid, rolloff, flatness, bands }
     }
 
-    /// YIN over the steady part. Returns (harmonicity 0..1, f0 Hz if any frame
-    /// is clearly periodic).
     fn yin(&mut self, x: &[f32]) -> (f32, Option<f32>) {
         let q = ((self.sr / 11_025.0).floor() as usize).max(1);
         let y = audio::decimate(x, q);
         let sr_d = self.sr / q as f32;
         let n = y.len();
-        // Lag range: A0 .. 2 kHz, shrunk to what fits (a frame holds W + τmax).
         let tau_min = ((sr_d / F0_MAX.min(sr_d * 0.25)).floor() as usize).max(2);
         let mut tau_max = (sr_d / F0_MIN).ceil() as usize;
         if 2 * tau_max > n {
@@ -470,7 +402,6 @@ impl Fingerprinter {
         let mut scratch = fwd.make_scratch_vec();
         let mut iscratch = inv.make_scratch_vec();
         let mut corr = inv.make_output_vec();
-        // Frames every 10 ms (at most MAX_YIN_FRAMES, evenly spread).
         let span = n - frame_len;
         let step = ((0.01 * sr_d) as usize).max(1);
         let count = (span / step + 1).min(MAX_YIN_FRAMES).max(1);
@@ -478,7 +409,7 @@ impl Fingerprinter {
         let mut cm = vec![1f32; tau_max + 1];
         let mut pre = vec![0f32; frame_len + 1];
         let (mut h_num, mut h_den) = (0f64, 0f64);
-        let mut voiced: Vec<(f32, f32)> = Vec::new(); // (f0, weight)
+        let mut voiced: Vec<(f32, f32)> = Vec::new();
         for i in 0..count {
             let s = if count > 1 { i * span / (count - 1) } else { span / 2 };
             let frame = &y[s..s + frame_len];
@@ -496,7 +427,6 @@ impl Fingerprinter {
             if fwd.process_with_scratch(&mut ta, &mut fa, &mut scratch).is_err() || fwd.process_with_scratch(&mut tb, &mut fb, &mut scratch).is_err() {
                 continue;
             }
-            // r(τ) = Σ_{j<W} a_j b_{j+τ} = IFFT(conj(A)·B)
             for (a, b) in fa.iter_mut().zip(fb.iter()) {
                 *a = a.conj() * b;
             }
@@ -519,7 +449,6 @@ impl Fingerprinter {
                 run += d[tau];
                 cm[tau] = if run > 0.0 { d[tau] * tau as f32 / run } else { 1.0 };
             }
-            // First dip under the threshold (descend to its bottom), else the global minimum.
             let mut best = None;
             let mut tau = tau_min;
             while tau < tau_max {
@@ -549,7 +478,6 @@ impl Fingerprinter {
         if voiced.is_empty() {
             return (harmonicity, None);
         }
-        // Energy-weighted median (in log frequency).
         voiced.sort_by(|a, b| a.0.total_cmp(&b.0));
         let total: f32 = voiced.iter().map(|v| v.1).sum();
         let mut c = 0f32;

@@ -1,26 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// PacksService: optional sound packs (shared/packs) the USER downloads.
-//
-//   installed  userData/packs/<id>/            pack.json {id, version, installedAt}
-//                                              + the catalog files, our SFZ
-//                                              mappings and LICENSE.txt
-//   staging    userData/packs/<id>.partial/    files land here one by one; it is
-//                                              renamed to <id>/ only when EVERY
-//                                              file's size + SHA-256 matched
-//   leftovers  userData/packs/<id>.old-<ts>/   the previous version during an
-//                                              update's swap (cleaned at start)
-//
-// Status per catalog pack: available → downloading → installed; 'update'
-// when the installed pack.json version is older than the catalog's;
-// 'failed' (with a sentence) after a failed install of a pack that isn't
-// installed. A cancelled or failed download keeps the files that already
-// verified in <id>.partial, so the next Download resumes per file.
-//
-// install() runs ONLY from the UI's IPC (electron/ipc.ts). Agents get the
-// read-only PacksAccess (list_packs, preset gating); they never download.
-// Node-only (no Electron import): tests drive it against a local HTTP server.
-// ──────────────────────────────────────────────────────────────────────
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { PACKS } from '@shared/packs/catalog';
@@ -32,38 +9,23 @@ import { copyInto, dirExists, downloadFile, DownloadCancelled, listDir, makeDir,
 import { freeBytes as diskFreeBytes } from './disk';
 import { extractZipMembers } from './zip';
 
-/** What the rest of main (MCP tools, preset gating) may use: read-only, never downloads. */
 export interface PacksAccess {
   state(): PacksState;
-  /** Installed (an older version that offers an update counts: its files are there). */
   isInstalled(id: string): boolean;
-  /** The catalog name ("Grand Piano"), or undefined for an unknown id. */
   packName(id: string): string | undefined;
-  /**
-   * Wave 7b: the one-shots / loops / FX of INSTALLED packs ('pack:<id>/…' paths), which join the factory sample
-   * index everywhere (find_samples, load_sample, the playbook picker, add_transition). Optional for test doubles.
-   */
   samples?(): readonly PackSample[];
-  /** Wave 7b: every pack that adds samples with its counts by kind (list_packs). Optional for test doubles. */
   sampleInfo?(): PackSamplesInfo;
 }
 
 export interface PacksServiceOptions {
-  /** userData/packs */
   dir: string;
-  /** Defaults to PACKS (tests inject their own). */
   catalog?: readonly PackDef[];
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
-  /** EVENT.packsState to every window (progress throttled). */
   broadcast?(state: PacksState): void;
-  /** Called once a pack was installed or updated (main reloads the engine's samples when the project uses it). */
   onInstalled?(id: string): void;
-  /** Test hooks. */
   fetchImpl?: typeof fetch;
   stallMs?: number;
-  /** Free bytes on the disk holding `dir` (null = unknown). Default: statfs. */
   freeBytes?(dir: string): Promise<number | null>;
-  /** Progress broadcast interval, ms (default 150). */
   throttleMs?: number;
   now?(): number;
 }
@@ -75,17 +37,14 @@ interface Transient {
   abort?: AbortController;
 }
 
-/** Written into <id>.partial so a later Download knows which catalog version the kept files belong to. */
 const STAGING_MARKER = '.krypt-partial.json';
 const MANIFEST = 'pack.json';
 const LICENCE_FILE = 'LICENSE.txt';
 const RESERVED = new Set([MANIFEST.toLowerCase(), LICENCE_FILE.toLowerCase(), STAGING_MARKER.toLowerCase()]);
-/** Headroom kept free on top of the download itself. */
 const DISK_MARGIN = 64 * 1024 * 1024;
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** '312 MB' / '1.2 GB' / '840 KB'. */
 export function fmtSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB';
   const mb = bytes / (1024 * 1024);
@@ -103,10 +62,6 @@ function hostOf(url: string): string {
   }
 }
 
-/**
- * A pack-relative path ('samples/C4v8.flac') joined onto `root`, or null when it isn't safe: the pack: rules
- * (no '..', '.', empty segments), no Windows-special characters, and the result must stay inside `root`.
- */
 export function packFilePath(root: string, rel: string): string | null {
   if (typeof rel !== 'string' || !rel || rel.length > 400) return null;
   if (!parsePackPath(`pack:x/${rel}`)) return null;
@@ -116,7 +71,6 @@ export function packFilePath(root: string, rel: string): string | null {
   return full.startsWith(base + path.sep) ? full : null;
 }
 
-/** The text of a pack's LICENSE.txt: licence, credit, source, the archived statement and the verified file list. */
 export function licenceText(def: PackDef): string {
   const l = def.licence;
   const lines = [
@@ -149,13 +103,11 @@ export function licenceText(def: PackDef): string {
 export class PacksService implements PacksAccess {
   private readonly catalog: readonly PackDef[];
   private readonly byId: Map<string, PackDef>;
-  /** Installed pack id → the version in its pack.json. */
   private installed = new Map<string, number>();
   private transient = new Map<string, Transient>();
   private broadcastTimer: NodeJS.Timeout | null = null;
   private lastBroadcast = 0;
   private readonly now: () => number;
-  /** Installed packs' samples (null = recompute on the next read). */
   private sampleCache: PackSample[] | null = null;
 
   constructor(private readonly opts: PacksServiceOptions) {
@@ -181,7 +133,6 @@ export class PacksService implements PacksAccess {
     return this.installed.has(id);
   }
 
-  /** The installed pack's folder, or null. */
   packDir(id: string): string | null {
     return this.installed.has(id) ? path.join(this.opts.dir, id) : null;
   }
@@ -189,8 +140,6 @@ export class PacksService implements PacksAccess {
   installedVersion(id: string): number | null {
     return this.installed.get(id) ?? null;
   }
-
-  // ── State ──────────────────────────────────────────────────────────
 
   state(): PacksState {
     return { packs: this.catalog.map((d) => this.entry(d)), dir: this.opts.dir };
@@ -216,7 +165,6 @@ export class PacksService implements PacksAccess {
     return e;
   }
 
-  /** Broadcast now (structural change) or throttled (progress). */
   private notify(throttle = false): void {
     const send = (): void => {
       this.broadcastTimer = null;
@@ -224,7 +172,6 @@ export class PacksService implements PacksAccess {
       try {
         this.opts.broadcast?.(this.state());
       } catch {
-        /* a window mid-teardown */
       }
     };
     if (!throttle) {
@@ -238,9 +185,6 @@ export class PacksService implements PacksAccess {
     this.broadcastTimer.unref?.();
   }
 
-  // ── Installed packs ────────────────────────────────────────────────
-
-  /** Read every catalog pack's pack.json (sync, tiny files): what is installed and at which version. */
   private scanInstalled(): void {
     const next = new Map<string, number>();
     for (const def of this.catalog) {
@@ -258,18 +202,11 @@ export class PacksService implements PacksAccess {
     this.sampleCache = null;
   }
 
-  // ── Samples (Wave 7b) ──────────────────────────────────────────────
-
-  /** A catalog sample entry that can join the library: a pack: path of THIS pack, a known kind, a name. */
   private static sampleOk(def: PackDef, s: PackSample): boolean {
     const pp = typeof s?.path === 'string' ? parsePackPath(s.path) : null;
     return !!pp && pp.packId === def.id && (SAMPLE_KINDS as readonly string[]).includes(s.kind) && typeof s.name === 'string' && !!s.name.trim() && Number.isFinite(s.lengthSec);
   }
 
-  /**
-   * The samples of installed packs, factory-index shaped ('pack:<id>/…' paths, lower-case tags). A pack installed at
-   * an older version than the catalog lists only the samples whose files it actually has.
-   */
   samples(): readonly PackSample[] {
     if (this.sampleCache) return this.sampleCache;
     const out: PackSample[] = [];
@@ -292,7 +229,6 @@ export class PacksService implements PacksAccess {
     return out;
   }
 
-  /** Every pack that adds samples (installed or not) with its counts by kind, plus the installed packs' samples. */
   sampleInfo(): PackSamplesInfo {
     const packs = this.catalog
       .filter((def) => def.samples?.some((s) => PacksService.sampleOk(def, s)))
@@ -309,10 +245,6 @@ export class PacksService implements PacksAccess {
     return { packs, samples: [...this.samples()] };
   }
 
-  /**
-   * Start-up: finish or roll back an update swap that was interrupted, drop unfinished downloads of packs no longer
-   * in the catalog (the others are kept for resume), re-read what is installed. Never throws.
-   */
   async refresh(): Promise<void> {
     try {
       await makeDir(this.opts.dir);
@@ -338,9 +270,6 @@ export class PacksService implements PacksAccess {
     this.notify();
   }
 
-  // ── Install / update ───────────────────────────────────────────────
-
-  /** Why a catalog entry can't be installed, or null. */
   private invalid(def: PackDef): string | null {
     if (!def.files.length) return `${def.name} has no files in this version's catalog.`;
     const seen = new Set<string>();
@@ -369,12 +298,6 @@ export class PacksService implements PacksAccess {
     return null;
   }
 
-  /**
-   * Download (or update) a pack: every file into <id>.partial (kept files whose size + SHA-256 already match are not
-   * fetched again; when updating, unchanged files are copied from the installed copy), mirrors in order, each file
-   * verified, then the SFZ mappings, LICENSE.txt and pack.json, then one rename to <id>/. Resolves when installed,
-   * failed or cancelled; never throws.
-   */
   async install(id: string): Promise<ActionResult<PacksState>> {
     const def = this.byId.get(String(id ?? ''));
     if (!def) return { ok: false, message: `There's no sound pack called "${String(id ?? '').slice(0, 60)}" in this version of Krypt Studio.`, data: this.state() };
@@ -401,10 +324,8 @@ export class PacksService implements PacksAccess {
     let fetched = 0;
     try {
       await this.prepareStaging(def, staging);
-      // Resume: files that are already complete (from an earlier attempt, or unchanged in the installed version).
       let done = 0;
       const todo: PackFile[] = [];
-      /** Archives already downloaded and verified whose members still need extracting (a stop mid-extract). */
       const unpackOnly: PackFile[] = [];
       for (const f of def.files) {
         const dest = packFilePath(staging, f.path)!;
@@ -452,7 +373,6 @@ export class PacksService implements PacksAccess {
       t.progress = { bytes: done, total };
       this.notify(true);
 
-      // An archive needs room for itself plus what is extracted from it (it is deleted afterwards).
       const extracted = (f: PackFile) => (f.archive ? f.archive.members.reduce((s, m) => s + m.bytes, 0) : 0);
       const need = todo.reduce((s, f) => s + f.bytes + extracted(f), 0) + unpackOnly.reduce((s, f) => s + extracted(f), 0);
       const free = await (this.opts.freeBytes ?? diskFreeBytes)(this.opts.dir).catch(() => null);
@@ -473,7 +393,6 @@ export class PacksService implements PacksAccess {
         this.notify(true);
       }
 
-      // Our mappings, the licence and the manifest; then the one atomic step.
       try {
         for (const s of def.sfz) await writeFileAtomic(packFilePath(staging, s.path)!, s.text);
         await writeFileAtomic(path.join(staging, LICENCE_FILE), licenceText(def));
@@ -513,7 +432,6 @@ export class PacksService implements PacksAccess {
     }
   }
 
-  /** <id>.partial for this catalog version: kept when it belongs to the same version, else started over. */
   private async prepareStaging(def: PackDef, staging: string): Promise<void> {
     try {
       const marker = await readJson<{ id?: string; version?: number }>(path.join(staging, STAGING_MARKER));
@@ -525,7 +443,6 @@ export class PacksService implements PacksAccess {
     }
   }
 
-  /** The file exists with the catalog size and SHA-256. */
   private async matches(file: string, f: Pick<PackFile, 'bytes' | 'sha256'>): Promise<boolean> {
     const st = await statFile(file);
     if (!st || st.size !== f.bytes) return false;
@@ -536,7 +453,6 @@ export class PacksService implements PacksAccess {
     }
   }
 
-  /** Every member of an archive file is in `root` with its catalog size and SHA-256. */
   private async membersIn(root: string, f: PackFile): Promise<boolean> {
     for (const m of f.archive?.members ?? []) {
       const p = packFilePath(root, m.path);
@@ -545,11 +461,6 @@ export class PacksService implements PacksAccess {
     return !!f.archive?.members.length;
   }
 
-  /**
-   * Extract a verified archive's listed members into the staging folder (each checked, written atomically), then
-   * delete the archive. A failure removes what this archive wrote (and the archive) and throws a sentence; a cancel
-   * keeps the archive and the members that finished, so the next Download continues.
-   */
   private async unpack(def: PackDef, f: PackFile, staging: string, signal: AbortSignal): Promise<void> {
     const arc = packFilePath(staging, f.path)!;
     const members = f.archive!.members.map((m) => ({ from: m.from, dest: packFilePath(staging, m.path)!, sha256: m.sha256.toLowerCase(), bytes: m.bytes }));
@@ -568,12 +479,10 @@ export class PacksService implements PacksAccess {
     } catch (err) {
       this.opts.log('warn', `Sound pack ${def.name}: couldn't delete the archive ${f.path} after extracting it: ${errText(err)}`);
     }
-    // The archive's own folder (e.g. 'downloads/') goes too when nothing else is in it.
     const parent = path.dirname(arc);
     if (parent !== path.resolve(staging) && (await listDir(parent)).length === 0) await removeDir(parent).catch(() => {});
   }
 
-  /** One file: the primary URL, then each mirror; a source that fails (network, HTTP, size, hash) falls through. */
   private async fetchFile(def: PackDef, f: PackFile, dest: string, signal: AbortSignal, onReceived: (n: number) => void): Promise<void> {
     const sources = [f.url, ...(f.mirrors ?? [])].filter(Boolean);
     const failures: Array<{ host: string; message: string }> = [];
@@ -601,7 +510,6 @@ export class PacksService implements PacksAccess {
     throw new Error(`${f.path} couldn't be downloaded from any of its ${sources.length} sources (${failures.map((x) => `${x.host}: ${x.message.replace(/\.$/, '')}`).join('; ')}). ${tail}`);
   }
 
-  /** staging → final in one rename; an installed older version is moved aside first and restored if the swap fails. */
   private async commit(staging: string, finalDir: string): Promise<void> {
     let aside: string | null = null;
     try {
@@ -626,9 +534,6 @@ export class PacksService implements PacksAccess {
     return { ok: true, message: `Cancelling the ${def.name} download…` };
   }
 
-  // ── Remove ─────────────────────────────────────────────────────────
-
-  /** Delete that pack's folder (and any unfinished download of it). Nothing else in userData/packs is touched. */
   async remove(id: string): Promise<ActionResult<PacksState>> {
     const def = this.byId.get(String(id ?? ''));
     if (!def) return { ok: false, message: `There's no sound pack called "${String(id ?? '').slice(0, 60)}".`, data: this.state() };

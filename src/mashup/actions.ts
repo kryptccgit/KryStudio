@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Auto Mashup (research/18): two songs → one mashup project, through
-// window.krypt.mashup (electron/mashup). Entry points: Home ▸ Audio Tools
-// (the Auto Mashup card), Tools ▸ Auto Mashup…, and the playlist audio-clip
-// menu ▸ Mashup with… (song A pre-filled). The form re-checks (debounced)
-// whenever a song or an option changes. Every outcome ends in visible
-// feedback: the dialog's readout / error, or a toast.
-// ──────────────────────────────────────────────────────────────────────
-
 import { tabsAvailable } from '../app/tabs/store';
 import type { ActionResult } from '@shared/types';
 import type { MashupCheck, MashupOutcome } from '@shared/mashup/types';
@@ -39,9 +30,6 @@ import { openMashupDialog } from './MashupDialog';
 
 const CHECK_DEBOUNCE_MS = 450;
 
-// ── Opening ───────────────────────────────────────────────────────────
-
-/** Open the Auto Mashup dialog: the form (optionally with song A set), or the running build. */
 export function openMashup(opts: { a?: SongSlot; doc?: Document | null } = {}): void {
   const s = getMashup();
   if (opts.a) {
@@ -55,7 +43,6 @@ export function openMashup(opts: { a?: SongSlot; doc?: Document | null } = {}): 
   openMashupDialog(opts.doc);
 }
 
-/** A slot for an audio clip of the open project (its channel's name). */
 export function slotForClip(clipId: string): SongSlot | null {
   let p;
   try {
@@ -70,7 +57,6 @@ export function slotForClip(clipId: string): SongSlot | null {
   return clipSlot(clipId, name, t?.detail ?? 'Audio clip in this project');
 }
 
-/** Playlist audio-clip menu ▸ Mashup with…: song A is that clip, the user picks B. */
 export function mashupWithClip(clipId: string, doc?: Document | null): void {
   const slot = slotForClip(clipId);
   if (!slot) {
@@ -81,7 +67,6 @@ export function mashupWithClip(clipId: string, doc?: Document | null): void {
   openMashup({ a: slot, doc });
 }
 
-/** The project's audio clips that can be a song (the first clip of every audio channel). */
 export function projectSongs(): Array<{ clipId: string; label: string; detail: string }> {
   try {
     return matchTargets(getProject(), '', 64);
@@ -90,9 +75,6 @@ export function projectSongs(): Array<{ clipId: string; label: string; detail: s
   }
 }
 
-// ── The form ──────────────────────────────────────────────────────────
-
-/** Change the form, then re-check (debounced). */
 export function editForm(act: FormAction): void {
   if (isBuilding()) {
     toast.warn('The mashup is being built: change it after it finishes, or cancel it');
@@ -107,7 +89,6 @@ export function setSlot(song: Song, slot: SongSlot | null): void {
   useMashup.setState({ picking: null });
 }
 
-/** Choose a file for a slot with the system file dialog. */
 export async function pickFile(song: Song): Promise<void> {
   let paths: string[] | null = null;
   try {
@@ -116,7 +97,7 @@ export async function pickFile(song: Song): Promise<void> {
     toast.error(`Couldn't open the file dialog: ${failureMessage(err)}`);
     return;
   }
-  if (!paths?.length) return; // closed: the slot stays as it was, which is visible
+  if (!paths?.length) return;
   setSlot(song, fileSlot(paths[0]));
 }
 
@@ -133,7 +114,6 @@ export function pickLibraryTrack(song: Song, t: LibraryTrack): void {
   setSlot(song, fileSlot(t.path, 'library', t.name));
 }
 
-/** Search the reference library for the picker (never throws: failures toast and return []). */
 export async function searchLibrary(text: string): Promise<LibraryTrack[]> {
   try {
     const r = await window.krypt.library.query({ text: text.trim() || undefined, sort: 'name', limit: 60 });
@@ -148,7 +128,6 @@ export async function searchLibrary(text: string): Promise<LibraryTrack[]> {
   }
 }
 
-/** Apply a planner suggestion that maps to an option (the button only shows when it does). */
 export function applySuggestion(text: string): void {
   const patch = suggestionPatch(text);
   if (!patch) {
@@ -159,37 +138,29 @@ export function applySuggestion(text: string): void {
   toast.info(`Applied: ${text.split(':')[0]}. Checking again…`, { durationMs: 3000 });
 }
 
-// ── The check ─────────────────────────────────────────────────────────
-
 let timer: ReturnType<typeof setTimeout> | null = null;
 let seq = 0;
-/** The request key of the check whose answer is on its way (null = none). */
 let inFlight: string | null = null;
 let lastToasted: string | null = null;
 
-/** Re-check after the user stops changing things (immediately with `now`). */
 export function scheduleCheck(now = false): void {
   const req = buildRequest(getMashup().form);
   if (!req) {
     if (timer) clearTimeout(timer);
     timer = null;
-    seq++; // drop any answer still on its way
+    seq++;
     useMashup.setState({ check: { ...IDLE_CHECK } });
     return;
   }
   const key = requestKey(req);
   const cur = getMashup().check;
-  // Same request: its result is here, or its check is really waiting / on its way. (A "checking" status whose
-  // answer was dropped as stale must not block a new check, or the dialog stays on "Listening…" forever.)
   if (cur.key === key && (cur.status === 'ready' || (cur.status === 'checking' && (timer !== null || inFlight === key)))) return;
   if (timer) clearTimeout(timer);
   timer = null;
-  // Stale result: mark it as "checking" right away so Build waits for the new plan.
   useMashup.setState({ check: { ...cur, status: 'checking', key } });
   timer = setTimeout(() => void runCheck(), now ? 0 : CHECK_DEBOUNCE_MS);
 }
 
-/** Check the current form now (also the "Check again" button). */
 export async function runCheck(force = false): Promise<void> {
   if (timer) clearTimeout(timer);
   timer = null;
@@ -210,8 +181,6 @@ export async function runCheck(force = false): Promise<void> {
     if (mine === seq) inFlight = null;
   }
   if (mine !== seq || requestKey(buildRequest(getMashup().form)) !== key) {
-    // The form changed meanwhile. A newer check is normally already scheduled; if none is, start one for the
-    // form as it is now (the analysis is cached, so it's quick).
     if (mine === seq && timer === null) scheduleCheck(true);
     return;
   }
@@ -226,9 +195,6 @@ export async function runCheck(force = false): Promise<void> {
   useMashup.setState({ check: { status: 'ready', key, result: r.data, error: null } });
 }
 
-// ── Build ─────────────────────────────────────────────────────────────
-
-/** Why Build is disabled, or null. */
 export function buildBlocker(): string | null {
   const s = getMashup();
   const err = formError(s.form);
@@ -250,8 +216,7 @@ export async function startBuild(): Promise<void> {
     toast.warn(blocker ?? 'Pick two songs first');
     return;
   }
-  // A new-project mashup opens in a new tab, so nothing is lost; the browser mock still asks.
-  if (req.newProject !== false && !tabsAvailable() && !(await confirmDiscard('Make the mashup as a new project'))) return; // stays on the form
+  if (req.newProject !== false && !tabsAvailable() && !(await confirmDiscard('Make the mashup as a new project'))) return;
   useMashup.setState({ phase: 'running', request: req, progress: null, outcome: null, error: null });
   let unsub: () => void = () => undefined;
   try {
@@ -259,7 +224,6 @@ export async function startBuild(): Promise<void> {
       if (isBuilding()) useMashup.setState({ progress: p });
     });
   } catch {
-    /* no progress feed: the bar stays indeterminate */
   }
   let r: ActionResult<MashupOutcome>;
   try {
@@ -293,7 +257,7 @@ function finish(r: ActionResult<MashupOutcome>): void {
   }
   useMashup.setState({ phase: 'done', outcome: o, progress: null });
   void refreshProjectStatus();
-  if (s.request?.newProject !== false) onProjectPicked(); // Home steps aside: the mashup is in the Studio behind the summary
+  if (s.request?.newProject !== false) onProjectPicked();
   const notes = o.notes.length ? ` Good to know: ${o.notes.slice(0, 2).join(' ')}` : '';
   toast.success(`${doneToast(o)}.${notes}`, { action: { label: 'Open Studio', run: openStudio }, durationMs: 12000 });
 }
@@ -313,13 +277,12 @@ export async function cancelBuild(): Promise<void> {
   }
 }
 
-/** The dialog was closed: a running build carries on (and says so); a finished one goes back to the form. */
 export function onDialogClosed(): void {
   const s = getMashup();
   useMashup.setState({ visible: false, picking: null });
   if (timer) clearTimeout(timer);
   timer = null;
-  if (s.check.status === 'checking') useMashup.setState({ check: { ...s.check, status: 'idle', key: null } }); // re-checked on open
+  if (s.check.status === 'checking') useMashup.setState({ check: { ...s.check, status: 'idle', key: null } });
   if (isBuilding(s)) {
     toast.info('Still building the mashup in the background', { action: { label: 'Show', run: () => openMashup() } });
     return;
@@ -327,13 +290,10 @@ export function onDialogClosed(): void {
   if (s.phase !== 'idle') backToForm();
 }
 
-/** Called when the dialog opens: check the form if it has two songs and no fresh result. */
 export function onDialogOpened(): void {
   useMashup.setState({ visible: true });
   if (!isBuilding()) scheduleCheck(true);
 }
-
-// ── Elsewhere ─────────────────────────────────────────────────────────
 
 export function openStudio(): void {
   showStudio();

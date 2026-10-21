@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Krypt EQ window: the combined magnitude response (./eqResponse.ts, the
-// engine's exact filter math) on a log-frequency grid, one handle per band
-// and the insert's live post-EQ spectrum (a watched slot, §15).
-//   drag a handle = frequency (+ gain on shelves / bells), wheel = Q,
-//   double-click = band on / off. Every change is a `mixer.setSlotParams`
-//   command (one undo step per gesture via coalesceKey).
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { pluginById } from '@shared/plugins/catalog';
 import { clampToSpec } from '@shared/plugins/types';
@@ -42,7 +33,6 @@ function specOf(id: string) {
   return pluginById('krypt.eq')?.params.find((p) => p.id === id) ?? null;
 }
 
-/** Handle position of a band: its frequency, and its gain (cuts sit on the 0 dB line). */
 function handleAt(b: EqBand, p: EqParams, w: number): { x: number; y: number } {
   return { x: freqToX(p(b.freq), w), y: dbToY(b.gain ? p(b.gain) : 0, HEIGHT, RANGE_DB) };
 }
@@ -54,7 +44,6 @@ export function EqCurve({ insertId, slotId }: { insertId: string; slotId: string
   const docParams = useProject((p) => p.mixer.inserts[insertId]?.slots[slotId]?.params);
   const sr = useEngineStatus((s) => s.status?.device?.sampleRate) || 48000;
   const key = slotKey(insertId, slotId);
-  /** Values being dragged (shown before the doc round-trip). */
   const local = useRef<Record<string, number>>({});
   const [, bump] = useState(0);
   const [active, setActive] = useState<number | null>(null);
@@ -63,20 +52,16 @@ export function EqCurve({ insertId, slotId }: { insertId: string; slotId: string
 
   const get: EqParams = useMemo(() => {
     return (id: string) => local.current[id] ?? docParams?.[id] ?? specOf(id)?.default ?? 0;
-    // `local` is read live; bump() re-renders while dragging
   }, [docParams]);
 
-  // the frame painter reads the latest values through refs (its subscription survives edits)
   const getRef = useRef(get);
   getRef.current = get;
   const activeRef = useRef(active);
   activeRef.current = active;
-  // redraw after every render (doc edits, drags, resize, selection)
   useEffect(() => {
     dirty.current = true;
   });
 
-  // live post-EQ spectrum of this slot while the window is open
   useEffect(() => telemetry.watchSlot(key), [key]);
 
   useEffect(() => {
@@ -104,14 +89,12 @@ export function EqCurve({ insertId, slotId }: { insertId: string; slotId: string
       const active = activeRef.current;
       const ctx = setupCanvas(c, w, HEIGHT);
       ctx.clearRect(0, 0, w, HEIGHT);
-      // spectrum (−90..0 dBFS over the full height)
       if (smoother.shown.length) {
         const g = ctx.createLinearGradient(0, 0, 0, HEIGHT);
         g.addColorStop(0, 'rgba(168,85,247,0.30)');
         g.addColorStop(1, 'rgba(99,102,241,0.04)');
         paintSpectrum(ctx, smoother.shown, smoother.peak, { w, h: HEIGHT, floorDb: -90, topDb: 0 }, g, 'rgba(236,72,153,0.35)');
       }
-      // grid
       ctx.font = '9px "Chakra Petch", sans-serif';
       ctx.textBaseline = 'top';
       for (const f of FREQ_GRID) {
@@ -128,7 +111,6 @@ export function EqCurve({ insertId, slotId }: { insertId: string; slotId: string
         ctx.fillStyle = C.text;
         ctx.fillText(`${db > 0 ? '+' : ''}${db}`, 2, y + 1);
       }
-      // the selected band's own curve
       if (active !== null) {
         const b = EQ_BANDS[active];
         ctx.beginPath();
@@ -141,7 +123,6 @@ export function EqCurve({ insertId, slotId }: { insertId: string; slotId: string
         ctx.lineWidth = 1;
         ctx.stroke();
       }
-      // combined response
       const resp = eqResponseDb(get, freqs, sr);
       ctx.beginPath();
       resp.forEach((db, i) => {
@@ -153,7 +134,6 @@ export function EqCurve({ insertId, slotId }: { insertId: string; slotId: string
       ctx.strokeStyle = accentGradient(ctx, w);
       ctx.lineWidth = 2;
       ctx.stroke();
-      // handles
       EQ_BANDS.forEach((b, i) => {
         const { x, y } = handleAt(b, get, w);
         const on = get(b.on) >= 0.5;
@@ -230,7 +210,7 @@ export function EqCurve({ insertId, slotId }: { insertId: string; slotId: string
     const b = d.band;
     const patch: Record<string, number> = { [b.freq]: clampParam(b.freq, xToFreq(e.clientX - r.left, width)) };
     if (b.gain) patch[b.gain] = clampParam(b.gain, Math.round(yToDb(e.clientY - r.top, HEIGHT, RANGE_DB) * 10) / 10);
-    if (get(b.on) < 0.5) patch[b.on] = 1; // dragging an off band switches it on
+    if (get(b.on) < 0.5) patch[b.on] = 1;
     Object.assign(local.current, patch);
     d.pending = { ...(d.pending ?? {}), ...patch };
     if (!d.raf) d.raf = requestAnimationFrame(flush);
@@ -243,7 +223,6 @@ export function EqCurve({ insertId, slotId }: { insertId: string; slotId: string
     if (d.raf) cancelAnimationFrame(d.raf);
     flush();
     drag.current = null;
-    // keep the local values until the doc catches up, then drop them
     setTimeout(() => {
       local.current = {};
       bump((n) => n + 1);
@@ -268,7 +247,6 @@ export function EqCurve({ insertId, slotId }: { insertId: string; slotId: string
     void dispatch('mixer.setSlotParams', { insertId, slotId, params: { [b.on]: on ? 0 : 1 } }, { label: `${b.label} ${on ? 'off' : 'on'}` });
   };
 
-  // stop the panel from scrolling while the wheel shapes Q over a handle
   useEffect(() => {
     const c = canvas.current;
     if (!c) return;

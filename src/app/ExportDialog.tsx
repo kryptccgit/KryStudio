@@ -1,11 +1,3 @@
-// Export dialog (Ctrl+R): song info & cover (embedded in the file), song /
-// pattern (with loop count) / loop region, WAV 16 / 24 / 32-bit float or MP3
-// (320 / 256 / 192 / 128 kbps, when the engine can encode it), tail, peak
-// normalize, "open folder after", and one file or stems (one file per mixer
-// insert plus Master, into a new folder). The last render choices are remembered per
-// machine; the song info lives in the project (project.setInfo, one undo
-// step), the cover too (project.setCover; its bytes stay in main).
-
 import { useEffect, useId, useState } from 'react';
 import { Download, ImagePlus, Loader2, Shuffle, Sparkles, Trash2 } from 'lucide-react';
 import { COVER_STYLES, MP3_BITRATES, type CoverPreview, type CoverStyle, type Mp3Kbps } from '@shared/types';
@@ -39,7 +31,6 @@ function infoFromMeta(): InfoFields {
   return { title: m.title ?? '', artist: m.artist ?? '', album: m.album ?? '', year: m.year ? String(m.year) : '', genre: m.genre ?? '', track: m.trackNumber ? String(m.trackNumber) : '' };
 }
 
-/** The project.setInfo args for what changed (null = nothing), or an error for the user. */
 function infoPatch(f: InfoFields): { args: Record<string, unknown> | null; error: string | null } {
   const m = getProject().meta;
   const args: Record<string, unknown> = {};
@@ -56,7 +47,6 @@ function infoPatch(f: InfoFields): { args: Record<string, unknown> | null; error
   return { args: Object.keys(args).length ? args : null, error: null };
 }
 
-/** The cover preview + Choose / Generate / Shuffle / Remove. Changes apply at once (each one undo step). */
 function CoverPicker({ text }: { text: { title: string; artist: string } }) {
   const coverFile = useProject((p) => p.meta.cover?.file ?? null);
   const [preview, setPreview] = useState<CoverPreview | null>(null);
@@ -199,7 +189,7 @@ function ExportForm({ close, run }: { close: () => void; run: ExportRunner }) {
       setBusy(true);
       const r = await dispatch('project.setInfo', check.args, { label: 'Edit song info' });
       setBusy(false);
-      if (!r.ok) return; // dispatch toasted the reason
+      if (!r.ok) return;
     }
     const next = { ...prefs, scope, format };
     saveExportPrefs(next);
@@ -274,7 +264,6 @@ function ExportForm({ close, run }: { close: () => void; run: ExportRunner }) {
             { value: 'file', label: 'One file' },
             { value: 'stems', label: 'Stems', title: 'One file per mixer insert, named like "01 Kick", plus "Master"' },
           ]}
-          // Parts can peak above 0 dB before the master limiter: 32-bit float keeps them from clipping.
           onChange={(v) => set(v === 'stems' ? { stems: true, format: 'wav32f' } : { stems: false })}
         />
       </Field>

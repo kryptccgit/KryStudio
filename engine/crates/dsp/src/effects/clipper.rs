@@ -1,7 +1,3 @@
-//! krypt.clipper — soft/hard clipper at 1x/2x/4x oversampling. The curve is
-//! linear up to (1 - softness) x ceiling, then a quadratic knee that lands
-//! exactly on the ceiling with zero slope (C1-continuous, odd-symmetric).
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::oversample::{Factor, Oversampler};
 use crate::blocks::{db_to_gain, Smooth};
@@ -30,7 +26,6 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
-/// Clip curve with ceiling `c` and knee half-width `w` (0 = hard).
 #[inline]
 pub(crate) fn clip(x: f32, c: f32, w: f32) -> f32 {
     let a = x.abs();
@@ -57,14 +52,12 @@ fn factor_of(i: usize) -> Factor {
 
 pub struct Clipper {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     os: [Oversampler; 2],
     factor: Factor,
     drive: Smooth,
     ceil: Smooth,
     soft: Smooth,
-    /// meter: dB the driven input went over the ceiling in the last block (>= 0)
     over_db: f32,
 }
 
@@ -124,8 +117,6 @@ impl Effect for Clipper {
     }
 
     fn latency(&self) -> usize {
-        // read the param directly: the engine asks right after set_param,
-        // before the next process() applies it
         self.os[0].latency(factor_of(self.pb.idx(P::Oversample as usize)))
     }
 

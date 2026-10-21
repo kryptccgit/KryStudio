@@ -1,21 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Rack editor (Wave 12.2, research/16 §2.3): the plugin window body for
-// 'krypt.rack' / 'krypt.drumrack' channels and 'krypt.fxrack' mixer slots.
-//   - 8 macro knobs (the rack's params macro1..8 via the normal ParamRef
-//     path: automation, controller links and MIDI learn work), rename by
-//     double-click, each macro's mappings with min / max;
-//   - variations: store / recall / delete, seeded randomize;
-//   - drum racks: a 4×4 pad view (drop samples, click to audition, choke);
-//   - the chain list (name, volume, pan, mute, solo, key / velocity zone,
-//     choke) and the selected chain's instrument + devices with knobs.
-//     Right-click any inner knob → "Map to macro N", plus the same menu as
-//     every other knob (Wave 12.2b): "Create automation clip", "Link to
-//     controller…" (MIDI learn), Copy ParamRef, through the inner ParamRef
-//     `<host>/rack/<chain>/…` (shared/schema/params.ts); automated inner
-//     knobs follow their clip while the song plays.
-// Every edit is a rack.* doc command through dispatch(); failures toast.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useMemo, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Dices, Headphones, Link2, Plus, Save, Trash2, Unlink, VolumeX, X } from 'lucide-react';
 import { EFFECTS, INSTRUMENTS, pluginById } from '@shared/plugins/catalog';
@@ -38,8 +20,6 @@ import { Waveform } from './Waveform';
 import { rackArgs, type RackTarget } from '../../racks/actions';
 import { useLiveParam } from '../../live/automationFollow';
 
-// ── Data access ───────────────────────────────────────────────────────
-
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const noteLabel = (n: number): string => `${NOTE_NAMES[((n % 12) + 12) % 12]}${Math.floor(n / 12) - 1}`;
 
@@ -55,14 +35,12 @@ function hostOf(p: Project, t: RackTarget): { rack: RackDef | null; params: Reco
   return { rack: s.rack ?? null, params: s.params, type: s.type, refPrefix: `insert/${t.insertId}/slot/${t.slotId}/`, color: ins.color };
 }
 
-/** Plugins a rack chain may hold (v1: stock only, no racks, no audio-clip player). */
 const RACK_INSTRUMENTS = INSTRUMENTS.filter((d) => !isRackPlugin(d.id) && d.id !== 'krypt.audioclip' && d.id !== 'krypt.multisampler');
 const RACK_EFFECTS = EFFECTS.filter((d) => !isRackPlugin(d.id));
 
 const CHAIN_VOLUME: ParamSpec = { ...RACK_CHAIN_VOLUME, name: 'Volume' };
 const CHAIN_PAN: ParamSpec = { ...RACK_CHAIN_PAN, name: 'Pan' };
 
-/** The ParamRef of a knob inside the rack (automation, controller links, params.set). */
 function innerRef(t: RackTarget, target: MacroTarget): string {
   return rackParamRef('channelId' in t ? { kind: 'channel', channelId: t.channelId } : { kind: 'slot', insertId: t.insertId, slotId: t.slotId }, target);
 }
@@ -88,7 +66,6 @@ function targetLabel(rack: RackDef, t: MacroTarget): string {
 const sameTarget = (a: MacroTarget, b: MacroTarget): boolean =>
   a.chainId === b.chainId && a.kind === b.kind && a.param === b.param && (a.kind !== 'device' || (b.kind === 'device' && a.deviceId === b.deviceId));
 
-/** The "Map to macro" entries for an inner control (right-click). */
 function macroMenuItems(t: RackTarget, rack: RackDef, target: MacroTarget, norm: number): MenuItem[] {
   const mapped = rack.macros.map((m, i) => ({ i, map: Object.values(m.maps).find((x) => sameTarget(x.target, target)) })).filter((x) => x.map);
   const lo = norm >= 0.99 ? 0 : Math.round(norm * 1000) / 1000;
@@ -115,8 +92,6 @@ function macroMenuItems(t: RackTarget, rack: RackDef, target: MacroTarget, norm:
   }
   return items;
 }
-
-// ── Small building blocks ─────────────────────────────────────────────
 
 function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
   return (
@@ -147,10 +122,6 @@ function SmallButton({ onClick, hint, children, danger, disabled }: { onClick: (
   );
 }
 
-/**
- * A knob over an inner rack value, committed through a rack.* command, with the shared right-click menu (automation
- * clip, controller link, … through its inner `paramRef`) plus extra items (macro mapping). Follows its automation.
- */
 function InnerKnob({ spec, value, onCommit, extra, label, size = 34, paramRef }: { spec: ParamSpec; value: number; onCommit: (v: number) => unknown; extra?: (norm: number) => MenuItem[]; label?: string; size?: number; paramRef?: string }) {
   const g = useGestureValue(spec, value, onCommit);
   const live = useLiveParam(paramRef ?? '');
@@ -183,7 +154,6 @@ function InnerKnob({ spec, value, onCommit, extra, label, size = 34, paramRef }:
   );
 }
 
-/** Knob / toggle / select for one inner param, by its spec. */
 function InnerControl({ spec, value, onCommit, extra, paramRef }: { spec: ParamSpec; value: number; onCommit: (v: number) => unknown; extra?: (norm: number) => MenuItem[]; paramRef?: string }) {
   const menu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -223,7 +193,6 @@ function groupSpecs(desc: PluginDescriptor): Array<[string, ParamSpec[]]> {
   return [...groups.entries()];
 }
 
-/** Every param of an inner plugin, grouped, committed through `commit`. */
 function InnerParams({ desc, params, commit, extraFor, refFor }: { desc: PluginDescriptor; params: Record<string, number>; commit: (id: string, v: number) => unknown; extraFor: (id: string) => (norm: number) => MenuItem[]; refFor: (id: string) => string }) {
   const groups = useMemo(() => groupSpecs(desc), [desc]);
   return (
@@ -241,8 +210,6 @@ function InnerParams({ desc, params, commit, extraFor, refFor }: { desc: PluginD
     </div>
   );
 }
-
-// ── Macros ────────────────────────────────────────────────────────────
 
 function MacroKnob({ t, rack, index, refPrefix }: { t: RackTarget; rack: RackDef; index: number; refPrefix: string }) {
   const ref = `${refPrefix}${MACRO_PARAM_IDS[index]}`;
@@ -366,10 +333,7 @@ function Variations({ t, rack }: { t: RackTarget; rack: RackDef }) {
   );
 }
 
-// ── Drum pads ─────────────────────────────────────────────────────────
-
 function DrumPads({ t, rack, selected, onSelect }: { t: RackTarget; rack: RackDef; selected: string | null; onSelect: (id: string) => void }) {
-  // Open on the page holding the first pad (a wrapped sampler sits on its root key, e.g. C4).
   const [page, setPage] = useState(() => {
     const notes = Object.values(rack.chains).map((c) => c.zone?.keyLo ?? DRUM_RACK_BASE_NOTE);
     return notes.length ? Math.max(0, Math.floor((Math.min(...notes) - DRUM_RACK_BASE_NOTE) / DRUM_RACK_PADS)) : 0;
@@ -430,7 +394,6 @@ function DrumPads({ t, rack, selected, onSelect }: { t: RackTarget; rack: RackDe
       >
         <div className="grid grid-cols-4 gap-1.5">
           {Array.from({ length: DRUM_RACK_PADS }, (_, i) => {
-            // Row 1 at the bottom, like a pad controller.
             const row = 3 - Math.floor(i / 4);
             const note = base + row * 4 + (i % 4);
             if (note > 127) return <div key={i} />;
@@ -483,10 +446,7 @@ function DrumPads({ t, rack, selected, onSelect }: { t: RackTarget; rack: RackDe
   );
 }
 
-// ── Chains ────────────────────────────────────────────────────────────
-
 function ZoneEditor({ t, chainId }: { t: RackTarget; chainId: string }) {
-  // Reads the live chain (the menu stays open while you drag, so it must follow the document).
   const chain = useProject((p) => hostOf(p, t)?.rack?.chains[chainId]);
   if (!chain) return <div className="px-2 py-1.5 text-[10px] text-krypt-muted">This chain no longer exists.</div>;
   const z0 = chain.zone ?? { keyLo: 0, keyHi: 127, velLo: 0, velHi: 1 };
@@ -734,10 +694,7 @@ function ChainDetail({ t, rack, chain, color }: { t: RackTarget; rack: RackDef; 
   );
 }
 
-// ── The editor ────────────────────────────────────────────────────────
-
 export function RackEditor({ target }: { target: RackTarget }) {
-  // Separate selectors: each returns a stable (Immer-shared) reference, so the store never sees a fresh object.
   const stored = useProject((p) => hostOf(p, target)?.rack ?? null);
   const type = useProject((p) => hostOf(p, target)?.type ?? null);
   const color = useProject((p) => hostOf(p, target)?.color ?? '#A855F7');

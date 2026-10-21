@@ -1,7 +1,3 @@
-//! Objective measurements of every written sample (we cannot listen, so we
-//! measure): length, levels, spectral centroid, decay time, DC, and the
-//! fundamental of tonal one-shots. Printed as a per-kind table.
-
 use super::synth::{Chans, SR};
 use crate::analysis::analyze;
 use std::collections::BTreeMap;
@@ -12,22 +8,15 @@ pub struct SampleStat {
     pub kind: String,
     pub len_s: f32,
     pub channels: usize,
-    /// Sample peak (dBFS).
     pub peak_db: f32,
     pub true_peak_db: f32,
     pub rms_db: f32,
-    /// RMS of the first 100 ms (the hit itself, without the tail).
     pub rms100_db: f32,
-    /// Band levels (dB): sub <60, low 60-250, lowMid 250-500, mid 500-2k, highMid 2-6k, high 6-20k.
     pub bands: [f32; 6],
     pub centroid_hz: f32,
-    /// Time from the loudest 5 ms window until the level is 20 dB below it.
     pub t20_ms: f32,
-    /// Where the loudest 5 ms window sits, 0..1 of the length (risers ≈ 1).
     pub peak_pos: f32,
-    /// |mean| / peak.
     pub dc: f32,
-    /// Measured fundamental for tonal samples.
     pub f0_hz: Option<f32>,
     pub bytes: u64,
 }
@@ -36,7 +25,6 @@ fn env5(x: &[f32]) -> Vec<f32> {
     x.chunks(240).map(|c| c.iter().fold(0.0f32, |m, v| m.max(v.abs()))).collect()
 }
 
-/// Fundamental by normalised autocorrelation over `win` (30-1000 Hz).
 pub(crate) fn f0_of(x: &[f32]) -> Option<f32> {
     if x.len() < 4800 {
         return None;
@@ -58,9 +46,7 @@ pub(crate) fn f0_of(x: &[f32]) -> Option<f32> {
     };
     let vals: Vec<f64> = (lo..=hi).map(r).collect();
     let best = vals.iter().cloned().fold(f64::MIN, f64::max);
-    // first lag that gets within 3% of the best (prefers the true period over multiples)
     let k = vals.iter().position(|v| *v >= best * 0.97)?;
-    // walk to the local maximum
     let mut k = k;
     while k + 1 < vals.len() && vals[k + 1] > vals[k] {
         k += 1;
@@ -89,7 +75,6 @@ pub(crate) fn measure(rel: &str, kind: &str, ch: &Chans, root: Option<u8>, bytes
     let head = &mono[..mono.len().min((0.1 * SR) as usize)];
     let rms100 = (head.iter().map(|v| (*v as f64).powi(2)).sum::<f64>() / head.len().max(1) as f64).sqrt() as f32;
     let f0 = root.and_then(|_| {
-        // skip the attack / pitch sweep, measure the body
         let s = (0.12 * SR) as usize;
         let e = (s + (0.25 * SR) as usize).min(mono.len());
         if e > s + 4800 {
@@ -117,7 +102,6 @@ pub(crate) fn measure(rel: &str, kind: &str, ch: &Chans, root: Option<u8>, bytes
     }
 }
 
-/// Per-kind summary table (and, with `detail`, one line per file).
 pub fn table(stats: &[SampleStat], detail: bool) -> String {
     let mut by: BTreeMap<&str, Vec<&SampleStat>> = BTreeMap::new();
     for s in stats {

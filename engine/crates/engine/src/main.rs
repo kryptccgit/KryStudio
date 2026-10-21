@@ -1,5 +1,3 @@
-//! krypt-studio-engine entry point: CLI modes + the stdio protocol engine.
-
 use krypt_studio_engine::audio::DeviceManager;
 use krypt_studio_engine::compile::Names;
 use krypt_studio_engine::control::{Engine, EngineParts};
@@ -49,14 +47,11 @@ struct Args {
     tail: Option<f64>,
     loops: Option<f64>,
     analyze: bool,
-    /// --stems: --out is a folder; one file per insert plus Master.
     stems: bool,
     parent_pid: Option<u32>,
     factory_dir: Option<String>,
-    /// Installed sound packs: `pack:<id>/<path>` sample paths resolve against it.
     packs_dir: Option<String>,
     no_audio: bool,
-    /// Third-party plugin descriptors (Plugin Manager scan cache) for CLI renders.
     plugins: Option<String>,
     plugin_host: Option<String>,
 }
@@ -136,9 +131,6 @@ fn main() {
         return;
     }
     if let Some(dir) = &args.gen_factory {
-        // Legacy kit + library + index.json. The JSON summary goes to stdout
-        // (scripts/engine-build.mjs parses it); the measurement table to stderr
-        // (KRYPT_FACTORY_VERBOSE=1 adds one line per file).
         let generator = format!("krypt-studio-engine {ENGINE_VERSION}");
         match krypt_studio_dsp::factory::generate_factory(Path::new(dir), &generator) {
             Ok(rep) => {
@@ -174,8 +166,6 @@ fn main() {
         }
         return;
     }
-    // Third-party VST3/CLAP plugins (krypt-studio-pluginclient). The live engine
-    // gets these over the protocol (plugins.configure / plugins.register).
     if let Some(p) = &args.plugin_host {
         krypt_studio_pluginclient::manager::set_host_exe(Some(PathBuf::from(p)));
     }
@@ -284,11 +274,9 @@ fn run_engine(args: &Args, host: PluginHost, factory_dir: PathBuf) {
     let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(4096);
     let (spec_tx, spec_rx) = rtrb::RingBuffer::new(1 << 15);
     let mut core = Core::new(48000.0, shared.clone(), Some(cmd_rx), Some(garbage_tx), Some(spec_tx));
-    // live input: MIDI input / recording queues (record.rs).
     krypt_studio_engine::midi::init_clock();
     let (live_rt, live_ctl) = krypt_studio_engine::record::live_channels(shared.live.clone());
     core.live.attach(live_rt);
-    // hardware: MIDI clock out / sync rings (clock.rs).
     if let Some(ends) = shared.clock.take_rt() {
         core.clock.attach(ends);
     }

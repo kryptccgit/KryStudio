@@ -1,8 +1,3 @@
-// The playbook registry: one file per genre (shared/playbooks/<id>.ts).
-// test/playbooks.test.ts validates every playbook (parts referenced by
-// sections exist, KPN parses, targets are sane, every role resolves to a
-// factory preset or sample).
-
 import { resolveGenre, type GenreId } from '../sounds/genres';
 import type { Playbook } from './types';
 import { TRAP } from './trap';
@@ -49,7 +44,6 @@ export const PLAYBOOKS: readonly Playbook[] = [
 
 const BY_ID = new Map<GenreId, Playbook>(PLAYBOOKS.map((p) => [p.id, p]));
 
-/** The playbook for a genre id or alias, or null. */
 export function playbookFor(genre: string | null | undefined): Playbook | null {
   const id = resolveGenre(genre);
   return id ? (BY_ID.get(id) ?? null) : null;

@@ -1,5 +1,3 @@
-// Factory LEAD presets: main melodies and toplines.
-
 import type { InstrumentPreset } from '../../types';
 import {
   CRUSH, DIV, DRUM, DV, FM, HALL, HARD, LFO, PLATE, POS, ROOM, SH, T, TAPE, TRI, TUBE, WAVE, ALG,

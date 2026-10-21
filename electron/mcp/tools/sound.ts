@@ -1,5 +1,3 @@
-// Sound tools: channels, instruments, parameters, samples.
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import type { ParamSpec, PluginDescriptor } from '@shared/plugins/types';
@@ -52,7 +50,7 @@ export const addChannel = defineTool({
     'Add a Channel Rack channel. Omit instrument and params to get a finished sound for the role the name implies and the project genre: Kick / Snare / Hat … → a sampler with the best factory drum sample; 808, Bass, Lead, Pad, Pluck, Keys … → the best instrument preset with its effects (find_presets / load_preset choose a specific one). instrument: a plugin id or alias (synth/krypt.triosc, wave/krypt.wavetable, fm, sampler, 808/krypt.kick808, drumsynth). With params but no instrument you design on the classic name-based default (TriOsc patches, sampler, 808). sample loads a sampler with "factory:drums/snare.wav" or an allowed absolute path. Each channel gets its own mixer insert unless insert is "master" or an existing insert. clone_of duplicates an existing channel instead (instrument, sample, params, routing; with_notes copies its notes in every pattern too). Example: {"name":"Lead","instrument":"synth","params":{"cutoff":"3kHz","ampRelease":"300ms"}}',
   input: z.object({
     name: z.string().min(1).max(64),
-    instrument: z.string().max(160).optional(), // stock alias or an installed vst3:/clap: id
+    instrument: z.string().max(160).optional(),
     sample: z.string().max(400).optional(),
     params: z.record(z.string(), zValue).optional().describe('Instrument params by id, human units allowed ("1.2kHz", "-6dB", "40%", "Saw").'),
     insert: z.union([z.string(), z.number()]).optional().describe('"new" (default), "master", or an existing insert.'),
@@ -99,7 +97,6 @@ export const addChannel = defineTool({
       type = 'krypt.sampler';
       label = 'Krypt Sampler';
     } else {
-      // No knobs given: a finished sound (preset / factory sample) for the name's role; with knobs, the classic default.
       const c = chooseInstrument(deps, a.name, a.instrument, false, !a.params);
       type = c.type;
       params = c.params;
@@ -119,7 +116,6 @@ export const addChannel = defineTool({
     const r = ctx.exec<{ id: string; insertId: string }>('channels.add', { type, name: safeName(a.name, 64), sampleId, params, insertId });
     let fxNote = '';
     if (preset) {
-      // Effects go on the channel's own insert only: an explicit master / shared insert keeps its chain.
       ctx.exec('presets.applyToChannel', { channelId: r.id, preset, withFx: insertId === undefined });
       if (preset.fx?.length) fxNote = insertId === undefined ? ` with ${plural(preset.fx.length, 'effect')}` : ` (its ${plural(preset.fx.length, 'effect')} not loaded onto the shared insert; load_preset with_fx on an own insert adds them)`;
     }
@@ -246,7 +242,6 @@ export const setParams = defineTool({
     const p = deps.doc.project;
     const refs: Array<{ ref: string; spec: ParamSpec; value: number }> = [];
     if (a.chain !== undefined && (a.channel !== undefined || (a.insert !== undefined && a.effect !== undefined))) {
-      // Knobs inside a rack (Wave 12.2b inner ParamRefs).
       let host: Parameters<typeof rackInnerRef>[2];
       let where: string;
       if (a.channel !== undefined) {
@@ -272,7 +267,6 @@ export const setParams = defineTool({
     } else if (a.insert !== undefined) {
       const ins = findInsert(p, a.insert);
       if (a.effect === undefined) {
-        // Insert-level params: volume (dB), pan, stereoSep
         for (const [k, v] of Object.entries(a.params)) {
           const ref = `insert/${ins.id}/${k}`;
           const spec = paramSpecFor(p, catalog, ref);

@@ -1,7 +1,3 @@
-// Pure part of the Export dialog: remembered choices and the render
-// request they produce: one file, or stems into a folder (unit-tested in
-// test/keymap.test.ts). No DOM, no React.
-
 import { MP3_BITRATES, type Mp3Kbps, type RenderOptions } from '@shared/types';
 import type { RenderScope } from '@shared/engine/protocol';
 import { patternLength, type Project } from '@shared/schema/project';
@@ -15,13 +11,11 @@ export interface ExportPrefs {
   patternId: string | null;
   loops: number;
   format: ExportFormat;
-  /** MP3 bitrate (default 320). */
   mp3Kbps?: Mp3Kbps;
   tail: 'leave' | 'cut';
   tailSec: number;
   normalize: boolean;
   openFolder: boolean;
-  /** One file per mixer insert plus "Master", into a new folder (no song info; never normalized one by one). */
   stems?: boolean;
 }
 
@@ -55,18 +49,15 @@ export function saveExportPrefs(p: ExportPrefs): void {
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify(p));
   } catch {
-    /* storage unavailable: the dialog still works, it just won't remember */
   }
 }
 
 export const FORMAT_LABEL: Record<ExportFormat, string> = { wav16: '16-bit WAV', wav24: '24-bit WAV', wav32f: '32-bit float WAV', mp3: 'MP3' };
 
-/** "MP3 320 kbps" / "24-bit WAV". */
 export function formatLabel(prefs: Pick<ExportPrefs, 'format' | 'mp3Kbps'>): string {
   return prefs.format === 'mp3' ? `MP3 ${prefs.mp3Kbps ?? 320} kbps` : FORMAT_LABEL[prefs.format];
 }
 
-/** Pure: the render options a set of prefs produces for a project (null = nothing to render). */
 export function exportRequest(prefs: ExportPrefs, p: Project): { opts: Partial<RenderOptions>; ticks: number; label: string } | null {
   const ts = p.transport.timeSig;
   const bar = ticksPerBar(ts);
@@ -97,7 +88,6 @@ export function exportRequest(prefs: ExportPrefs, p: Project): { opts: Partial<R
   if (prefs.format === 'mp3') opts.mp3Kbps = prefs.mp3Kbps ?? 320;
   if (prefs.scope === 'pattern' && prefs.loops > 1) opts.loops = prefs.loops;
   if (prefs.stems) {
-    // Stems keep the mix balance: normalizing each file on its own would undo it.
     opts.stems = true;
     label = prefs.scope === 'song' ? 'Export stems' : label.replace(/^Export /, 'Export stems of ');
   } else if (prefs.normalize) opts.normalize = true;

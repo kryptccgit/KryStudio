@@ -1,6 +1,3 @@
-// Interactive tours (src/tours, research/22 §1): step sequencing and tour 4's branches, every done predicate on
-// fake app state, the recovery advice when a target isn't on screen, card placement, the "offer the first tour
-// once" memory, and integrity (anchors, commands and data-tour hooks the tours rely on exist).
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -27,8 +24,6 @@ import {
 import type { TourCtx, TourSnapshot, TourStep } from '../src/tours/types';
 import { GUIDE_ANCHORS, isGuideAnchor } from '../src/guides/anchors';
 import { HOME_ACTION_IDS } from '../src/home/logic';
-
-// ── Fixtures ──────────────────────────────────────────────────────────
 
 const snap = (over: Partial<TourSnapshot> = {}): TourSnapshot => ({
   homeOpen: false,
@@ -66,8 +61,6 @@ function step(tourId: keyof typeof TOURS, id: string, c: TourCtx = {}): TourStep
 
 const done = (st: TourStep, s: TourSnapshot, base: TourSnapshot = snap(), c: TourCtx = {}): boolean => isStepDone(st, s, base, c);
 
-// ── Sequencing ────────────────────────────────────────────────────────
-
 test('the five tours are listed in order and found by id', () => {
   assert.deepEqual(TOUR_ORDER, ['first-beat', 'windows', 'song', 'ai', 'master']);
   for (const id of TOUR_ORDER) assert.equal(tourById(id)?.id, id);
@@ -100,11 +93,9 @@ test('tour 4 starts with a chooser and follows only the chosen path', () => {
     assert.deepEqual(stepsFor(ai, { choice }).map((s) => s.id), ['choose', 'agents-open', 'connect-tab', 'install', 'restart', 'ask', 'safety'], choice);
   }
   assert.deepEqual(stepsFor(ai, { choice: 'api-key' }).map((s) => s.id), ['choose', 'get-key', 'agents-chat', 'paste-key', 'first-message', 'safety']);
-  // texts follow the choice
   assert.match(textOf(step('ai', 'install', { choice: 'cursor' }).title, { choice: 'cursor' }), /Cursor/);
   assert.match(textOf(step('ai', 'restart', { choice: 'claude-desktop' }).text, { choice: 'claude-desktop' }), /Claude Desktop/);
   assert.match(textOf(step('ai', 'restart', { choice: 'claude-code' }).title, { choice: 'claude-code' }), /session/);
-  // the API key path links to the console and is honest about cost
   const key = step('ai', 'get-key', { choice: 'api-key' });
   assert.equal(key.links?.[0].url, 'https://console.anthropic.com/');
   assert.ok(key.notes?.some((n) => /money|costs/i.test(textOf(n, {}))));
@@ -135,8 +126,6 @@ test('moveIndex: clamps at the start, null past the end', () => {
   assert.equal(moveIndex(2, 1, 5), 3);
   assert.equal(moveIndex(4, 1, 5), null);
 });
-
-// ── Done predicates ───────────────────────────────────────────────────
 
 test('tour 1 done predicates', () => {
   const base = snap();
@@ -230,8 +219,6 @@ test('a throwing predicate never advances', () => {
   assert.equal(isStepDone({ id: 'r', do: 'read', title: 't', text: 't' }, snap(), snap(), {}), false);
 });
 
-// ── Do it for me ──────────────────────────────────────────────────────
-
 test('"Do it for me" actions are real: commands exist, panels exist, steps hit the right rows', () => {
   const actionsSrc = readFileSync(path.join(SRC, 'app', 'actions.ts'), 'utf8');
   const commandExists = (id: string): boolean => actionsSrc.includes(`id: '${id}'`) || /^view\.toggle\./.test(id);
@@ -250,8 +237,6 @@ test('"Do it for me" actions are real: commands exist, panels exist, steps hit t
   assert.deepEqual(actOf(step('first-beat', 'kick'), {}), { kind: 'steps', row: 'kick', steps: [0, 4, 8, 12] });
   assert.deepEqual(actOf(step('ai', 'install', { choice: 'vscode' }), { choice: 'vscode' }), { kind: 'installClient' });
 });
-
-// ── Project → rows ────────────────────────────────────────────────────
 
 function project(channels: string[], steps: Record<string, number[]>, clips = 0): Project {
   const ch = Object.fromEntries(channels.map((n, i) => [`ch${i}`, { id: `ch${i}`, name: n }]));
@@ -282,13 +267,11 @@ test('drumRows: the Kick and Clap rows by name, with fallbacks; steps count dist
   assert.equal(patternClipCount(project(['Kick'], {}, 3)), 3, 'audio clips do not count');
 });
 
-// ── Recovery ──────────────────────────────────────────────────────────
-
 test('recovery: Home covering the Studio comes first, except for title-bar targets', () => {
   const kick = step('first-beat', 'kick');
   assert.equal(recoveryFor(kick, 'ok', snap(), {}), null);
   assert.deepEqual(recoveryFor(kick, 'covered', snap({ homeOpen: true }), {})?.action, { kind: 'leaveHome' });
-  const save = step('first-beat', 'save'); // the File menu: on screen over Home
+  const save = step('first-beat', 'save');
   assert.notDeepEqual(recoveryFor(save, 'missing', snap({ homeOpen: true }), {})?.action, { kind: 'leaveHome' });
   assert.equal(recoveryFor({ id: 'r', do: 'read', title: 't', text: 't' }, 'missing', snap(), {}), null, 'anchorless steps never need it');
 });
@@ -315,8 +298,6 @@ test("recovery: a step's own advice, a detached window, something on top, else r
   assert.deepEqual(recoveryFor(step('first-beat', 'play'), 'missing', snap(), {})?.action, { kind: 'resetLayout' });
 });
 
-// ── Card placement ────────────────────────────────────────────────────
-
 test('placeCard: below, above, beside, else over; always inside the window', () => {
   const view = { width: 1280, height: 800 };
   const card = { width: 460, height: 300 };
@@ -339,8 +320,6 @@ test('placeCard: below, above, beside, else over; always inside the window', () 
   inside(placeCard({ left: 100, top: 100, width: 50, height: 50 }, { width: 476, height: 300 }, tiny), tiny);
 });
 
-// ── Offer once + memory ───────────────────────────────────────────────
-
 test('the first tour is offered once, never to someone who already took a tour, never without storage', () => {
   const ok = { storageOk: true, active: false };
   assert.equal(shouldOfferFirstTour(EMPTY_MEMORY, ok), true);
@@ -348,7 +327,6 @@ test('the first tour is offered once, never to someone who already took a tour, 
   assert.equal(shouldOfferFirstTour(noteStarted(EMPTY_MEMORY, 'ai'), ok), false);
   assert.equal(shouldOfferFirstTour(EMPTY_MEMORY, { storageOk: false, active: false }), false, "can't remember the answer: don't nag");
   assert.equal(shouldOfferFirstTour(EMPTY_MEMORY, { storageOk: true, active: true }), false);
-  // the round trip through storage keeps "offered"
   const stored = JSON.stringify({ ...EMPTY_MEMORY, offered: true });
   assert.equal(shouldOfferFirstTour(parseMemory(stored), ok), false);
 });
@@ -366,8 +344,6 @@ test('tour memory: parsing junk, started / finished, the Home card', () => {
   assert.equal(tourCardVisible({ ...EMPTY_MEMORY, cardHidden: true }), false);
   assert.equal(tourCardVisible(noteFinished(EMPTY_MEMORY, 'song')), true);
 });
-
-// ── Integrity: what the tours point at exists ─────────────────────────
 
 const SRC = path.resolve(process.cwd(), 'src');
 function sources(dir: string): string[] {
@@ -389,7 +365,6 @@ test('every guide anchor a tour uses is registered, and the data-tour hooks are 
     .map((f) => readFileSync(f, 'utf8'))
     .join('\n');
   for (const hook of ['data-tour-steps=', 'data-tour-panel=', 'data-tour-tab=', 'data-tour-client=']) assert.ok(all.includes(hook), `${hook} is set somewhere in src/`);
-  // the selectors the tours build use those hooks
   assert.equal(step('first-beat', 'kick').anchor?.selector?.(snap(), {}), '[data-tour-steps="ch_kick"]');
   assert.equal(step('first-beat', 'kick').anchor?.selector?.(snap({ kick: null }), {}), null);
   assert.equal(step('ai', 'install', { choice: 'vscode' }).anchor?.selector?.(snap(), { choice: 'vscode' }), '[data-tour-client="vscode"]');
@@ -398,8 +373,6 @@ test('every guide anchor a tour uses is registered, and the data-tour hooks are 
 test('guides and Home can start every tour', () => {
   for (const id of ['tours', 'tourFirstBeat', 'tourWindows', 'tourSong', 'tourAi', 'tourMaster']) assert.ok((HOME_ACTION_IDS as readonly string[]).includes(id), id);
 });
-
-// ── 5. Master a song ──────────────────────────────────────────────────
 
 const mastering = (over: Partial<TourSnapshot['master']> = {}): TourSnapshot['master'] => ({ open: true, songPicked: false, phase: 'idle', ab: 'after', verdict: 'open', ...over });
 
@@ -410,19 +383,15 @@ test('tour 5 walks Home ▸ Audio Tools ▸ Master a song… ▸ your song ▸ s
   );
   assert.ok(done(step('master', 'home'), snap({ homeOpen: true })));
   assert.ok(!done(step('master', 'home'), snap()));
-  // Mastering lives on Home ▸ Audio Tools: the tour opens it before pointing at the card.
   assert.ok(!done(step('master', 'tools'), snap({ homeOpen: true })));
   assert.ok(done(step('master', 'tools'), snap({ homeOpen: true, homeScreen: 'audio' })));
   assert.deepEqual(actOf(step('master', 'tools'), {}), { kind: 'showHome', screen: 'audio' });
-  // the window: Auto Mix on a project doesn't count (the runtime reports it as closed)
   assert.ok(!done(step('master', 'open'), snap({ homeOpen: true })));
   assert.ok(done(step('master', 'open'), snap({ homeOpen: true, master: mastering() })));
   assert.deepEqual(actOf(step('master', 'open'), {}), { kind: 'masterSong' });
-  // the card lives on Home, so Home being open is not "covering" it; off Audio Tools it offers the way there
   assert.equal(step('master', 'open').anchor?.chrome, true);
   assert.deepEqual(recoveryFor(step('master', 'open'), 'missing', snap({ homeOpen: true }), {})?.action, { kind: 'showHome', screen: 'audio' });
   assert.equal(recoveryFor(step('master', 'open'), 'ok', snap({ homeOpen: true }), {}), null);
-  // step 1 only chooses the song (nothing runs); Master my song starts it; the wait ends with the result
   assert.ok(!done(step('master', 'song'), snap({ master: mastering() })));
   assert.ok(done(step('master', 'song'), snap({ master: mastering({ songPicked: true }) })));
   assert.equal(step('master', 'song').anchor?.guide, 'automix.song');
@@ -432,14 +401,12 @@ test('tour 5 walks Home ▸ Audio Tools ▸ Master a song… ▸ your song ▸ s
   assert.ok(done(step('master', 'wait'), snap({ master: mastering({ phase: 'done' }) })));
   assert.match(step('master', 'wait').progress!(snap({ master: mastering({ phase: 'idle' }) }), snap(), {}) ?? '', /hasn't started/);
   assert.match(step('master', 'wait').progress!(snap({ master: mastering({ phase: 'failed' }) }), snap(), {}) ?? '', /didn't finish/);
-  // A/B: any switch counts; Keep: a decision (Export… also keeps); Export: the Export audio window
   const after = snap({ master: mastering({ phase: 'done' }) });
   assert.ok(!done(step('master', 'compare'), after, after));
   assert.ok(done(step('master', 'compare'), snap({ master: mastering({ phase: 'done', ab: 'before' }) }), after));
   assert.ok(!done(step('master', 'keep'), after));
   assert.ok(done(step('master', 'keep'), snap({ master: mastering({ phase: 'done', verdict: 'kept' }) })));
   assert.ok(done(step('master', 'export'), snap({ exportOpen: true })));
-  // the steps in the dialog point at its real buttons, never at a card over them
   for (const id of ['style', 'run']) assert.equal(step('master', id).anchor?.guide, 'automix.run');
   assert.equal(step('master', 'compare').anchor?.guide, 'automix.ab');
   assert.match(step('master', 'keep').anchor?.selector?.(snap(), {}) ?? '', /aria-label="Master a song"\] \[data-autofocus\]/);

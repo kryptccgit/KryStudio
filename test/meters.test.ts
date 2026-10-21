@@ -1,7 +1,3 @@
-// Meters and scopes (docs/ENGINE_PROTOCOL.md §15): the Krypt EQ response math must match the engine's
-// filters (reference values from the Rust test `combined_response_reference_values` in
-// engine/crates/dsp/src/effects/eq.rs), GR meter scaling + ballistics, spectrum smoothing,
-// telemetry parsing of watched slots, and the render_preview dynamics report.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -48,14 +44,11 @@ test('EQ sections: exact bell gain at the centre, Butterworth −3 dB at the cut
   for (const g of [-12, -3, 6, 18]) near(20 * Math.log10(svfMagnitude(designSvf('bell', 1000, 1.5, g, 48000), 1000, 48000)), g, 1e-9, `bell ${g}`);
   near(20 * Math.log10(svfMagnitude(designSvf('highpass', 500, Math.SQRT1_2, 0, 48000), 500, 48000)), -3.0103, 1e-3, 'hp');
   near(20 * Math.log10(svfMagnitude(designSvf('lowShelf', 100, 0.7, 9, 48000), 20, 48000)), 9, 0.3, 'shelf');
-  // the 24 dB/oct low cut: −3 dB at its frequency, ~ −24 dB an octave below
   const lowCut = EQ_BANDS[0];
   const p = paramsOf({ b1On: 1, b1Freq: 400, b1Slope: 1 });
   near(bandResponseDb(lowCut, p, 400, 48000), -3.0103, 1e-3, 'cut');
   near(bandResponseDb(lowCut, p, 200, 48000), -24.1, 0.3, 'octave');
-  // defaults: every band at 0 dB, cuts off → flat
   for (const db of eqResponseDb(paramsOf({}), [20, 100, 1000, 10000, 20000], 48000)) near(db, 0, 1e-9, 'flat');
-  // an off band contributes nothing even with gain set
   near(bandResponseDb(EQ_BANDS[2], paramsOf({ b3On: 0, b3Gain: 12, b3Freq: 1000 }), 1000, 48000), 0, 1e-12, 'off');
 });
 
@@ -89,7 +82,7 @@ test('GR ballistics: instant attack, 40 dB/s fall, peak hold, time-based (severa
   b.ingest({ 'i/a': 6 }, 0);
   assert.deepEqual(b.read('i/a', 0), [6, 6]);
   assert.deepEqual(b.read('i/a', 0), [6, 6], 'a second reader in the same frame sees the same value');
-  b.ingest({}, 16); // absent = no reduction
+  b.ingest({}, 16);
   const [shown, hold] = b.read('i/a', 100);
   near(shown, 2, 1e-9, 'fell 4 dB in 100 ms');
   assert.equal(hold, 6);

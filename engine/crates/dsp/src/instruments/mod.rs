@@ -1,9 +1,3 @@
-//! Shared instrument machinery: a sample-accurate event queue and a generic
-//! voice manager (polyphony limit with click-free stealing, mono legato +
-//! glide, slide notes, cut-group chokes). Everything is preallocated.
-
-// Per-sample index loops over parallel buffers are the clearest DSP style;
-// smoothers expose `next()` deliberately (they are not iterators).
 #![allow(clippy::needless_range_loop, clippy::should_implement_trait)]
 
 pub mod audioclip;
@@ -25,15 +19,11 @@ use crate::NoteExtras;
 
 pub(crate) const MAX_EVENTS: usize = 1024;
 
-/// Frames playable from a sample: the shortest of its first two channels
-/// (SampleData promises equal lengths; never trust it on the audio thread).
 #[inline]
 pub(crate) fn usable_frames(s: &crate::SampleData) -> usize {
     s.channels.iter().take(2).map(|c| c.len()).min().unwrap_or(0)
 }
-/// Glide time used by slide notes when the channel has no glide time set.
 pub(crate) const DEFAULT_SLIDE_MS: f32 = 70.0;
-/// Choke / steal fade.
 pub(crate) const CHOKE_MS: f32 = 2.0;
 
 #[derive(Clone, Copy, Debug)]
@@ -42,8 +32,6 @@ pub(crate) struct NoteStart {
     pub pitch: f32,
     pub vel: f32,
     pub extras: NoteExtras,
-    /// The voice replaces one that is fading out (mono retrigger): fade in
-    /// over the same CHOKE_MS so the handover is a crossfade, not a sum.
     pub xfade: bool,
 }
 
@@ -61,26 +49,18 @@ struct Event {
     ev: Ev,
 }
 
-/// A voice implementation. `Shared` holds the instrument-wide (smoothed) params.
 pub(crate) trait Voice {
     type Shared;
-    /// Start or retrigger. `glide_from`: start pitch to glide from, if any.
     fn start(&mut self, sh: &Self::Shared, n: &NoteStart, glide_from: Option<f32>, glide_ms: f32);
-    /// Change pitch without retriggering (legato / slide).
     fn legato(&mut self, sh: &Self::Shared, pitch: f32, glide_ms: f32);
-    /// Note off (may be ignored by one-shot voices).
     fn release(&mut self, sh: &Self::Shared);
-    /// Fast (~2 ms) fade to silence.
     fn choke(&mut self);
     fn kill(&mut self);
     fn active(&self) -> bool;
     fn choking(&self) -> bool;
     #[allow(dead_code)]
     fn pitch(&self) -> f32;
-    /// Render ADDING into l/r.
     fn render(&mut self, sh: &Self::Shared, l: &mut [f32], r: &mut [f32]);
-    /// Called before each `render` with the span's first frame within the
-    /// current `VoiceManager::render` call (song-locked modulation needs it).
     fn span_start(&mut self, _frame: usize) {}
 }
 
@@ -105,7 +85,6 @@ pub(crate) struct VoiceManager<V: Voice> {
 }
 
 impl<V: Voice> VoiceManager<V> {
-    /// `max_poly` sounding voices; a few spare slots let stolen voices fade.
     pub fn new(max_poly: usize, mut make: impl FnMut() -> V) -> Self {
         let cap = max_poly + 4;
         Self {
@@ -163,7 +142,6 @@ impl<V: Voice> VoiceManager<V> {
         self.glide_ms = if glide_ms.is_finite() { glide_ms.clamp(0.0, 10_000.0) } else { 0.0 };
     }
 
-    /// Render `l.len()` frames, applying queued events at their offsets.
     pub fn render(&mut self, sh: &V::Shared, l: &mut [f32], r: &mut [f32]) {
         let n = l.len().min(r.len());
         if !self.events.is_empty() {
@@ -190,7 +168,6 @@ impl<V: Voice> VoiceManager<V> {
         if pos < n {
             self.render_span(sh, pos, &mut l[pos..n], &mut r[pos..n]);
         }
-        // keep future events (offset beyond this block), shifted
         if consumed > 0 {
             self.events.drain(..consumed);
         }
@@ -230,7 +207,6 @@ impl<V: Voice> VoiceManager<V> {
         }
     }
 
-    /// Most recently started voice that is sounding and not fading out.
     fn newest_sounding(&self) -> Option<usize> {
         let mut best: Option<usize> = None;
         for (i, v) in self.voices.iter().enumerate() {
@@ -245,7 +221,6 @@ impl<V: Voice> VoiceManager<V> {
         if let Some(i) = self.voices.iter().position(|v| !v.active()) {
             return i;
         }
-        // all slots busy (only possible with many simultaneous chokes): take the oldest
         let mut oldest = 0;
         for i in 1..self.voices.len() {
             if self.meta[i].order < self.meta[oldest].order {
@@ -261,7 +236,6 @@ impl<V: Voice> VoiceManager<V> {
         self.push_held(n.key, n.pitch);
         let glide = self.glide_ms;
 
-        // Slide note: glide the previously sounding note, no retrigger.
         if n.extras.slide {
             if let Some(i) = self.newest_sounding() {
                 let gt = if glide > 0.0 { glide } else { DEFAULT_SLIDE_MS };
@@ -275,7 +249,6 @@ impl<V: Voice> VoiceManager<V> {
         if self.mono {
             let cur = self.newest_sounding();
             if let (Some(i), true, true) = (cur, was_held, glide > 0.0) {
-                // legato overlap: glide without retrigger
                 self.voices[i].legato(sh, n.pitch, glide);
                 let o = self.next_order();
                 self.meta[i] = Meta { key: n.key, held: true, order: o };
@@ -296,7 +269,6 @@ impl<V: Voice> VoiceManager<V> {
             return;
         }
 
-        // Poly: enforce the voice limit by fading the oldest (released first).
         loop {
             let sounding = self.voices.iter().filter(|v| v.active() && !v.choking()).count();
             if sounding < self.max_poly {
@@ -331,7 +303,6 @@ impl<V: Voice> VoiceManager<V> {
 
     fn handle_off(&mut self, sh: &V::Shared, key: u8) {
         self.remove_held(key);
-        // the oldest held voice playing this key
         let mut target: Option<usize> = None;
         for (i, v) in self.voices.iter().enumerate() {
             let m = &self.meta[i];
@@ -341,7 +312,6 @@ impl<V: Voice> VoiceManager<V> {
         }
         let Some(i) = target else { return };
         if self.mono && self.glide_ms > 0.0 && self.n_held > 0 {
-            // return to the most recent still-held key (last-note priority)
             let (k2, p2) = self.held[self.n_held - 1];
             self.voices[i].legato(sh, p2, self.glide_ms);
             self.meta[i].key = k2;
@@ -362,14 +332,11 @@ impl<V: Voice> VoiceManager<V> {
     }
 }
 
-/// Instrument-level output stage: gain smoothing, add into the engine's
-/// buffers, peak tracking for the Channel Rack LED.
 pub(crate) struct OutStage {
     pub mix_l: Vec<f32>,
     pub mix_r: Vec<f32>,
     pub gain: crate::blocks::Smooth,
     pub peak: f32,
-    /// snap the gain smoother on the first block (params arrive after creation)
     pub fresh: bool,
 }
 
@@ -392,7 +359,6 @@ impl OutStage {
         self.mix_l.len()
     }
 
-    /// Mix buffers [..n] → out (adding), applying the smoothed gain.
     pub fn emit(&mut self, out: &mut [&mut [f32]; 2], at: usize, n: usize) -> f32 {
         let mut pk = 0.0f32;
         let (ol, or) = out.split_at_mut(1);
@@ -410,7 +376,6 @@ impl OutStage {
     }
 }
 
-/// Generic block loop for instruments built on `VoiceManager`.
 macro_rules! instrument_process {
     ($self:ident, $ctx:ident, $out:ident) => {{
         let frames = $ctx.frames.min($out[0].len()).min($out[1].len());

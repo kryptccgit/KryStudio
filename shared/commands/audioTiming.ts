@@ -1,15 +1,7 @@
-// Keeps audio clips showing the same audio when an Audio Clip channel's
-// timing params change (tempo_sync / src_bpm / stretch). Those params change
-// how source seconds map to ticks, so the channel's playlist clips are
-// rescaled (start stays; length, offset and fades scale). Used by every
-// command that writes generator params, so a knob, a MIDI controller, the
-// analysis dialog and an agent all get the same result.
-
 import type { PluginCatalog } from '../plugins/types';
 import type { Project } from '../schema/project';
 import { AUDIOCLIP, audioTickBpm } from '../analyzer/tempo';
 
-/** Run `mutate` (which edits channel `channelId`'s generator), then rescale its audio clips if their tick tempo changed. */
 export function keepAudioInPlace<R>(d: Project, catalog: PluginCatalog, channelId: string, mutate: () => R): R {
   const ch = d.channels[channelId];
   if (!ch || ch.generator.type !== AUDIOCLIP) return mutate();

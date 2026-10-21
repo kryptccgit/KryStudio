@@ -1,10 +1,3 @@
-// Craft tools (research/10-sound-and-craft.md): get_playbook with a fixture
-// playbook / presets / factory index (sound resolution, absolute start bars,
-// transitions per boundary, the library-focus merge, genre resolution);
-// add_transition through callTool with a fake factory index (tempo-synced FX
-// that end exactly on the boundary, impacts that start on it, the snare roll
-// pattern, the filter-sweep automation, silence, fallbacks without a kit, one
-// undo group per call); review_song end to end (read-only, ranked issues).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,8 +20,6 @@ import { briefNumbers, buildRecipe, chooseGenre, focusNumbers, genericPlaybook }
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'krypt-craft-tools-'));
 const BAR = 3840;
-
-// ── Fixtures ────────────────────────────────────────────────────────────
 
 const PB: Playbook = {
   id: 'edm',
@@ -101,7 +92,6 @@ const INDEX: FactoryIndex = {
   ],
 };
 
-// The factory files exist (get_playbook only recommends installed samples, like load_sample / write_pattern).
 for (const s of INDEX.samples) {
   const f = path.join(TMP, 'factory', s.path.slice('factory:'.length));
   fs.mkdirSync(path.dirname(f), { recursive: true });
@@ -231,13 +221,10 @@ const READ_CTX: RunCtx = {
   },
 };
 
-/** get_playbook over the fixture registry (the real one is filled by the playbooks agent). */
 async function playbook(deps: MainDeps, caller: ToolCaller, args: Record<string, unknown>) {
   const def = craftTools(REGISTRY).find((t) => t.name === 'get_playbook')!;
   return def.run(deps, caller, def.input.parse(args) as never, READ_CTX);
 }
-
-// ── get_playbook ────────────────────────────────────────────────────────
 
 test('get_playbook: sounds resolved by role + genre, absolute start bars, transitions per boundary, exact build order', async () => {
   const { deps, caller } = makeDeps();
@@ -269,14 +256,14 @@ test('get_playbook: sounds resolved by role + genre, absolute start bars, transi
     'BUILD ORDER',
     'begin_edit {"label":"EDM song"}',
     'set_tempo {"bpm":126}',
-    'load_sample {"channel":"Kick","sample":"factory:drums/kick-punchy.wav"}', // Kick exists in the default kit
-    'load_preset {"preset":"factory:bass/dark-reese","name":"Bass"}', // Bass doesn't: a new channel
+    'load_sample {"channel":"Kick","sample":"factory:drums/kick-punchy.wav"}',
+    'load_preset {"preset":"factory:bass/dark-reese","name":"Bass"}',
     'apply_chain {"chain":"factory:chain/bass/reese-grit","insert":"Bass"}',
     '"op":"groove","template":"dance"',
     'arrange {"placements":[{"pattern":"Intro","bars":"1-16"},{"pattern":"Build","bars":"17-24"},{"pattern":"Drop","bars":"25-40"}',
     'add_marker {"markers":[{"at":1,"name":"Intro"}',
     'add_transition {"kind":"riser","at_bars":[25,49],"length_bars":8}',
-    'apply_chain {"chain":"factory:chain/drumbus/glue","insert":"new:Drum Bus"}', // buses are created with the playbook's name
+    'apply_chain {"chain":"factory:chain/drumbus/glue","insert":"new:Drum Bus"}',
     'route {"from_insert":"Kick","to":"Drum Bus"}',
     'route {"from_insert":"Supersaw","to":"Reverb","level_db":-12,"exclusive":false}',
     'apply_chain {"chain":"factory:chain/master/club-loud","insert":"master"}',
@@ -318,7 +305,6 @@ test('get_playbook: genre from the argument, the project, the brief, then the li
   const none = await playbook(deps, caller, {});
   assert.match(none.message, /No genre given/);
 
-  // The real registry (empty until the playbooks land, full after): never an error.
   const real = await makeDeps().call('get_playbook', { genre: 'edm' });
   assert.equal(real.ok, true, real.message);
   assert.match(real.text ?? '', /BUILD ORDER/);
@@ -337,7 +323,6 @@ test('get_playbook: a library style focus overrides tempo (octave reading), key,
   assert.match(r.text!, /YOUR REFERENCES SAY \(style focus "Club refs", 12 analysed songs\)/);
   assert.match(r.text!, /progressions "i iv VI V"; sections of about 8 bars; form "A B A B"; loudness -7.5 LUFS/);
   assert.ok(r.text!.includes('Tempo 128 bpm (your references: median 64, read at 128 for this genre)'), r.text);
-  // The user's words beat the references.
   const brief = await playbook(deps, caller, { brief: 'edm at 140 bpm in F# minor' });
   assert.deepEqual([(brief.data as { bpm: number }).bpm, (brief.data as { key: string }).key], [140, 'F# minor']);
   assert.deepEqual(briefNumbers('trap 150 bpm, F#m vibes'), { bpm: 150, key: 'F#m' });
@@ -361,12 +346,9 @@ test('get_playbook: the playbook\'s own groove (template, amounts, parts) goes i
   assert.ok(rec.text.includes('transform_notes {"pattern":"Intro","channel":"Hat","ops":[{"op":"groove","template":"hiphop","amount":0.25,"velocity":0.4}]}'), rec.text);
   assert.match(rec.text, /the same op for Hat in every section pattern \(only these: the rest stays on the grid\)/);
   assert.match(rec.text, /Groove: transform_notes op "groove", template "hiphop" \(amount 0.25, velocity 0.4\) on Hat/);
-  // An unknown template is ignored (the genre default applies).
   const odd = buildRecipe({ ...PB, groove: { template: 'polka', amount: 1, velocity: 1, parts: [] } } as Playbook, { genre: 'edm', source: 'argument', presets: [], samples: null, channels: [], projectBpm: 126, projectSwing: 0 });
   assert.equal(odd.groove?.template, 'dance');
 });
-
-// ── add_transition ──────────────────────────────────────────────────────
 
 function fxClips(doc: DocHost) {
   const p = doc.project;
@@ -396,7 +378,6 @@ test('add_transition riser: tempo-synced FX end exactly on each boundary, on an 
   assert.equal(p.mixer.inserts[ch.insertId].name, 'FX');
   assert.equal(p.playlist.tracks[clips[0].trackId].name, 'FX');
 
-  // An impact STARTS on the downbeat (one-shot at the project tempo), through the same FX insert.
   const imp = await call('add_transition', { at_bars: [17], kind: 'impact' });
   assert.equal(imp.ok, true, imp.message);
   const p2 = doc.project;
@@ -406,7 +387,6 @@ test('add_transition riser: tempo-synced FX end exactly on each boundary, on an 
   assert.equal(p2.channels[impact.channelId!].insertId, ch.insertId);
   assert.equal(p2.mixer.insertOrder.filter((id) => p2.mixer.inserts[id].name === 'FX').length, 1, 'one FX insert');
 
-  // 8 bars picks the 8-bar riser; a length between the samples stretches one to exactly that many bars.
   const r8 = await call('add_transition', { at_bars: [49], kind: 'riser', length_bars: 8 });
   assert.equal(r8.ok, true, r8.message);
   const long = fxClips(doc).find((c) => c.start === 40 * BAR)!;
@@ -417,12 +397,10 @@ test('add_transition riser: tempo-synced FX end exactly on each boundary, on an 
   assert.equal(six.length, 6 * BAR);
   assert.match(r6.message, /stretched to 6 bars/);
 
-  // The same call again changes nothing: reported, never a fake success.
   const again = await call('add_transition', { at_bars: [17, 33], kind: 'riser', length_bars: 4 });
   assert.equal(again.ok, false);
   assert.match(again.message, /No change/);
 
-  // undo_last reverts the whole call.
   const undo = await call('undo_last', {});
   assert.equal(undo.ok, true, undo.message);
   assert.equal(fxClips(doc).filter((c) => c.start + c.length === 64 * BAR).length, 0);
@@ -448,7 +426,6 @@ test('add_transition snare-roll: 8ths → 16ths → 32nds with a rising velocity
   const clips = Object.values(p.playlist.clips).filter((c) => c.patternId === pat.id).sort((a, b) => a.start - b.start);
   assert.deepEqual(clips.map((c) => [c.start, c.length]), [[14 * BAR, 2 * BAR], [46 * BAR, 2 * BAR]]);
   assert.notEqual(p.transport.activePatternId, pat.id, 'the active pattern stays');
-  // A second roll of the same length reuses the pattern.
   const r2 = await call('add_transition', { at_bars: [33], kind: 'snare-roll' });
   assert.equal(r2.ok, true);
   assert.equal(Object.values(doc.project.patterns).filter((x) => x.name.startsWith('Snare Roll')).length, 1);
@@ -512,8 +489,6 @@ test('add_transition without a factory kit: a clear sentence plus the fallback (
   assert.equal(early.ok, false);
   assert.match(early.message, /needs 2 bars before it/);
 });
-
-// ── review_song ─────────────────────────────────────────────────────────
 
 test('review_song: renders the song, returns a score and ranked issues with tool-call fixes, and never modifies the project', async () => {
   const { doc, call, renders } = makeDeps();

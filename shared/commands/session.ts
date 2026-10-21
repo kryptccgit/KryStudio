@@ -1,12 +1,3 @@
-// Clip launcher (Session view) commands, Wave 12.2 (research/16 §2.1).
-// The grid: one column per playlist track, one row per scene, at most one
-// launch clip per slot. `project.session` is created lazily on first use.
-// Also the bridges between the launcher and the arrangement:
-//   session.fromArrangement  playlist sections → scenes
-//   session.scenesToSong     a scene order → playlist clips
-//   session.capture          the engine's launch recording → playlist clips
-// Pure document edits (no I/O); each is ONE undo step.
-
 import { z } from 'zod';
 import { defineCommand, must, plural, CommandError, type CommandContext } from './types';
 import { patternLength, type Clip, type Project } from '../schema/project';
@@ -30,9 +21,6 @@ export const LAUNCH_CLIP_PREFIX = 'lc';
 
 const NAME_MAX = 64;
 
-// ── Helpers (exported for main / MCP / tests) ─────────────────────────
-
-/** The project's session, created on first use (inside a command draft). */
 export function ensureSession(d: Project): Session {
   if (!d.session) d.session = emptySession();
   return d.session;
@@ -71,7 +59,6 @@ function addSceneTo(d: Project, ctx: CommandContext, opts: { name?: string; colo
   return id;
 }
 
-/** Length in ticks of an audio-clip channel's audio at the current tempo, rounded up to a bar (FALLBACK when unknown). */
 export function audioLaunchLength(d: Project, ctx: Pick<CommandContext, 'catalog'>, channelId: string): number {
   const ch = d.channels[channelId];
   const bar = ticksPerBar(d.transport.timeSig);
@@ -81,7 +68,6 @@ export function audioLaunchLength(d: Project, ctx: Pick<CommandContext, 'catalog
   return Math.max(bar, Math.ceil(Math.round(ticks) / bar) * bar);
 }
 
-/** The source's natural length: the pattern length, or the audio length at the current tempo (rounded up to a bar). */
 function sourceLength(d: Project, ctx: CommandContext, c: Pick<LaunchClip, 'kind' | 'patternId' | 'channelId'>): number {
   if (c.kind === 'pattern') return patternLength(must(d.patterns[c.patternId ?? ''], `Pattern ${c.patternId} not found`), d.transport.timeSig);
   return audioLaunchLength(d, ctx, c.channelId ?? '');
@@ -93,7 +79,6 @@ function audioChannel(d: Project, id: string) {
   return ch;
 }
 
-/** Remove every launch clip matching `pred` (deletion hooks in the track / pattern / channel commands). */
 export function removeLaunchClipsWhere(d: Project, pred: (c: LaunchClip) => boolean): number {
   const s = d.session;
   if (!s) return 0;
@@ -107,12 +92,9 @@ export function removeLaunchClipsWhere(d: Project, pred: (c: LaunchClip) => bool
   return n;
 }
 
-/** Key-order-independent JSON (for "did anything change"). */
 function canonical(v: unknown): string {
   return JSON.stringify(v, (_k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([p], [q]) => (p < q ? -1 : p > q ? 1 : 0))) : x));
 }
-
-// Arg schemas
 
 const zQuant = z.enum(LAUNCH_QUANTS);
 const zFollow = z.object({
@@ -126,8 +108,6 @@ const zTempo = z.number().min(10).max(999);
 function followRule(f: z.infer<typeof zFollow>): FollowRule {
   return { action: f.action, chance: f.chance, otherAction: f.otherAction, afterBars: f.afterBars };
 }
-
-// ── Scenes ────────────────────────────────────────────────────────────
 
 export const sessionAddScene = defineCommand({
   id: 'session.addScene',
@@ -183,8 +163,6 @@ export const sessionMoveScene = defineCommand({
   },
 });
 
-// ── Launch clips ──────────────────────────────────────────────────────
-
 const zClipFields = {
   name: z.string().max(NAME_MAX).optional(),
   color: z.string().nullable().optional(),
@@ -222,7 +200,7 @@ export const sessionSetClip = defineCommand({
     if (a.name) c.name = a.name;
     if (a.quantize) c.quantize = a.quantize;
     if (a.follow) c.follow = followRule(a.follow);
-    if (!old || canonical(old) !== canonical(c)) s.clips[id] = c; // an identical slot is not an edit
+    if (!old || canonical(old) !== canonical(c)) s.clips[id] = c;
     return { id, replaced: !!old };
   },
 });
@@ -324,9 +302,6 @@ export const sessionSetQuantize = defineCommand({
   },
 });
 
-// ── Playlist clip surgery (capture, scenesToSong) ─────────────────────
-
-/** Clear [start, end) on a track: pattern / audio clips inside are removed, crossing ones trimmed or split. */
 export function clearTrackSpan(d: Project, trackId: string, start: number, end: number, ctx: CommandContext): void {
   if (end <= start) return;
   for (const c of Object.values(d.playlist.clips)) {
@@ -370,12 +345,6 @@ export function clearTrackSpan(d: Project, trackId: string, start: number, end: 
 
 const mod = (a: number, n: number): number => ((a % n) + n) % n;
 
-/**
- * Write what launch clip `lc` plays over [start, end) on `trackId` as playlist clips. `srcPos` = ticks into the
- * source at `start` (absent = the clip's own offset, i.e. launched at `start`). A looping clip wraps at
- * offset + length; a pattern clip whose loop is whole pattern lengths becomes ONE playlist clip (playlist pattern
- * clips loop by themselves), anything else is tiled one loop pass per clip. Returns the new clip ids.
- */
 export function writeLaunchSpan(d: Project, lc: LaunchClip, trackId: string, start: number, end: number, srcPos: number | undefined, ctx: CommandContext): string[] {
   const ids: string[] = [];
   if (end <= start) return ids;
@@ -419,8 +388,6 @@ export function writeLaunchSpan(d: Project, lc: LaunchClip, trackId: string, sta
   return ids;
 }
 
-// ── Session ⇄ arrangement ─────────────────────────────────────────────
-
 const zEntry = z.object({
   trackId: z.string(),
   clipId: z.string(),
@@ -453,7 +420,6 @@ export const sessionCapture = defineCommand({
       placed += writeLaunchSpan(d, lc, e.trackId, start, end, Math.round(e.offset), ctx).length;
       spans++;
     }
-    // The capture IS the arrangement now: Play should play it, not the active pattern.
     if (placed > 0) d.transport.mode = 'song';
     return { placed, spans, skipped };
   },

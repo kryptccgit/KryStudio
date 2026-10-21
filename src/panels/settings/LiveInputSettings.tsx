@@ -1,7 +1,3 @@
-// Settings → MIDI input, Recording, Audio input, Controller links.
-// The engine owns every device; main persists the choices (settings.json)
-// and pushes them to the engine. Every change confirms or toasts its failure.
-
 import { useEffect, useState, type ReactNode } from 'react';
 import { Loader2, RefreshCw, Trash } from 'lucide-react';
 import type { DeviceInfo } from '@shared/engine/protocol';
@@ -111,7 +107,6 @@ export function LiveInputSettings() {
   const inp = audioInputSettings(settings);
   const dev = audioDevices?.find((d) => d.id === inp.deviceId) ?? audioDevices?.find((d) => d.isDefault) ?? null;
   const input = record.input;
-  // A selection the device can't provide shows what the engine falls back to (channel 1, or 1+2).
   const chOptions = channelOptions(dev?.channels ?? 2);
   const chValue = chOptions.some((o) => o.value === inp.channels.join(',')) ? inp.channels.join(',') : chOptions[0].value;
 

@@ -1,12 +1,9 @@
-// Channel Rack step tools: FL's "Fill each N steps" and rotate (shift steps
-// left / right). Pure commands; each call is one undo step.
 import { z } from 'zod';
 import { defineCommand, must, plural, CommandError, type CommandDef } from './types';
 import { defaultNote, patternLength, type Note, type Pattern, type Project } from '../schema/project';
 import { ID_PREFIX } from '../schema/ids';
 import { TICKS_PER_STEP } from '../schema/time';
 
-/** Max row length the step tools accept (FL caps patterns at 512 steps; we allow more). */
 const MAX_STEPS = 4096;
 
 function rackTarget(d: Project, patternId: string, channelId: string): { pat: Pattern; notes: Record<string, Note> } {
@@ -20,7 +17,6 @@ function pruneEmpty(pat: Pattern, channelId: string): void {
   if (pat.notes[channelId] && Object.keys(pat.notes[channelId]).length === 0) delete pat.notes[channelId];
 }
 
-/** A step-sequencer note: starts on a 16th step and lasts at most one step. */
 function isStepNote(n: Note): boolean {
   return n.tick % TICKS_PER_STEP === 0 && n.dur <= TICKS_PER_STEP;
 }

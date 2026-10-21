@@ -1,11 +1,3 @@
-// Project ⇄ Standard MIDI File conversion. Pure TS.
-//
-// Import: every MIDI track (format-0 files split by MIDI channel) becomes
-// one instrument channel in ONE new pattern; ticks are rescaled to PPQ 960
-// and velocity 1..127 maps to 0..1.
-// Export: one pattern's channels (in Channel Rack order) become format-1
-// tracks after a conductor track carrying the project tempo + meter.
-
 import type { Project } from '../schema/project';
 import { PPQ } from '../schema/time';
 import { convertPpq, type SmfFile, type SmfNote, type SmfTrack } from './smf';
@@ -14,7 +6,6 @@ export interface MidiImportNote {
   tick: number;
   dur: number;
   key: number;
-  /** 0..1 */
   vel: number;
 }
 
@@ -25,7 +16,6 @@ export interface MidiImportTrack {
 
 export interface MidiImportPlan {
   tracks: MidiImportTrack[];
-  /** First tempo in the file, if any. */
   bpm: number | null;
   timeSig: { num: number; den: number } | null;
   noteCount: number;
@@ -39,7 +29,6 @@ function trackLabel(t: SmfTrack, index: number, channel: number | null): string 
   return label.slice(0, MAX_NAME);
 }
 
-/** Turn a parsed SMF into per-channel note lists at PPQ 960. Empty tracks are dropped. */
 export function planMidiImport(file: SmfFile): MidiImportPlan {
   const f = convertPpq(file, PPQ);
   const tracks: MidiImportTrack[] = [];
@@ -74,12 +63,10 @@ export function planMidiImport(file: SmfFile): MidiImportPlan {
   };
 }
 
-/** MIDI channel for the i-th exported track (skips 10, the GM drum channel). */
 function exportChannel(i: number): number {
   return (i < 9 ? i : i + 1) % 16;
 }
 
-/** Build a format-1 SMF (PPQ 960) from one pattern. Throws if the pattern doesn't exist. */
 export function patternToSmf(project: Project, patternId: string): SmfFile {
   const pat = project.patterns[patternId];
   if (!pat) throw new Error(`Pattern ${patternId} not found`);
@@ -93,14 +80,13 @@ export function patternToSmf(project: Project, patternId: string): SmfFile {
       name: project.channels[chId]?.name ?? chId,
       program: null,
       notes: Object.values(notes)
-        .filter((n) => !n.mute) // muted notes never play, so they don't export either
+        .filter((n) => !n.mute)
         .sort((a, b) => a.tick - b.tick || a.key - b.key)
         .map((n) => ({
           tick: n.tick,
           dur: Math.max(1, n.dur),
           key: n.key,
           vel: Math.max(1, Math.min(127, Math.round(n.vel * 127))),
-          // FL maps note colour groups to MIDI channels; colour 0 keeps the track's channel
           channel: n.color ? n.color : midiCh,
         })),
     });

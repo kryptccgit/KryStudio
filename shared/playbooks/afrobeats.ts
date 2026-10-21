@@ -1,4 +1,3 @@
-// Afrobeats: syncopated percussion grooves, bright maj7 chords, a melodic bass and call-and-response hooks.
 import type { Playbook } from './types';
 
 export const AFROBEATS: Playbook = {

@@ -1,6 +1,3 @@
-// The built-in chat's provider setup (Agents panel ▸ Chat): pick Anthropic, OpenAI (ChatGPT) or OpenRouter, the model,
-// and, when that provider has no key yet, the key box (shared/agent/providers.ts; keys are saved encrypted by main).
-
 import { useEffect, useState } from 'react';
 import { ExternalLink, KeyRound } from 'lucide-react';
 import { AGENT_PROVIDERS, AGENT_PROVIDER_IDS, keyProblem, modelFor, type AgentProvider } from '@shared/agent/providers';

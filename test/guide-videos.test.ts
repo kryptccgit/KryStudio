@@ -1,7 +1,3 @@
-// Tutorial videos in the Guides (shared/guides/videos.ts): the {{video:…}} / {{videos}} markup, the manifest (ids,
-// articles, the files in resources/guides/videos agree with it), how a block renders when a video isn't shipped
-// (never a broken player), the Home quickstart card rule, and the read-only app:// handler that streams the files
-// (flat names only, range requests for seeking).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,7 +25,6 @@ import { VIDEOS_ARTICLE, mediaErrorMessage, videoBlockView, videoIndex } from '.
 import { quickstartCardVisible } from '../src/home/logic';
 import { guideVideoResponse, parseRange } from '../electron/system/guide-videos';
 
-/** The repo root: the first folder up from this (bundled) test that has a package.json. */
 function repoRoot(): string {
   let dir = import.meta.dirname ?? process.cwd();
   for (let i = 0; i < 6; i++) {
@@ -42,8 +37,6 @@ const VIDEO_DIR = path.join(repoRoot(), 'resources', 'guides', 'videos');
 
 const fixture = (id: string, durationSec: number | null): GuideVideo => ({ id, title: id, description: `${id} video`, durationSec, article: 'getting-started' });
 const FIX: GuideVideo[] = [fixture('shipped', 61), fixture('later', null), fixture('broken', Number.NaN)];
-
-// ── Markup ────────────────────────────────────────────────────────────
 
 test('{{video:<id>}} and {{videos}} parse to blocks; malformed ones stay visible text', () => {
   const b = parseGuide('## Watch\n\n{{video:quickstart}}\n\n{{videos}}\n\n{{video:}}\n\n{{videos:extra}}\n\n{{video:a b}}');
@@ -66,8 +59,6 @@ test('a video block adds its title to search only once the video ships', () => {
   }
   if (soon) assert.equal(inlineText(blockInlines(parseGuide(`{{video:${soon.id}}}`))).trim(), '', 'a coming-soon video adds no text');
 });
-
-// ── Missing videos degrade, never a broken player ─────────────────────
 
 test('videoBlockView: shipped → player, not shipped (null / NaN duration) → nothing, unknown id → a problem note', () => {
   assert.deepEqual(videoBlockView('shipped', FIX), { kind: 'player', video: FIX[0] });
@@ -101,8 +92,6 @@ test('a failed video always gets a sentence', () => {
   for (const code of [1, 2, 3, 4, 99, null, undefined]) assert.ok(mediaErrorMessage(code).length > 10, String(code));
   assert.notEqual(mediaErrorMessage(4), mediaErrorMessage(2));
 });
-
-// ── Manifest ──────────────────────────────────────────────────────────
 
 test('manifest: unique file-safe ids, one-line title and description, a real article, the quickstart, the credit', () => {
   const ids = GUIDE_VIDEOS.map((v) => v.id);
@@ -168,8 +157,6 @@ test('Home quickstart card: only when shipped, not dismissed / watched, and not 
   assert.equal(quickstartCardVisible({ ready: true, dismissed: true, welcomeSeen: false }), false);
   assert.equal(quickstartCardVisible({ ready: true, dismissed: false, welcomeSeen: true }), false);
 });
-
-// ── The app:// handler ────────────────────────────────────────────────
 
 test('parseRange: start-end, open end, suffix, clamping, unsatisfiable, and fall back to the whole file', () => {
   assert.deepEqual(parseRange('bytes=0-99', 1000), { start: 0, end: 99 });

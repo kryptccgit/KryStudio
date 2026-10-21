@@ -1,21 +1,3 @@
-//! HT-Demucs spectrogram front and back end, run outside the ONNX graph.
-//!
-//! Mirrors demucs `HTDemucs._spec` / `HTDemucs._ispec` (demucs/htdemucs.py,
-//! MIT) on top of `torch.stft` / `torch.istft` with n_fft 4096, hop 1024, a
-//! periodic Hann window, `normalized=True`, `center=True` and reflect padding:
-//!
-//! - `_spec`: reflect-pad the signal by 1536 on the left and
-//!   `1536 + ceil(len/1024)*1024 - len` on the right, STFT, drop the Nyquist
-//!   bin and the first/last two frames → `[2048 bins][ceil(len/1024) frames]`.
-//! - `_ispec`: put the Nyquist bin and two empty frames on each side back,
-//!   iSTFT, and cut the 1536-sample pad off again.
-//!
-//! The kept frames never reach `torch.stft`'s own centre padding, so only the
-//! first reflection exists here. The inverse divides by the full window²
-//! envelope including the four empty frames, exactly like `torch.istft`, which
-//! is why the first and last ~1.5k samples of a segment are attenuated: the
-//! model was trained with that, and the chunk overlap hides it.
-
 use std::sync::Arc;
 
 use realfft::num_complex::Complex32;
@@ -23,12 +5,9 @@ use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 
 pub const NFFT: usize = 4096;
 pub const HOP: usize = NFFT / 4;
-/// Frequency bins the model sees (Nyquist dropped).
 pub const BINS: usize = NFFT / 2;
-/// demucs: `pad = hl // 2 * 3`.
 const PAD: usize = HOP / 2 * 3;
 
-/// Spectrogram frames for a segment of `length` samples.
 pub fn frames(length: usize) -> usize {
     length.div_ceil(HOP)
 }
@@ -41,7 +20,6 @@ pub struct Spectro {
     freq: Vec<Complex32>,
     scratch_fwd: Vec<Complex32>,
     scratch_inv: Vec<Complex32>,
-    /// 1 / window² envelope per output sample, cached per segment length.
     inv_env: (usize, Vec<f32>),
 }
 
@@ -56,7 +34,6 @@ impl Spectro {
         let mut planner = RealFftPlanner::<f32>::new();
         let fwd = planner.plan_fft_forward(NFFT);
         let inv = planner.plan_fft_inverse(NFFT);
-        // torch.hann_window(N) is periodic: 0.5 - 0.5 cos(2πn/N).
         let window = (0..NFFT).map(|n| (0.5 - 0.5 * (2.0 * std::f64::consts::PI * n as f64 / NFFT as f64).cos()) as f32).collect();
         Self {
             scratch_fwd: fwd.make_scratch_vec(),
@@ -70,8 +47,6 @@ impl Spectro {
         }
     }
 
-    /// `_spec` of one channel. Writes the real and imaginary planes, each
-    /// `[BINS][frames(x.len())]` row-major (bin-major, like the model input).
     pub fn forward(&mut self, x: &[f32], re: &mut [f32], im: &mut [f32]) {
         let len = x.len();
         let le = frames(len);
@@ -81,7 +56,6 @@ impl Spectro {
         let scale = 1.0 / (NFFT as f32).sqrt();
         let last = (len - 1) as isize;
         for t in 0..le {
-            // Frame t starts at t*HOP in the padded signal = t*HOP - PAD in x.
             let base = (t * HOP) as isize - PAD as isize;
             for k in 0..NFFT {
                 let mut j = base + k as isize;
@@ -102,7 +76,6 @@ impl Spectro {
         }
     }
 
-    /// `_ispec` of one channel: planes `[BINS][frames(out.len())]` → `out`.
     pub fn inverse(&mut self, re: &[f32], im: &[f32], out: &mut [f32]) {
         let length = out.len();
         let le = frames(length);
@@ -110,20 +83,16 @@ impl Spectro {
         assert_eq!(im.len(), BINS * le);
         self.ensure_envelope(length);
         out.fill(0.0);
-        // normalized istft: × sqrt(N); realfft's inverse is unnormalised: × 1/N.
         let scale = (NFFT as f32).sqrt() / NFFT as f32;
         for t in 0..le {
             for f in 0..BINS {
                 self.freq[f] = Complex32::new(re[f * le + t], im[f * le + t]);
             }
-            // A real signal's DC and Nyquist bins are real; torch's c2r ignores
-            // their imaginary parts, realfft insists on it.
             self.freq[0].im = 0.0;
             self.freq[BINS] = Complex32::new(0.0, 0.0);
             self.inv
                 .process_with_scratch(&mut self.freq, &mut self.time, &mut self.scratch_inv)
                 .expect("realfft inverse: buffer sizes are fixed");
-            // Data frame t sits at istft frame t+2 → output index t*HOP - PAD.
             let base = (t * HOP) as isize - PAD as isize;
             let k0 = (-base).max(0) as usize;
             let k1 = ((length as isize - base).min(NFFT as isize)).max(0) as usize;
@@ -144,7 +113,6 @@ impl Spectro {
         let n_frames = le + 4;
         let mut env = vec![0f32; length];
         for (i, e) in env.iter_mut().enumerate() {
-            // istft buffer index of output sample i: centre pad (NFFT/2) + PAD.
             let p = i + NFFT / 2 + PAD;
             let t_hi = (p / HOP).min(n_frames - 1);
             let t_lo = (p + HOP).saturating_sub(NFFT) / HOP;
@@ -180,10 +148,8 @@ mod tests {
         (a - b).abs() <= 2e-4 + 1e-4 * b.abs()
     }
 
-    /// Values from demucs `HTDemucs._spec` / `_ispec` (torch 2.14, demucs 4.0.1)
-    /// for the same 10 000-sample signal (scratch script golden_spec.py).
     #[test]
-    #[allow(clippy::excessive_precision)] // golden values copied verbatim from torch
+    #[allow(clippy::excessive_precision)]
     fn matches_torch_reference() {
         let x = signal(10_000);
         let le = frames(x.len());
@@ -216,8 +182,6 @@ mod tests {
 
     #[test]
     fn round_trip_is_exact_in_the_interior() {
-        // 343 980 = the HT-Demucs segment; interior = away from the 1536-sample
-        // edges that lose their outer frames (by design, see module docs).
         let x = signal(343_980);
         let le = frames(x.len());
         let mut sp = Spectro::new();
@@ -227,7 +191,6 @@ mod tests {
         sp.inverse(&re, &im, &mut y);
         let err = x[PAD..le * HOP - PAD].iter().zip(&y[PAD..le * HOP - PAD]).map(|(a, b)| (a - b).abs()).fold(0f32, f32::max);
         assert!(err < 1e-4, "interior round-trip error {err}");
-        // And a second call reuses the cached envelope.
         let mut y2 = vec![0f32; x.len()];
         sp.inverse(&re, &im, &mut y2);
         assert_eq!(y, y2);

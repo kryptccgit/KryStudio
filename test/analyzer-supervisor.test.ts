@@ -1,6 +1,3 @@
-// AnalyzerSupervisor against a fake NDJSON analyzer (test/fake-analyzer.ts):
-// lazy start + hello, progress, concurrent jobs, cancel, crash → reject +
-// restart on next use, cancel-grace kill, graceful stop, missing exe.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -82,11 +79,10 @@ test('cancel: the job answers cancelled; cancelling before the process started n
   const h = sup.run<'separate', StemsResult>('separate', { path: 'C:/slow.wav', model: 'htdemucs', modelDir: dir, outDir: path.join(dir, 'out-slow') }, (_s, f) => progress.push(f));
   while (progress.length < 1) await sleep(10);
   h.cancel();
-  h.cancel(); // idempotent
+  h.cancel();
   const r = await h.done;
   assert.deepEqual(r, { ok: false, cancelled: true, message: 'Cancelled' });
   assert.ok(!fs.existsSync(path.join(dir, 'out-slow')), 'no stems written');
-  // The process survives a cancel and keeps working.
   const pid = sup.status().pid;
   const ok = await sup.run('analyze', { path: 'C:/after.wav' }).done;
   assert.equal(ok.ok, true);
@@ -123,7 +119,6 @@ test('a cancelled job that never answers gets the process killed after the grace
   try {
     const before = countRuns(logFile, 'separate');
     const h = sup.run('separate', { path: 'C:/hang.wav', model: 'htdemucs', modelDir: dir, outDir: path.join(dir, 'out-hang') });
-    // Cancel once the analyzer has the job (a fixed sleep raced a slow process start on a busy machine).
     for (let t = 0; countRuns(logFile, 'separate') === before; t += 20) {
       assert.ok(t < 10_000, 'the fake analyzer received the job');
       await sleep(20);

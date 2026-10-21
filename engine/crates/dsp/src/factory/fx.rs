@@ -1,14 +1,7 @@
-//! Transition FX. Tempo-synced ones are exactly N bars at 128 BPM:
-//! risers, uplifting sweeps and reverse cymbals build to their climax on the
-//! very last sample (the next downbeat); downlifters and down-sweeps start
-//! at full level on sample 0. Impacts and sub drops are one-shots with the
-//! transient on sample 0.
-
 use super::drums::{cymbal, kick, snare, Cym, Kick, Snare, CRASH, KICK, SNARE};
 use super::library::{spec, Spec};
 use super::synth::*;
 
-/// Stereo noise with a shared centre: `corr` 0 = independent sides, 1 = mono.
 pub(crate) fn stereo_noise(n: usize, corr: f32, pink: bool, seed: u32) -> Chans {
     let mut c = Noise::new(seed);
     let mut a = Noise::new(seed.wrapping_add(101));
@@ -24,7 +17,6 @@ pub(crate) fn stereo_noise(n: usize, corr: f32, pink: bool, seed: u32) -> Chans 
     vec![l, r]
 }
 
-/// Multiply every channel by `env(u)` (u = 0..1 through the buffer).
 pub(crate) fn shape(ch: &mut Chans, env: impl Fn(f32) -> f32) {
     for c in ch.iter_mut() {
         let n = c.len().max(1) as f32;
@@ -40,8 +32,6 @@ pub(crate) fn cut(ch: &mut Chans, n: usize) {
     }
 }
 
-/// Noise uplifter: resonant band pass + high pass sweeping up, level rising
-/// to the end, with a growing hall behind it.
 fn noise_uplifter(bars: u32, seed: u32) -> Chans {
     let n = bars as usize * BAR;
     let mut ch = stereo_noise(n, 0.35, false, seed);
@@ -62,9 +52,6 @@ fn noise_uplifter(bars: u32, seed: u32) -> Chans {
     out
 }
 
-/// Detuned saw stack (7 voices per side), pitch rising `from` → `to` (MIDI),
-/// filter opening, a tremolo gate that doubles speed every quarter of the
-/// length (1/4 → 1/8 → 1/16 → 1/32) and level rising into the downbeat.
 fn synth_riser(bars: u32, from: f32, to: f32, seed: u32) -> Chans {
     let n = bars as usize * BAR;
     let mut nz = Noise::new(seed);
@@ -106,7 +93,6 @@ fn synth_riser(bars: u32, from: f32, to: f32, seed: u32) -> Chans {
         sweep(c, LP, 0.9, |u| 500.0 * (15_000.0f32 / 500.0).powf(u.powf(1.2)));
         hp(c, 120.0);
     }
-    // a little white noise on top that also rises
     let mut nn = stereo_noise(n, 0.3, false, seed + 9);
     for c in nn.iter_mut() {
         sweep(c, HP, 0.7, |u| 2000.0 * (8000.0f32 / 2000.0).powf(u));
@@ -118,7 +104,6 @@ fn synth_riser(bars: u32, from: f32, to: f32, seed: u32) -> Chans {
     out
 }
 
-/// Pure tension riser: a sine sweeping up with growing vibrato (mono).
 fn sine_riser(bars: u32) -> Chans {
     let n = bars as usize * BAR;
     let mut x = vec![0.0f32; n];
@@ -135,8 +120,6 @@ fn sine_riser(bars: u32) -> Chans {
     vec![x]
 }
 
-/// Noise downlifter: starts on sample 0 at full level and falls, filter
-/// closing from 12 kHz to ~150 Hz.
 fn noise_downlifter(bars: u32, seed: u32) -> Chans {
     let n = bars as usize * BAR;
     let mut ch = stereo_noise(n, 0.35, false, seed);
@@ -148,7 +131,6 @@ fn noise_downlifter(bars: u32, seed: u32) -> Chans {
         add(c, &whistle, 0.3, 0);
     }
     shape(&mut ch, |u| db(-40.0 * u.powf(0.8)) * (1.0 - u).powf(0.3));
-    // a burst on the downbeat
     let mut burst = stereo_noise(ns(0.25), 0.6, false, seed + 5);
     for c in burst.iter_mut() {
         lp(c, 9000.0);
@@ -163,8 +145,6 @@ fn noise_downlifter(bars: u32, seed: u32) -> Chans {
     out
 }
 
-/// "Jet" sweep: noise through a comb whose delay shrinks (rising) or grows
-/// (falling), a matching low pass and an auto-pan.
 fn jet_sweep(bars: u32, up: bool, seed: u32) -> Chans {
     let n = bars as usize * BAR;
     let src = stereo_noise(n, 0.5, false, seed);
@@ -195,7 +175,6 @@ fn jet_sweep(bars: u32, up: bool, seed: u32) -> Chans {
         hp(&mut y, 150.0);
         out.push(y);
     }
-    // level: rises into the end (up) or falls from sample 0 (down); slow auto-pan
     let pan_hz = 0.5 * BPM / 60.0 / 4.0 * if up { 2.0 } else { 1.0 };
     for (k, c) in out.iter_mut().enumerate() {
         for (i, v) in c.iter_mut().enumerate() {
@@ -209,8 +188,6 @@ fn jet_sweep(bars: u32, up: bool, seed: u32) -> Chans {
     out
 }
 
-/// A crash reversed so its attack lands on the very last sample, with a
-/// reversed reverb swelling into it.
 fn reverse_crash(bars: u32, dark: bool, seed: u32) -> Chans {
     let n = bars as usize * BAR;
     let len = n as f32 / SR + 0.4;
@@ -232,13 +209,10 @@ fn reverse_crash(bars: u32, dark: bool, seed: u32) -> Chans {
             *ch = pad;
         }
     }
-    // keep the very start silent-ish and swell like a real reverse cymbal
     shape(&mut out, |u| smooth01(u * 4.0));
     out
 }
 
-/// Sub drop: a sine falling from `f0` to `f1` Hz (time constant `tau` s),
-/// level decaying to -60 dB at `t60` s, optional drive.
 fn sub_drop(f0: f32, f1: f32, tau: f32, t60: f32, drv: f32, lp_hz: f32) -> Vec<f32> {
     let n = ns(t60 + 0.05);
     let mut ph = 0.0f64;
@@ -315,7 +289,6 @@ fn impact_gated(seed: u32) -> Chans {
 
 pub(crate) fn specs() -> Vec<Spec> {
     let mut v = Vec::new();
-    // risers: end on their last bar line
     for (bars, seed) in [(2u32, 901u32), (4, 902), (8, 903)] {
         v.push(
             spec(
@@ -354,7 +327,6 @@ pub(crate) fn specs() -> Vec<Spec> {
         .peak(-4.0)
         .fades(5.0, 3.0),
     );
-    // downlifters: transient on sample 0
     for (bars, seed) in [(1u32, 931u32), (2, 932), (4, 933)] {
         v.push(
             spec(
@@ -370,7 +342,6 @@ pub(crate) fn specs() -> Vec<Spec> {
             .fades(0.15, 5.0),
         );
     }
-    // impacts
     v.push(spec("fx/impact/boom.wav", "Boom Impact", "impact", &["big", "deep", "dark", "wide"], &["edm", "dubstep", "future-bass", "trap", "techno"], || impact_boom(951)));
     v.push(
         spec("fx/impact/sub-impact.wav", "Sub Impact", "impact", &["deep", "clean", "mono", "big"], &["edm", "dubstep", "trap", "drill", "future-bass", "dnb"], || {
@@ -385,7 +356,6 @@ pub(crate) fn specs() -> Vec<Spec> {
     v.push(spec("fx/impact/short-hit.wav", "Short Hit", "impact", &["short", "punchy", "hard"], &["edm", "pop", "trap", "dubstep", "dnb"], || impact_short(981)));
     v.push(spec("fx/impact/metal-slam.wav", "Metal Slam Impact", "impact", &["metallic", "big", "dark", "aggressive"], &["dubstep", "techno", "dnb", "drill"], || impact_metal(991)).trim(-60.0));
     v.push(spec("fx/impact/gated-hit.wav", "Gated 80s Hit", "impact", &["retro", "big", "vintage"], &["synthwave", "pop"], || impact_gated(995)));
-    // sweeps
     for (bars, seed) in [(1u32, 1001u32), (2, 1002), (4, 1003)] {
         v.push(
             spec(
@@ -417,7 +387,6 @@ pub(crate) fn specs() -> Vec<Spec> {
             .fades(0.15, 5.0),
         );
     }
-    // reverse cymbals: the crash attack lands on the last sample
     for (bars, dark, seed) in [(1u32, false, 1101u32), (2, false, 1102)] {
         let (slug, name, tags): (&str, &str, &[&'static str]) =
             if dark { ("reverse-crash-dark", "Dark Reverse Crash", &["dark", "wide", "airy"]) } else { ("reverse-crash", "Reverse Crash", &["bright", "wide", "airy"]) };
@@ -435,7 +404,6 @@ pub(crate) fn specs() -> Vec<Spec> {
             .fades(5.0, 2.0),
         );
     }
-    // sub drops
     v.push(
         spec("fx/sub-drop/long.wav", "Long Sub Drop", "sub-drop", &["deep", "long", "clean", "mono"], &["edm", "trap", "dubstep", "future-bass", "drill"], || {
             vec![sub_drop(110.0, 30.0, 0.6, 3.0, 0.15, 1500.0)]

@@ -1,18 +1,3 @@
-// Sound-pack manifest tool. For each pack spec (scripts/packs/specs/*.ts) it downloads exactly the files our SFZ
-// mappings use, hashes them, reads their audio headers, renders the mappings with `end=` trims and writes
-// shared/packs/data/<id>.gen.ts (PackFile[] + PackSfz[] + the facts test/packs-catalog.test.ts checks).
-// Sample packs (Wave 7b, `type: 'samples'` specs) go through scripts/packs/samples.ts instead: per-file GitHub /
-// direct-URL downloads or ZIP archives with listed members, measured with ffmpeg, written as FILES + SAMPLES.
-//
-//   node scripts/run-script.mjs scripts/packs/build.ts <packId|all> --cache <dir>            download + write
-//   node scripts/run-script.mjs scripts/packs/build.ts <packId|all> --cache <dir> --check    re-verify, write nothing
-//   … --check --mirrors                                                                       also hash every mirror
-//
-// --cache is a scratch directory OUTSIDE the repo (downloads are untrusted data and never committed). The tool only
-// reads bytes: it hashes them and parses WAV/FLAC headers (scripts/packs/audio.mjs). Nothing downloaded is executed.
-// --check re-downloads every file from its URL (ignoring the cache), compares SHA-256 and size with the committed
-// data file, and re-renders the mappings from the cached files to prove the committed SFZ text is current.
-
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -53,7 +38,6 @@ async function fetchBytes(url: string, tries = 6): Promise<Uint8Array> {
       return new Uint8Array(await r.arrayBuffer());
     } catch (e) {
       last = e;
-      // CDNs answer bursts with 403/429 now and then: back off (2, 4, 8, 16, 32 s)
       if (i < tries - 1) await new Promise((res) => setTimeout(res, 2000 * 2 ** i));
     }
   }
@@ -87,7 +71,6 @@ interface Measured {
   facts: AudioFacts;
 }
 
-/** Downloads (or reuses from the cache) one file and measures it. */
 async function measure(spec: PackSpec, s: { src: string; path: string }): Promise<Measured> {
   const file = path.join(cacheAbs, spec.id, ...s.path.split('/'));
   let bytes: Uint8Array;
@@ -121,7 +104,6 @@ function render(spec: PackSpec) {
     if (dupe) throw new Error(`${spec.id}: duplicate pack path ${dupe.path}`);
     console.log(`${spec.id}: ${spec.samples.length} files`);
     const files = await pool(spec.samples, 8, (s) => measure(spec, s));
-    // Facts for the mapping author (levels, pitch estimates), next to the cache, never in the repo.
     writeFileSync(path.join(cacheAbs, `${spec.id}.facts.json`), JSON.stringify(Object.fromEntries(files.map((f) => [f.path, f.facts])), null, 1));
     const byPath = new Map(files.map((f) => [f.path, f]));
     const facts = (p: string) => {
@@ -148,7 +130,6 @@ function render(spec: PackSpec) {
         facts(p);
         used.add(p);
       }
-      // facts() for RAM resolves paths relative to the .sfz
       ram[inst.path] = Math.round(ramMb(doc, (s) => facts(dir === '.' ? s : path.posix.join(dir, s))) * 10) / 10;
       sfz.push({ path: inst.path, text: renderSfz(doc) });
     }

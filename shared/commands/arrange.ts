@@ -1,7 +1,3 @@
-// Playlist arrangement tools: split a pattern clip by channel, consolidate
-// pattern clips into one pattern, clone clips as unique copies, and insert /
-// delete time. Pure document edits (no I/O); each is ONE undo step.
-
 import { z } from 'zod';
 import { defineCommand, must, plural, CommandError } from './types';
 import { patternLength, type Clip, type Note, type Pattern, type Project } from '../schema/project';
@@ -14,7 +10,6 @@ function clipName(s: string): string {
   return s.length > NAME_MAX ? s.slice(0, NAME_MAX - 1) + '…' : s;
 }
 
-/** Copy a channel's notes with fresh ids. */
 function cloneNotes(src: Record<string, Note>, ctx: CommandContext): Record<string, Note> {
   const out: Record<string, Note> = {};
   for (const n of Object.values(src)) {
@@ -41,7 +36,6 @@ function overlaps(c: Clip, start: number, end: number): boolean {
   return c.start < end && c.start + c.length > start;
 }
 
-/** Sort clips top-to-bottom, then left-to-right (deterministic processing order). */
 function byPosition(d: Project, clips: Clip[]): Clip[] {
   const lane = (c: Clip) => d.playlist.trackOrder.indexOf(c.trackId);
   return [...clips].sort((a, b) => lane(a) - lane(b) || a.start - b.start || a.id.localeCompare(b.id));
@@ -53,8 +47,6 @@ function newTrack(d: Project, index: number, name: string, height: number, ctx: 
   d.playlist.trackOrder.splice(Math.min(index, d.playlist.trackOrder.length), 0, id);
   return id;
 }
-
-// ── Split by channel ──────────────────────────────────────────────────
 
 export const playlistSplitByChannel = defineCommand({
   id: 'playlist.splitByChannel',
@@ -69,7 +61,6 @@ export const playlistSplitByChannel = defineCommand({
     );
     if (!src.length) throw new CommandError('Select at least one pattern clip to split by channel');
     const ts = d.transport.timeSig;
-    // One set of per-channel patterns per distinct source pattern.
     const split = new Map<string, Array<{ channelId: string; patternId: string }>>();
     const patternIds: string[] = [];
     for (const c of src) {
@@ -120,8 +111,6 @@ export const playlistSplitByChannel = defineCommand({
   },
 });
 
-// ── Consolidate ───────────────────────────────────────────────────────
-
 export const playlistConsolidate = defineCommand({
   id: 'playlist.consolidate',
   label: (a) => `Consolidate ${plural(a.clipIds.length, 'clip')}`,
@@ -144,8 +133,7 @@ export const playlistConsolidate = defineCommand({
       const clipEnd = c.start + c.length;
       for (const [chId, byId] of Object.entries(pat.notes)) {
         for (const n of Object.values(byId)) {
-          if (n.tick >= len) continue; // never reached by the looping source
-          // unwrapped source positions n.tick + k·len inside [offset, offset + length)
+          if (n.tick >= len) continue;
           let k = Math.ceil((c.offset - n.tick) / len);
           for (let p = n.tick + k * len; p < c.offset + c.length; p = n.tick + ++k * len) {
             const song = c.start + p - c.offset;
@@ -167,15 +155,13 @@ export const playlistConsolidate = defineCommand({
     const patternId = ctx.newId(ID_PREFIX.pattern);
     d.patterns[patternId] = { id: patternId, name, color: first?.color ?? '#A855F7', length: t1 - t0, notes };
     d.patternOrder.push(patternId);
-    const trackId = src[0].trackId; // byPosition: topmost lane first
+    const trackId = src[0].trackId;
     for (const c of src) delete d.playlist.clips[c.id];
     const clipId = ctx.newId(ID_PREFIX.clip);
     d.playlist.clips[clipId] = { id: clipId, trackId, kind: 'pattern', start: t0, length: t1 - t0, offset: 0, mute: false, color: null, patternId };
     return { patternId, clipId };
   },
 });
-
-// ── Clone as unique ───────────────────────────────────────────────────
 
 export const playlistCloneClips = defineCommand({
   id: 'playlist.cloneClips',
@@ -211,9 +197,6 @@ export const playlistCloneClips = defineCommand({
   },
 });
 
-// ── Insert / delete time ──────────────────────────────────────────────
-
-/** Split clip `c` at absolute tick `at` (strictly inside); returns the new right-hand clip. */
 function splitAt(d: Project, c: Clip, at: number, ctx: CommandContext): Clip {
   const rel = at - c.start;
   const id = ctx.newId(ID_PREFIX.clip);
@@ -283,7 +266,6 @@ export const playlistDeleteTime = defineCommand({
         delete d.playlist.clips[c.id];
         removed++;
       } else if (cs < a.start && ce > a.end) {
-        // keep [cs, start) and [end, ce): split at end, drop the middle, butt the right part on
         const right = splitAt(d, c, a.end, ctx);
         right.start = a.start;
         c.length = a.start - cs;
@@ -314,7 +296,7 @@ export const playlistDeleteTime = defineCommand({
       if (e - s >= 1) {
         loop.start = s;
         loop.end = e;
-      } else loop.enabled = false; // the whole region was deleted: keep its old bounds, just switch it off
+      } else loop.enabled = false;
     }
     return { removed, trimmed, moved };
   },

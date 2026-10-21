@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The Vocal Booth: a small floating panel in the Studio that makes
-// recording a vocal one button. It shows the mic level and whether you can
-// hear yourself, where the take will land (the playhead, on the Vocals
-// track), a big Record / Stop button (Space works too), and after each take
-// Listen, Redo, Keep & record more and Krypt Tune. Session: ./actions.ts.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, useState } from 'react';
 import { Check, Circle, Headphones, Loader2, Mic, Play, RotateCcw, SkipBack, Square, TriangleAlert, Wand2, X } from 'lucide-react';
 import { audioInputSettings, recordingSettings } from '@shared/live/recording';
@@ -25,7 +17,6 @@ import { useBooth } from './store';
 
 const TONE: Record<'off' | 'ok' | 'warn' | 'wait', string> = { off: 'text-krypt-muted', ok: 'text-emerald-300', warn: 'text-amber-300', wait: 'text-krypt-muted' };
 
-/** Telemetry the panel needs, re-rendering only when something visible changes; the level bar is drawn directly. */
 function useBoothLive(fill: React.RefObject<HTMLDivElement | null>): { beats: number; elapsed: number; tick: number; micPeak: number; monPeak: number; monRunning: boolean } {
   const [s, set] = useState({ beats: 0, elapsed: 0, tick: 0, micPeak: 0, monPeak: 0, monRunning: false });
   useEffect(() => {
@@ -113,7 +104,6 @@ function Booth() {
       </div>
 
       <div className="space-y-3 px-4 pb-4 pt-3">
-        {/* Mic + hear yourself */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-2 text-[11.5px]">
             <span className="min-w-0 flex-1 truncate text-white/80" title={input?.name ?? undefined}>
@@ -135,7 +125,6 @@ function Booth() {
           <div className={cls('text-[11px]', TONE[mon.tone])}>{mon.text}</div>
         </div>
 
-        {/* Where */}
         {st.phase !== 'review' && (
           <div className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-black/25 px-3 py-2 text-[11.5px] text-white/80">
             <span className="min-w-0 flex-1">
@@ -161,7 +150,6 @@ function Booth() {
           </div>
         )}
 
-        {/* Record / Stop */}
         {st.phase !== 'review' && (
           <div className="flex items-center gap-3">
             {busy ? (
@@ -208,7 +196,6 @@ function Booth() {
           </div>
         )}
 
-        {/* Review */}
         {st.phase === 'review' && st.take && (
           <div className="space-y-2.5">
             <div className="flex items-center gap-2 text-[12px] text-white/90">
@@ -261,7 +248,6 @@ function Booth() {
   );
 }
 
-/** Mounted once in the app shell (hidden while Home covers the Studio). */
 export function BoothHost() {
   const open = useBooth((s) => s.open);
   const homeOpen = useHome((s) => s.open);

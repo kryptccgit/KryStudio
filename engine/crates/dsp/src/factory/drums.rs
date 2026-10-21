@@ -1,31 +1,17 @@
-//! Drum recipes: kicks, snares, claps, hats, rides, crashes, toms and snare
-//! fills. Layered synthesis: a pitched sine body with a two-stage pitch
-//! envelope + a click/transient layer + saturation (kicks); a tuned body +
-//! filtered noise wires + a crack (snares); offset noise bursts + a short
-//! room (claps); a six-square metallic bank through band/high passes + noise
-//! (hats); modal banks of decaying partials + a noise wash (cymbals).
-
 use super::library::{spec, Spec};
 use super::synth::*;
 use crate::instruments::drums::{render as drum_render, DrumKind, DrumParams};
 
-// ── Kick ────────────────────────────────────────────────────────────────
-
 #[derive(Clone, Copy)]
 pub(crate) struct Kick {
-    /// End pitch of the body (Hz).
     pub f: f32,
-    /// Fast pitch drop: start = f × (1 + a1 + a2).
     pub a1: f32,
     pub t1: f32,
-    /// Slower "knock" bend.
     pub a2: f32,
     pub t2: f32,
-    /// Full level (ms), then `decay` ms to -60 dB shaped by `curve` (0 exp … 1 hold-then-drop).
     pub hold: f32,
     pub decay: f32,
     pub curve: f32,
-    /// Share of a longer sub tail.
     pub sub: f32,
     pub sub_ms: f32,
     pub click: f32,
@@ -63,7 +49,6 @@ pub(crate) const KICK: Kick = Kick {
     seed: 101,
 };
 
-/// Hold, then fall to exactly zero at -60 dB (no end click).
 pub(crate) fn env_hd(t_ms: f32, hold: f32, decay: f32, curve: f32) -> f32 {
     if t_ms <= hold {
         return 1.0;
@@ -109,8 +94,6 @@ pub(crate) fn kick(p: &Kick) -> Vec<f32> {
     out
 }
 
-/// Techno "rumble": the kick through a long dark hall, low passed, driven
-/// and ducked under the kick, then added back (mono).
 fn rumble(k: Vec<f32>, amount: f32, decay_s: f32, lp_hz: f32) -> Vec<f32> {
     let w = reverb_wet(&vec![k.clone()], &rev(1.0, 0.85, decay_s).damp(2500.0).low(25.0).pre(15.0).width(0.0), decay_s * 0.55);
     let mut r = mono_sum(&w);
@@ -480,26 +463,20 @@ fn kicks() -> Vec<Spec> {
     ]
 }
 
-// ── Snare ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Copy)]
 pub(crate) struct Snare {
-    /// Body (shell) pitch and its second mode ratio.
     pub f: f32,
     pub r2: f32,
     pub body: f32,
     pub body_ms: f32,
     pub bend: f32,
     pub bend_ms: f32,
-    /// Wires: band-limited noise.
     pub noise: f32,
     pub n_hp: f32,
     pub n_lp: f32,
     pub noise_ms: f32,
-    /// Share of a longer wire tail.
     pub tail: f32,
     pub tail_ms: f32,
-    /// Stick crack: a short band-passed burst.
     pub crack: f32,
     pub crack_hz: f32,
     pub crack_ms: f32,
@@ -551,7 +528,6 @@ pub(crate) fn snare(p: &Snare) -> Vec<f32> {
         let wires = tick(&mut l2, tick(&mut l1, tick(&mut h1, w)));
         let att = (t / 0.5).min(1.0);
         let nenv = att * ((1.0 - p.tail) * dec60(t, p.noise_ms) + p.tail * dec60(t, p.tail_ms));
-        // the wires rattle with the shell
         let wires = wires * (1.0 + 0.25 * body) * nenv;
         let crack = tick(&mut cb, w) * (-t / p.crack_ms).exp() * 1.5;
         *o = body * p.body * 1.2 + wires * p.noise + crack * p.crack;
@@ -762,7 +738,6 @@ fn snares() -> Vec<Spec> {
         }),
         spec("drums/snare/brushed.wav", "Brushed Snare", "snare", &["soft", "warm", "organic", "lofi"], &["lofi", "rnb", "boom-bap"], || {
             let mut x = snare(&Snare { f: 190.0, body: 0.3, body_ms: 90.0, noise: 0.9, n_hp: 800.0, n_lp: 6000.0, noise_ms: 240.0, crack: 0.0, drive: 0.0, seed: 226, ..SNARE });
-            // a swish, not a stick: soften the first 8 ms
             for (i, v) in x.iter_mut().enumerate().take(ns(0.008)) {
                 *v *= i as f32 / ns(0.008) as f32;
             }
@@ -777,8 +752,6 @@ fn snares() -> Vec<Spec> {
         }),
     ]
 }
-
-// ── Clap ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 pub(crate) struct Clap {
@@ -799,7 +772,6 @@ pub(crate) struct Clap {
 pub(crate) const CLAP: Clap =
     Clap { bursts: 4, spacing: 9.0, jitter: 1.2, burst_ms: 2.6, tail_ms: 200.0, bp: 1150.0, q: 0.9, hp: 480.0, bright: 0.4, drive: 0.2, lp: 11_000.0, seed: 401 };
 
-/// One channel of a clap: several short bursts, the last one rings out.
 pub(crate) fn clap_ch(p: &Clap, seed: u32) -> Vec<f32> {
     let mut nz = Noise::new(seed);
     let mut times = vec![0.0f32];
@@ -838,7 +810,6 @@ pub(crate) fn clap_ch(p: &Clap, seed: u32) -> Vec<f32> {
     out
 }
 
-/// A clap rendered twice with different burst timing and noise per side.
 pub(crate) fn clap(p: &Clap, width: f32) -> Chans {
     let a = clap_ch(p, p.seed);
     if width <= 0.0 {
@@ -888,7 +859,6 @@ fn claps() -> Vec<Spec> {
         }),
         spec("drums/clap/layered-edm.wav", "Layered EDM Clap", "clap", &["big", "bright", "wide", "hard"], &["edm", "dubstep", "future-bass"], || {
             let mut c = clap(&Clap { bursts: 4, spacing: 9.5, tail_ms: 230.0, bp: 1250.0, bright: 0.6, drive: 0.4, seed: 420, ..CLAP }, 0.8);
-            // a second, brighter clap from the drum voice and a snare body underneath
             let lay = drum_render(DrumKind::Clap, DrumParams { tune: 2.0, decay_ms: 200.0, tone: 0.7, snap: 0.8, drive: 0.3 }, SR, 421);
             let body = snare(&Snare { f: 210.0, body: 1.0, body_ms: 90.0, noise: 0.2, noise_ms: 80.0, crack: 0.3, seed: 422, ..SNARE });
             add(&mut c[0], &lay, 0.5, 0);
@@ -913,10 +883,6 @@ fn claps() -> Vec<Spec> {
     ]
 }
 
-// ── Hats ────────────────────────────────────────────────────────────────
-
-/// Inharmonic square-oscillator sets: the classic analog hat ratios, a
-/// brighter clangy set, and our own wider set.
 const HAT_SETS: [[f32; 6]; 3] = [
     [205.3, 304.4, 369.6, 522.7, 540.0, 800.0],
     [263.0, 401.0, 541.0, 627.0, 773.0, 911.0],
@@ -1099,30 +1065,23 @@ fn openhats() -> Vec<Spec> {
     ]
 }
 
-// ── Cymbals (modal) ─────────────────────────────────────────────────────
-
 #[derive(Clone, Copy)]
 pub(crate) struct Cym {
     pub modes: usize,
     pub f_lo: f32,
     pub f_hi: f32,
-    /// Mode amplitude tilt: amp ∝ (f / 2 kHz)^tilt.
     pub tilt: f32,
-    /// T60 (s) of a 2 kHz mode; higher modes decay faster by (2k/f)^t60_exp.
     pub t60: f32,
     pub t60_exp: f32,
     pub noise: f32,
     pub n_hp: f32,
     pub n_lp: f32,
     pub noise_t60: f32,
-    /// Ride bell partials.
     pub bell: f32,
     pub bell_hz: f32,
     pub bell_t60: f32,
-    /// Stick ping.
     pub ping: f32,
     pub ping_hz: f32,
-    /// Extra level in the first ~30 ms.
     pub swell: f32,
     pub hp: f32,
     pub lp: f32,
@@ -1240,9 +1199,6 @@ fn cymbals() -> Vec<Spec> {
     ]
 }
 
-// ── Toms ────────────────────────────────────────────────────────────────
-
-/// Circular-membrane mode ratios (ratio, amplitude, decay multiplier).
 pub(crate) const MEMBRANE: [(f32, f32, f32); 4] = [(1.0, 1.0, 1.0), (1.594, 0.42, 0.55), (2.136, 0.26, 0.4), (2.653, 0.15, 0.3)];
 
 #[derive(Clone, Copy)]
@@ -1250,7 +1206,6 @@ pub(crate) struct Drum {
     pub f: f32,
     pub bend: f32,
     pub bend_ms: f32,
-    /// T60 of the fundamental (ms).
     pub decay: f32,
     pub m: [(f32, f32, f32); 4],
     pub slap: f32,
@@ -1309,13 +1264,8 @@ fn toms() -> Vec<Spec> {
     ]
 }
 
-// ── Fills ───────────────────────────────────────────────────────────────
-
-/// A snare build that ends on its last bar line: the subdivisions get
-/// faster, louder, brighter and higher toward the downbeat.
 fn snare_build(bars: u32, seed: u32) -> Chans {
     let n = bars as usize * BAR;
-    // (start bar, end bar, hits per bar) segments
     let plan: Vec<(f32, f32, usize)> = match bars {
         1 => vec![(0.0, 1.0, 16)],
         2 => vec![(0.0, 1.0, 8), (1.0, 1.5, 16), (1.5, 2.0, 32)],

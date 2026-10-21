@@ -1,18 +1,3 @@
-// Wave 8a (research/15 §3.4): the two deterministic one-call builders.
-//
-//  audio_to_project      any audio file → an editable project (a CONVERSION:
-//                        every part transcribed, vocals as audio, stems kept
-//                        muted). For the user's own songs, practice, remixes.
-//  build_from_reference  the studied reference → a NEW song's whole
-//                        instrumental bed in its style (drum programming,
-//                        chord progression, bass rhythm, sections, sounds,
-//                        mix), an empty matched Lead and the melody SHAPE
-//                        for the agent's ORIGINAL top line. Never its melody,
-//                        vocal or lyrics (unless mine: true).
-//
-// Both run electron/audioProject (analyze → separate → transcribe → match →
-// build) and land as ONE undo step.
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import type { Project } from '@shared/schema/project';
@@ -42,7 +27,6 @@ function progressOf(ctx: RunCtx): ((p: AudioProjectProgress) => void) | undefine
   return ctx.progress ? (p) => ctx.progress!(p.fraction, p.message) : undefined;
 }
 
-/** Run another tool's body inside this call (same group), with its zod defaults. */
 async function runTool(def: ToolDef, deps: MainDeps, caller: ToolCaller, args: unknown, ctx: RunCtx): Promise<ToolResult> {
   const parsed = def.input.safeParse(args);
   if (!parsed.success) fail(`${def.name}: ${parsed.error.issues[0]?.message ?? 'invalid arguments'}`);
@@ -50,8 +34,6 @@ async function runTool(def: ToolDef, deps: MainDeps, caller: ToolCaller, args: u
 }
 
 const writerOf = (ctx: RunCtx): Writer => ({ exec: <T,>(cmd: string, args: unknown): T => ctx.exec<T>(cmd, args) });
-
-// ── audio_to_project ────────────────────────────────────────────────────
 
 export const audioToProject = defineTool({
   name: 'audio_to_project',
@@ -70,7 +52,6 @@ export const audioToProject = defineTool({
   }),
   summarize: (a) => (a.template !== undefined && !a.path ? `template ${safeName(a.template, 40)}` : safeName(a.path?.split(/[\\/]/).pop() ?? a.path ?? '', 40)),
   paths: (a) => (a.template !== undefined ? [] : [{ value: a.path, kind: 'audio' }]),
-  // A new project from a template is a reset (no patches): not a "No change".
   readsWhenUnchanged: true,
   async run(deps, caller, a, ctx) {
     if (a.template !== undefined) {
@@ -99,7 +80,6 @@ export const audioToProject = defineTool({
   },
 });
 
-/** audio_to_project {template}: File ▸ New from template for agents (Wave 12.2b; electron/project/templates.ts). */
 async function startFromTemplate(deps: MainDeps, caller: ToolCaller, ref: string): Promise<ToolResult> {
   if (!deps.project.newFromTemplate || !deps.project.listTemplates) fail("Project templates aren't available in this session.");
   const list = deps.project.listTemplates();
@@ -113,8 +93,6 @@ async function startFromTemplate(deps: MainDeps, caller: ToolCaller, ref: string
   return { ok: true, message: `${r.message ?? `New project from "${safeName(t.name)}"`} (${describeTemplate(t)}). It is a new, unsaved project; get_project shows what it holds.`, changed: [] };
 }
 
-// ── build_from_reference ────────────────────────────────────────────────
-
 function genreArg(g: string | undefined): GenreId | null {
   const t = g?.trim();
   if (!t) return null;
@@ -123,7 +101,6 @@ function genreArg(g: string | undefined): GenreId | null {
   return id;
 }
 
-/** The section kind a transcribed section name implies ("Drop 2" → drop). */
 export function kindOfName(name: string): SectionKind | null {
   const n = name.toLowerCase();
   const kinds: Array<[RegExp, SectionKind]> = [
@@ -142,7 +119,6 @@ export function kindOfName(name: string): SectionKind | null {
   return kinds.find(([re]) => re.test(n))?.[1] ?? null;
 }
 
-/** add_transition calls for the section boundaries, from the genre playbook's kinds per section kind. */
 export function boundaryTransitions(sections: Prepared['t']['sections'], genre: GenreId | null): Array<{ kind: TransitionKind; at_bars: number[]; length_bars?: number }> {
   const pb = (genre ? playbookFor(genre) : null) ?? genericPlaybook(genre);
   const generic = genericPlaybook(genre);
@@ -152,7 +128,6 @@ export function boundaryTransitions(sections: Prepared['t']['sections'], genre: 
     const prev = sections[i - 1];
     const kind = kindOfName(s.name);
     const from = kind ? (pb.arrangement.find((x) => x.kind === kind && x.transitionIn?.length) ?? generic.arrangement.find((x) => x.kind === kind && x.transitionIn?.length)) : undefined;
-    // Without a playbook section of that kind: rising energy gets a crash on the downbeat, falling a downlifter.
     const kinds: TransitionKind[] = from?.transitionIn?.length ? [...from.transitionIn] : s.energy >= prev.energy ? ['crash'] : ['downlifter'];
     for (const k of kinds) {
       if (!(TRANSITION_KINDS as readonly string[]).includes(k)) continue;
@@ -166,7 +141,6 @@ export function boundaryTransitions(sections: Prepared['t']['sections'], genre: 
   return [...byKey.values()].map((c) => ({ ...c, at_bars: c.at_bars.slice(0, 32) }));
 }
 
-/** Insert levels (dB, relative to the drums) from the reference stems' loudness: a starting point match_mix refines. */
 function stemLevels(prep: Prepared): Record<string, number> {
   const st = prep.stems?.stems;
   const rms = (n: StemName) => (st?.[n] && Number.isFinite(st[n]!.rmsDb) ? st[n]!.rmsDb : null);
@@ -181,7 +155,6 @@ function stemLevels(prep: Prepared): Record<string, number> {
   return out;
 }
 
-/** Sections the agent's melody belongs in: the peak sections (the most energetic third), in order. */
 function melodySections(prep: Prepared): string[] {
   const s = prep.t.sections;
   if (!s.length) return [];
@@ -242,7 +215,6 @@ export const buildFromReference = defineTool({
       parts: prep.parts,
       sounds: prep.sounds,
       empty: leadWritten ? [] : [{ name: leadName, sound: prep.lead ?? fallbackSound(deps, presets, { kind: 'lead', name: leadName }, genre) }],
-      // Never the reference's audio in a new song.
       stems: [],
       sidechain,
       levelsDb: stemLevels(prep),
@@ -256,7 +228,6 @@ export const buildFromReference = defineTool({
     const res = writeProject(writerOf(ctx), () => deps.doc.project, deps.doc.catalog, plan);
     const notes = [...prep.notes, ...res.notesText];
 
-    // Transitions at every boundary (add_transition's own logic, inside this call's group).
     const transitions: string[] = [];
     for (const call of boundaryTransitions(prep.t.sections, genre)) {
       try {
@@ -268,7 +239,6 @@ export const buildFromReference = defineTool({
       }
     }
 
-    // Buses, sends and the master chain from the genre playbook.
     const mix: string[] = [];
     const tryTool = async (def: ToolDef, args: Record<string, unknown>, what: string): Promise<ToolResult | null> => {
       try {
@@ -308,7 +278,6 @@ export const buildFromReference = defineTool({
     const master = resolveChain('master', genre, presets, pb.mix.master.tags);
     if (master && (await tryTool(applyChain, { chain: master.id, insert: 'master' }, 'The master chain'))) mix.push(`master (${master.name})`);
 
-    // The reference: lined up with bar 1 and following the tempo (A/B), or removed.
     const refNote = alignReference(deps, ctx, track.channel.id, prep, a.keep_reference);
     if (refNote) notes.push(refNote);
 
@@ -356,7 +325,6 @@ export const buildFromReference = defineTool({
   },
 });
 
-/** keep_reference: sync the reference clip to the tempo with bar 1 on its first downbeat; else remove it. */
 function alignReference(deps: MainDeps, ctx: RunCtx, channelId: string, prep: Prepared, keep: boolean): string | null {
   const p: Project = deps.doc.project;
   const ch = p.channels[channelId];

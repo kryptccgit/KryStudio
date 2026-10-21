@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// One menu system for the menu bar, right-click menus and pickers.
-//   openMenu({ x, y }, items)              // context menu at the cursor
-//   openMenuAt(buttonEl, items)            // dropdown under an element
-// Menus portal into the document that owns the trigger, so they work in
-// dockview popout windows too. Keyboard: ↑ ↓ Enter → ← Esc.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { create } from 'zustand';
@@ -22,9 +14,7 @@ export type MenuItem =
       checked?: boolean;
       danger?: boolean;
       hint?: string;
-      /** Small color dot before the label. */
       swatch?: string;
-      /** Secondary text under the label (pickers). */
       detail?: string;
       onSelect: () => void;
     }
@@ -37,7 +27,6 @@ interface OpenMenu {
   id: number;
   x: number;
   y: number;
-  /** Alternative anchor: if set, the menu flips above when it doesn't fit below. */
   anchor?: { top: number; bottom: number; left: number; right: number };
   items: MenuItem[];
   doc: Document;
@@ -65,7 +54,6 @@ export function isMenuOpenFor(el: Element | null): boolean {
   return !!m && !!el && m.anchorEl === el;
 }
 
-/** Context menu at a point (pass the mouse event; uses its document). */
 export function openMenu(
   at: { clientX: number; clientY: number; target?: EventTarget | null } | { x: number; y: number; doc?: Document },
   items: MenuItem[],
@@ -88,7 +76,6 @@ export function openMenu(
   useMenuStore.setState({ menu: { id: ++seq, x, y, items, doc, minWidth: opts.minWidth, onClose: opts.onClose } });
 }
 
-/** Dropdown anchored under (or above) an element. */
 export function openMenuAt(el: Element, items: MenuItem[], opts: { minWidth?: number; onClose?: () => void; align?: 'left' | 'right' } = {}): void {
   closeMenu();
   const r = el.getBoundingClientRect();
@@ -107,7 +94,6 @@ export function openMenuAt(el: Element, items: MenuItem[], opts: { minWidth?: nu
   });
 }
 
-/** Toggle a dropdown on a button (second click closes). */
 export function toggleMenuAt(el: Element, items: MenuItem[] | (() => MenuItem[]), opts?: Parameters<typeof openMenuAt>[2]): void {
   if (isMenuOpenFor(el)) {
     closeMenu();
@@ -165,7 +151,6 @@ function MenuList({
     }
     if (it.type === undefined || it.type === 'item') {
       close();
-      // Run after the menu unmounts so focus/keyboard state is clean.
       setTimeout(() => it.onSelect(), 0);
     }
   };
@@ -259,11 +244,6 @@ function MenuList({
   );
 }
 
-/**
- * Submenus portal to the document body at fixed coordinates next to their
- * row: the parent list scrolls (overflow-y-auto), which used to clip them.
- * [data-krypt-menu] marks them as "inside the menu" for outside-click checks.
- */
 function SubMenu({ items, close, onLeft, anchor }: { items: MenuItem[]; close: () => void; onLeft: () => void; anchor: HTMLElement | null }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; ready: boolean }>({ left: 0, top: 0, ready: false });
@@ -294,7 +274,6 @@ function SubMenu({ items, close, onLeft, anchor }: { items: MenuItem[]; close: (
   );
 }
 
-/** Render once at the app root. */
 export function MenuHost() {
   const menu = useMenuStore((s) => s.menu);
   const ref = useRef<HTMLDivElement>(null);
@@ -319,8 +298,8 @@ export function MenuHost() {
     const onDown = (e: PointerEvent): void => {
       const t = e.target as Node;
       if (ref.current?.contains(t)) return;
-      if ((t as Element).closest?.('[data-krypt-menu]')) return; // a portalled submenu
-      if (menu.anchorEl && menu.anchorEl.contains(t)) return; // the trigger toggles itself
+      if ((t as Element).closest?.('[data-krypt-menu]')) return;
+      if (menu.anchorEl && menu.anchorEl.contains(t)) return;
       closeMenu();
     };
     const onKey = (e: KeyboardEvent): void => {
@@ -354,7 +333,6 @@ export function MenuHost() {
   );
 }
 
-/** A small inline color grid for menus (rename/color flows). */
 export function ColorSwatches({ colors, current, onPick }: { colors: string[]; current?: string; onPick: (c: string) => void }) {
   return (
     <div className="grid grid-cols-6 gap-1.5 px-3 py-2">

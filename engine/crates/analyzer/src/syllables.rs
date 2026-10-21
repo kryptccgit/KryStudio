@@ -1,52 +1,27 @@
-//! `syllables`: syllable nuclei in speech, for mapping lyrics onto notes
-//! ("Sing my notes", research/21). Contract: docs/ANALYZER_PROTOCOL.md
-//! § Syllables.
-//!
-//! Per 5 ms frame: band-limited energy (250 Hz–4 kHz, where vowels carry
-//! their energy) and YIN voicing (de Cheveigné & Kawahara 2002) on a 12 kHz
-//! copy. Nucleus strength = smoothed energy × voicing weight. Nuclei are
-//! its peaks (≥ 70 ms apart), ranked by prominence; with `expected` the
-//! detector keeps the `expected` most prominent (splitting the longest
-//! syllables when it finds fewer), else those clearly above their valleys.
-//! Boundaries sit at the strength minimum between nuclei; pauses longer than
-//! 120 ms end a syllable. Krypt-original implementation.
-//!
-//! [`voicing_track`] (YIN per frame) is shared with `sing`.
-
 use crate::audio;
 use crate::features::{median, parabolic};
 use crate::protocol::{Syllable, SyllablesArgs, SyllablesResult};
 use crate::{JobCtx, JobError};
 
-/// Rate the voicing / energy analysis runs at.
 pub const TRACK_SR: u32 = 12_000;
 pub const FMIN: f32 = 60.0;
 pub const FMAX: f32 = 700.0;
-/// YIN integration window (s).
 const YIN_WIN: f32 = 0.03;
-/// Aperiodicity (CMNDF dip) below which a frame counts as voiced.
 pub const VOICED_APER: f32 = 0.25;
 
 const HOP_SEC: f32 = 0.005;
 const MIN_SPACING_SEC: f32 = 0.07;
 const PAUSE_SEC: f32 = 0.12;
-/// Frames quieter than this (dB below the loudest frame) are silence.
 const SILENCE_DB: f32 = 40.0;
-/// Most syllables reported (guards absurd `expected` values).
 pub const MAX_SYLLABLES: usize = 2000;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VoiceFrame {
-    /// f0 (Hz) when voiced.
     pub f0: Option<f32>,
-    /// YIN CMNDF dip, 0 periodic .. 1 noise.
     pub aper: f32,
-    /// RMS of the frame (linear).
     pub rms: f32,
 }
 
-/// YIN per frame on `x` (rate `sr`, any): frames every `hop_sec`, frame t
-/// centred on t × hop. Silent frames (60 dB under the loudest) are unvoiced.
 pub fn voicing_track(x: &[f32], sr: f32, hop_sec: f32) -> Vec<VoiceFrame> {
     let y = if (sr.round() as u32) == TRACK_SR { x.to_vec() } else { audio::resample(x, sr, TRACK_SR) };
     let fs = TRACK_SR as f32;
@@ -91,7 +66,6 @@ pub fn voicing_track(x: &[f32], sr: f32, hop_sec: f32) -> Vec<VoiceFrame> {
             }
             d[tau] = s;
         }
-        // CMNDF in place.
         let mut run = 0f32;
         for tau in 1..=tau_max {
             run += d[tau];
@@ -119,13 +93,11 @@ pub fn voicing_track(x: &[f32], sr: f32, hop_sec: f32) -> Vec<VoiceFrame> {
     frames
 }
 
-/// Median f0 of the voiced frames, if at least `min_frames` are voiced.
 pub fn median_f0(frames: &[VoiceFrame], min_frames: usize) -> Option<f32> {
     let f: Vec<f32> = frames.iter().filter_map(|v| v.f0).collect();
     (f.len() >= min_frames.max(1)).then(|| median(&f))
 }
 
-/// One-pole band-pass (high-pass at `lo`, low-pass at `hi`).
 fn band(x: &[f32], sr: f32, lo: f32, hi: f32) -> Vec<f32> {
     let a_hp = (-2.0 * std::f32::consts::PI * lo / sr).exp();
     let a_lp = (-2.0 * std::f32::consts::PI * hi / sr).exp();
@@ -155,13 +127,12 @@ fn smooth(x: &[f32], radius: usize) -> Vec<f32> {
         .collect()
 }
 
-/// Syllables in mono audio `x` at `sr`.
 pub fn detect(x: &[f32], sr: f32, expected: Option<usize>, ctx: &JobCtx) -> Result<Vec<Syllable>, JobError> {
     let voice = voicing_track(x, sr, HOP_SEC);
     ctx.check()?;
     let hop = (HOP_SEC * sr).round().max(1.0) as usize;
     let b = band(x, sr, 250.0, 4000.0);
-    let half_win = (0.0125 * sr) as isize; // 25 ms energy window
+    let half_win = (0.0125 * sr) as isize;
     let n = voice.len();
     let mut energy = vec![0f32; n];
     for (t, e) in energy.iter_mut().enumerate() {
@@ -177,13 +148,11 @@ pub fn detect(x: &[f32], sr: f32, expected: Option<usize>, ctx: &JobCtx) -> Resu
     }
     let silent_thr = loud * 10f32.powf(-SILENCE_DB / 20.0);
     let strength_raw: Vec<f32> = energy.iter().zip(&voice).map(|(e, v)| e / loud * (0.25 + 0.75 * (1.0 - v.aper).clamp(0.0, 1.0))).collect();
-    let s = smooth(&strength_raw, 4); // ±20 ms
+    let s = smooth(&strength_raw, 4);
     let silent: Vec<bool> = energy.iter().map(|&e| e < silent_thr).collect();
 
-    // Candidate peaks.
     let mut peaks: Vec<usize> = (1..n.saturating_sub(1)).filter(|&t| s[t] > s[t - 1] && s[t] >= s[t + 1] && !silent[t] && s[t] > 0.02).collect();
     let min_gap = (MIN_SPACING_SEC / HOP_SEC) as usize;
-    // Enforce spacing: keep the stronger of two close peaks.
     let mut by_height = peaks.clone();
     by_height.sort_by(|&a, &b| s[b].total_cmp(&s[a]).then(a.cmp(&b)));
     let mut kept: Vec<usize> = Vec::new();
@@ -194,7 +163,6 @@ pub fn detect(x: &[f32], sr: f32, expected: Option<usize>, ctx: &JobCtx) -> Resu
     }
     kept.sort_unstable();
     peaks = kept;
-    // Prominence: height over the higher of the two valleys to its neighbours (or the edges).
     let valley = |a: usize, b: usize| (a..=b).map(|t| s[t]).fold(f32::INFINITY, f32::min);
     let prom: Vec<f32> = (0..peaks.len())
         .map(|i| {
@@ -218,7 +186,6 @@ pub fn detect(x: &[f32], sr: f32, expected: Option<usize>, ctx: &JobCtx) -> Resu
         return Ok(Vec::new());
     }
 
-    // Boundaries: speech onset / offset, minima between nuclei, pauses.
     let first_sound = silent.iter().position(|&q| !q).unwrap_or(0);
     let last_sound = silent.iter().rposition(|&q| !q).unwrap_or(n - 1);
     let pause_frames = (PAUSE_SEC / HOP_SEC) as usize;
@@ -227,7 +194,6 @@ pub fn detect(x: &[f32], sr: f32, expected: Option<usize>, ctx: &JobCtx) -> Resu
     for i in 0..chosen.len() {
         let end = if i + 1 < chosen.len() {
             let (a, b) = (chosen[i], chosen[i + 1]);
-            // A pause between the nuclei splits there; else the strength minimum.
             let mut run = 0;
             let mut pause: Option<(usize, usize)> = None;
             for t in a..=b {
@@ -256,7 +222,6 @@ pub fn detect(x: &[f32], sr: f32, expected: Option<usize>, ctx: &JobCtx) -> Resu
         segs.push((start, end));
         start = end;
     }
-    // Fewer nuclei than expected: split the longest syllables in half.
     if let Some(k) = expected {
         let k = k.min(MAX_SYLLABLES);
         while segs.len() < k {
@@ -300,8 +265,6 @@ pub fn run(args: &SyllablesArgs, ctx: &JobCtx) -> Result<SyllablesResult, JobErr
 mod tests {
     use super::*;
 
-    /// "ba-ba-ba": per syllable a 12 ms noise burst, then a 150 Hz vowel with
-    /// a smooth envelope; syllables `gap` seconds apart.
     pub fn babas(count: usize, sr: f32, vowel: f32, gap: f32) -> Vec<f32> {
         let mut x = vec![0f32; (0.1 * sr) as usize];
         let mut seed = 12345u32;
@@ -333,7 +296,6 @@ mod tests {
             for w in s.windows(2) {
                 assert!(w[0].end_sec <= w[1].start_sec + 1e-6, "{s:?}");
             }
-            // Same with `expected`.
             assert_eq!(detect(&x, 24_000.0, Some(count), &ctx).unwrap().len(), count);
         }
     }

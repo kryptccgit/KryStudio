@@ -1,6 +1,3 @@
-// Canvas colour tokens (mirrors tailwind.config.js krypt-* tokens so canvas
-// and DOM never drift) + tiny cached colour helpers for painters.
-
 export const C = {
   void: '#0A0A0F',
   panel: '#11111A',
@@ -49,7 +46,6 @@ export function hexToRgb(hex: string): RGB {
 }
 
 const rgbaCache = new Map<string, string>();
-/** '#rrggbb' + alpha → 'rgba(...)' (cached; alpha quantized to 1/100). */
 export function rgba(hex: string, a: number): string {
   const q = Math.round(Math.max(0, Math.min(1, a)) * 100);
   const key = `${hex}|${q}`;
@@ -68,21 +64,19 @@ function lerp(a: number, b: number, t: number): number {
 
 const STOPS: RGB[] = [hexToRgb('#4F46E5'), hexToRgb(C.purple), hexToRgb(C.pink)];
 const velCache: string[] = [];
-/** Note fill by velocity: indigo (soft) → purple → pink (hard). 64 cached steps. */
 export function velocityColor(vel: number): string {
   const i = Math.round(Math.max(0, Math.min(1, vel)) * 63);
   let s = velCache[i];
   if (!s) {
     const t = i / 63;
     const [a, b, u] = t < 0.5 ? [STOPS[0], STOPS[1], t * 2] : [STOPS[1], STOPS[2], (t - 0.5) * 2];
-    const k = 0.62 + 0.38 * t; // softer notes are also darker
+    const k = 0.62 + 0.38 * t;
     s = `rgb(${Math.round(lerp(a[0], b[0], u) * k)},${Math.round(lerp(a[1], b[1], u) * k)},${Math.round(lerp(a[2], b[2], u) * k)})`;
     velCache[i] = s;
   }
   return s;
 }
 
-/** Lighten a hex colour toward white by t (0..1). */
 export function lighten(hex: string, t: number): string {
   const [r, g, b] = hexToRgb(hex);
   return `rgb(${Math.round(lerp(r, 255, t))},${Math.round(lerp(g, 255, t))},${Math.round(lerp(b, 255, t))})`;

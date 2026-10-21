@@ -1,21 +1,9 @@
-//! True-peak (inter-sample peak) estimation by 4x polyphase interpolation,
-//! after ITU-R BS.1770-4 Annex 2. Two interpolators run side by side and the
-//! larger estimate wins, so readings never fall below either convention:
-//!
-//! * a long Kaiser-windowed sinc (24 taps/phase) — close to ideal
-//!   band-limited reconstruction;
-//! * a 48-tap Hann-windowed sinc (12 taps/phase) — the conventional design
-//!   used by common R128 meters (libebur128 / ffmpeg-style), which reads a
-//!   little higher on content close to Nyquist.
-
 use super::oversample::bessel_i0;
 
 pub const TAPS: usize = 24;
 pub const PHASES: usize = 4;
 const BETA: f64 = 7.5;
 const HANN_TAPS: usize = 12;
-/// The Hann interpolator's own centre (taps/2); it reads the history 6
-/// samples late so both evaluate at the same instants.
 const HANN_OFFSET: usize = TAPS / 2 - HANN_TAPS / 2;
 
 fn design_kaiser() -> [[f32; TAPS]; PHASES] {
@@ -27,7 +15,6 @@ fn design_kaiser() -> [[f32; TAPS]; PHASES] {
         let mut sum = 0.0;
         let mut tmp = [0.0f64; TAPS];
         for (j, t) in tmp.iter_mut().enumerate() {
-            // tap j multiplies x[n - j]; we evaluate at time n - half + tau
             let t_rel = j as f64 - half + tau;
             let s = if t_rel.abs() < 1e-12 { 1.0 } else { (std::f64::consts::PI * t_rel).sin() / (std::f64::consts::PI * t_rel) };
             let r = (t_rel / (half + 1.0)).clamp(-1.0, 1.0);
@@ -42,10 +29,8 @@ fn design_kaiser() -> [[f32; TAPS]; PHASES] {
     c
 }
 
-/// 48-tap Hann-windowed sinc for 4x upsampling, split into phases: row f,
-/// tap t multiplies x[n - t] and yields the output at time n - 6 + f/4.
 fn design_hann() -> [[f32; HANN_TAPS]; PHASES] {
-    let n = HANN_TAPS * PHASES; // 48
+    let n = HANN_TAPS * PHASES;
     let mut h = vec![0.0f64; n];
     for (j, v) in h.iter_mut().enumerate() {
         let w = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * j as f64 / n as f64).cos());
@@ -62,8 +47,6 @@ fn design_hann() -> [[f32; HANN_TAPS]; PHASES] {
     c
 }
 
-/// Streaming detector for one channel. `push` returns the largest absolute
-/// value (sample or inter-sample) around the sample `latency()` pushes ago.
 #[derive(Clone, Debug)]
 pub struct TruePeak {
     coef: [[f32; TAPS]; PHASES],
@@ -117,8 +100,6 @@ impl TruePeak {
     }
 }
 
-/// Offline true peak (linear) of a whole buffer. Skips regions that cannot
-/// beat the running maximum, so it is fast on real music.
 pub fn true_peak(x: &[f32]) -> f32 {
     let coef = design_kaiser();
     let hann = design_hann();
@@ -147,7 +128,6 @@ pub fn true_peak(x: &[f32]) -> f32 {
         let hi = (e + TAPS).min(n);
         let local = x[lo..hi].iter().fold(0.0f32, |m, v| m.max(v.abs()));
         if local * l1 > best {
-            // interpolated points between m and m+1 for m in [b, e)
             for m in b..e {
                 let m = m as isize;
                 for row in &coef[1..] {
@@ -177,7 +157,6 @@ mod tests {
 
     #[test]
     fn detects_intersample_peak() {
-        // fs/4 sine at 45° phase: samples at ±0.7071, true peak 1.0
         let x: Vec<f32> = (0..2000).map(|i| (std::f32::consts::FRAC_PI_2 * i as f32 + std::f32::consts::FRAC_PI_4).sin()).collect();
         let sp = x.iter().fold(0.0f32, |m, v| m.max(v.abs()));
         assert!((sp - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3);

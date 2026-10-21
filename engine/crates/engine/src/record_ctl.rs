@@ -1,9 +1,3 @@
-//! Control-thread side of live input + recording (docs/ENGINE_PROTOCOL.md
-//! §7): the protocol commands, the MIDI device manager, CC forwarding for
-//! MIDI-learn, the audio input, and turning what the audio thread recorded
-//! into `recorded` events. Hooked into control.rs by three call sites
-//! (dispatch fallback, `tick`, shutdown), each marked `live input:`.
-
 use crate::compile::Session;
 use crate::input::{take_path, AudioDone, InputManager};
 use crate::midi::{now_ns, CcEv, CcThrottle, MidiInputInfo, MidiManager, MidiPolicy, MidiSink};
@@ -18,7 +12,6 @@ use std::sync::atomic::Ordering::*;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// How long main waits for the audio half of a take after the transport stopped.
 const AUDIO_TAKE_TIMEOUT: Duration = Duration::from_secs(8);
 
 struct TakeAcc {
@@ -28,18 +21,13 @@ struct TakeAcc {
     pattern_id: Option<String>,
     audio: bool,
     notes: Vec<Value>,
-    /// Set when the audio thread ended the take (notes are final).
     ended_at: Option<Instant>,
-    /// Song mode: heard seconds of each loop wrap since the take started (takes, docs §13).
     wraps: Vec<f64>,
     loop_lo: f64,
     loop_hi: f64,
-    /// Song mode with 2+ passes: the `passes` array of the report (set at End).
     passes: Option<Value>,
 }
 
-/// One loop pass of a song-mode take (docs/ENGINE_PROTOCOL.md §13): where it
-/// sits on the timeline and where it starts in the audio take file.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pass {
     pub start_tick: f64,
@@ -47,9 +35,6 @@ pub struct Pass {
     pub sec: f64,
 }
 
-/// Passes of a looped take: pass 0 starts at the take start, every later pass
-/// at the loop start; each ends at the loop end except the last, which ends
-/// where recording stopped (its heard length at `bpm`, capped at the loop end).
 pub fn take_passes(start_tick: f64, wraps: &[f64], lo: f64, hi: f64, len_sec: f64, bpm: f64) -> Vec<Pass> {
     let mut out = Vec::with_capacity(wraps.len() + 1);
     let mut starts = vec![(start_tick, 0.0)];
@@ -80,11 +65,9 @@ pub struct LiveControl {
     armed: bool,
     rec_audio: bool,
     monitor: bool,
-    /// Input open for its level meter only (the Recording Studio's mic test): not monitored, not recorded.
     meter: bool,
     in_device: Option<String>,
     in_channels: Vec<u16>,
-    /// (device, channels) the input stream was opened with.
     opened: Option<(Option<String>, Vec<u16>)>,
     record_dir: Option<PathBuf>,
     record_name: String,
@@ -131,7 +114,6 @@ impl LiveControl {
         }
     }
 
-    /// Handle a live-input command; `None` = not ours.
     pub fn dispatch(&mut self, cmd: &str, v: &Value, session: &Session) -> Option<Result<Value, String>> {
         let r = match cmd {
             "listMidiInputs" => self.midi.rescan().map(|l| json!(l)),
@@ -203,8 +185,6 @@ impl LiveControl {
         })
     }
 
-    /// Debug builds only: inject raw MIDI bytes as if a device sent them
-    /// (protocol smoke tests without hardware or a loopback driver).
     fn debug_midi_in(&self, v: &Value) -> Result<Value, String> {
         if !cfg!(debug_assertions) {
             return Err("debugMidiIn is only available in debug engine builds".into());
@@ -220,9 +200,6 @@ impl LiveControl {
         Ok(json!({ "messages": self.live.midi_in.load(Relaxed).wrapping_sub(before) }))
     }
 
-    /// Gamepads and computer-keyboard pads (main → shared/live/controllers.ts): whole note / CC messages from a
-    /// virtual input named "Krypt: …", through the same sink as a device (target channel, recording, controller
-    /// links, the launcher grid). Released builds too; the device-name prefix keeps them apart from hardware.
     fn virtual_midi_in(&self, v: &Value) -> Result<Value, String> {
         let (dev, bytes) = virtual_midi(v)?;
         let before = self.live.midi_in.load(Relaxed);
@@ -239,8 +216,6 @@ impl LiveControl {
         self.takes.iter().any(|t| t.audio) || self.live.state.load(Relaxed) == crate::record::STATE_RECORDING
     }
 
-    /// Open / re-open / close the input stream to match the settings.
-    /// Closing waits until no audio take is still being written.
     fn apply_input(&mut self, session: &Session, force_reopen: bool) {
         let want = self.want_input();
         let cfg = (self.in_device.clone(), self.in_channels.clone());
@@ -248,7 +223,6 @@ impl LiveControl {
             let open = self.input.is_open();
             if !open || self.opened.as_ref() != Some(&cfg) || (force_reopen && !open) {
                 if self.audio_pending() && open {
-                    // Don't cut a take in half; the new device applies after it.
                 } else {
                     let st = self.input.open(cfg.0.clone(), cfg.1.clone());
                     if st.open {
@@ -287,11 +261,9 @@ impl LiveControl {
         }
     }
 
-    /// Called from the control loop (every ≤10 ms).
     pub fn tick(&mut self, session: &Session) {
         self.resolve_target(session);
 
-        // CCs → `midiCc` (≤100 Hz per controller; the last value always arrives).
         let now = now_ns();
         let mut ccs: Vec<CcEv> = Vec::new();
         while let Ok(ev) = self.cc_rx.try_recv() {
@@ -304,7 +276,6 @@ impl LiveControl {
             self.out.event(json!({ "event": "midiCc", "device": &*ev.device, "channel": ev.ch, "cc": ev.cc, "value": ev.value }));
         }
 
-        // Device list changes (hot-plug, enable, open errors).
         let mut latest = None;
         while let Ok(l) = self.inputs_rx.try_recv() {
             latest = Some(l);
@@ -313,7 +284,6 @@ impl LiveControl {
             self.out.event(json!({ "event": "midiInputs", "inputs": l }));
         }
 
-        // Recorded material from the audio thread.
         while let Ok(m) = self.rec_rx.pop() {
             self.on_rec(m, session);
         }
@@ -326,7 +296,6 @@ impl LiveControl {
             self.live.monitor.store(false, Relaxed);
             self.out.event(json!({ "event": "inputStatus", "status": self.input.status() }));
         }
-        // Give up on audio that never arrived.
         let mut i = 0;
         while i < self.takes.len() {
             let t = &self.takes[i];
@@ -337,7 +306,6 @@ impl LiveControl {
             }
             i += 1;
         }
-        // A deferred input close (disarmed while a take was still being written).
         if !self.want_input() && self.input.is_open() && !self.audio_pending() {
             self.input.close();
             self.opened = None;
@@ -384,8 +352,6 @@ impl LiveControl {
             RecMsg::Wrap { take, sec, lo, hi } => {
                 if let Some(i) = self.takes.iter().position(|t| t.take == take) {
                     if self.takes[i].song {
-                        // Song mode (loop region): a pass boundary for take lanes; the
-                        // notes are reported once, at the end, tagged with their pass.
                         let t = &mut self.takes[i];
                         t.wraps.push(sec);
                         t.loop_lo = lo;
@@ -464,18 +430,14 @@ impl LiveControl {
         self.out.event(ev);
     }
 
-    /// Engine exit: stop the input (finalizing a take in progress) and MIDI.
     pub fn shutdown(&mut self) {
         self.input.shutdown();
         self.midi.shutdown();
     }
 }
 
-/// Most bytes one virtualMidiIn carries (shared/live/controllers.ts MAX_VIRTUAL_MIDI_BYTES).
 const MAX_VIRTUAL_BYTES: usize = 192;
 
-/// A virtualMidiIn request's device and bytes: a "Krypt: " device name and whole note-off / note-on / poly
-/// aftertouch / CC messages (status 0x80..0xBF + two data bytes), nothing else.
 fn virtual_midi(v: &Value) -> Result<(Arc<str>, Vec<u8>), String> {
     let dev = s(v, "device").unwrap_or_default();
     if !dev.starts_with("Krypt: ") || dev.chars().count() > 64 {
@@ -520,17 +482,13 @@ mod tests {
 
     #[test]
     fn looped_take_passes() {
-        // 120 bpm: 1920 ticks per second. Loop [3840, 11520) = 4 s; recording
-        // started at 5760 (3 s before the loop end), wrapped twice, stopped 1.5 s into pass 3.
         let ps = take_passes(5760.0, &[3.0, 7.0], 3840.0, 11520.0, 8.5, 120.0);
         assert_eq!(ps.len(), 3);
         assert_eq!(ps[0], Pass { start_tick: 5760.0, end_tick: 11520.0, sec: 0.0 });
         assert_eq!(ps[1], Pass { start_tick: 3840.0, end_tick: 11520.0, sec: 3.0 });
         assert!((ps[2].end_tick - (3840.0 + 1.5 * 1920.0)).abs() < 1e-6 && ps[2].sec == 7.0);
-        // A last pass longer than the loop is capped at the loop end.
         let ps = take_passes(3840.0, &[4.0], 3840.0, 11520.0, 9.0, 120.0);
         assert_eq!(ps[1].end_tick, 11520.0);
-        // Stopped right at the wrap: an empty last pass, never negative.
         let ps = take_passes(3840.0, &[4.0], 3840.0, 11520.0, 3.99, 120.0);
         assert_eq!(ps[1].end_tick, 3840.0);
     }

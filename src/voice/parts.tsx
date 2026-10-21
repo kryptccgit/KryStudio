@@ -1,7 +1,3 @@
-// Krypt Voice building blocks shared by the Krypt Voice dialog, Sing my notes, Settings ▸ Voice and Record my voice:
-// the Cloud / On your PC badges, the grouped voice picker with its empty states, the compact voice select, notes,
-// and the stage list with progress + Cancel.
-
 import type { ReactNode } from 'react';
 import { Ban, BrainCircuit, Check, Circle, CircleX, Cloud, Cpu, ExternalLink, KeyRound, Loader2, Mic, UserRound, type LucideIcon } from 'lucide-react';
 import type { VoiceInfo, VoiceState } from '@shared/voice/types';
@@ -71,8 +67,6 @@ export function SectionTitle({ children, right }: { children: ReactNode; right?:
   );
 }
 
-// ── Empty states ──────────────────────────────────────────────────────
-
 export function NeedModel({ message }: { message?: string }) {
   return (
     <div className="flex flex-wrap items-center gap-2 px-2.5 py-2 text-[11px] text-white/70">
@@ -97,8 +91,6 @@ export function NeedKey({ message }: { message?: string }) {
     </div>
   );
 }
-
-// ── The grouped voice picker ──────────────────────────────────────────
 
 const GROUP_ICON: Record<VoiceGroup, LucideIcon> = { local: Cpu, cloud: Cloud, mine: UserRound };
 
@@ -170,7 +162,6 @@ export function VoicePicker({ state, value, onChange, onRecord }: { state: Voice
   );
 }
 
-/** Compact voice select (Sing my notes): optgroups Local / Cloud / My voice; unusable groups are disabled with the reason. */
 export function VoiceSelect({ state, value, onChange, width = 230 }: { state: VoiceState | null; value: string | null; onChange: (id: string) => void; width?: number }) {
   const g = groupVoices(state?.voices ?? []);
   const groups: Array<{ key: VoiceGroup; label: string; disabled: boolean }> = [
@@ -202,8 +193,6 @@ export function VoiceSelect({ state, value, onChange, width = 230 }: { state: Vo
     </select>
   );
 }
-
-// ── Progress ──────────────────────────────────────────────────────────
 
 const STAGE_ICON: Record<StageState, { icon: LucideIcon; className: string }> = {
   pending: { icon: Circle, className: 'text-white/25' },

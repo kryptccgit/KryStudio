@@ -1,5 +1,3 @@
-//! Exit when the parent (Electron main) dies: poll the process handle every 1 s.
-
 use crate::protocol::Out;
 use std::sync::Arc;
 
@@ -8,7 +6,6 @@ pub fn spawn_parent_watchdog(pid: u32, out: Arc<Out>) {
     {
         use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0};
         use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
-        // SAFETY: plain Win32 calls with checked handles.
         let h = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
         if h.is_null() {
             let err = unsafe { GetLastError() };

@@ -1,13 +1,9 @@
-// Project info (FL's F11 "song info"): name, author, genre and notes.
-// One `project.setMeta` call = one undo step. Agents read the same meta.
-
 import { useId, useState } from 'react';
 import { FileText } from 'lucide-react';
 import { dispatch, getProject } from '../doc/store';
 import { openDialog, DialogForm, Field } from '../components/Dialog';
 import { flashHint } from './hints';
 
-/** Genre suggestions (a datalist: any text works). */
 export const GENRES = [
   'Trap',
   'Hip-hop',
@@ -105,7 +101,6 @@ function ProjectInfoForm({ close }: { close: () => void }) {
           rows={6}
           onChange={(e) => setNotes(e.target.value)}
           onKeyDown={(e) => {
-            // Enter adds a line here; Ctrl+Enter saves.
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
               e.preventDefault();
               void submit();

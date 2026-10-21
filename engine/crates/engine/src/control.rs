@@ -1,7 +1,3 @@
-//! The NDJSON control loop (stdin → requests, stdout → responses/events).
-//! Heavy work (decoding, peaks, analysis, renders) runs on worker threads
-//! that answer by id, so `ping` keeps answering during a render.
-
 use crate::audio::{CoreCell, DeviceManager};
 use crate::compile::{Names, SampleMode, Session};
 use crate::core::{Cmd, Garbage, Preview, Shared};
@@ -27,7 +23,6 @@ pub enum Msg {
     Line(String),
     Eof,
     SampleLoaded(PathBuf),
-    /// A variant worker finished (or dropped) an audio-clip time-stretch job.
     VariantDone(VariantKey, VariantOutcome),
     PreviewReady { id: Value, result: Result<Arc<SampleData>, String>, gain: f32 },
     RenderDone,
@@ -35,7 +30,6 @@ pub enum Msg {
 
 type Job = Box<dyn FnOnce() + Send>;
 
-/// Threads rendering audio-clip variants (time-stretch / pitch-shift).
 const VARIANT_WORKERS: usize = 2;
 
 pub struct Engine {
@@ -59,7 +53,6 @@ pub struct Engine {
     rx: Receiver<Msg>,
     jobs: Sender<Job>,
     samples_dirty: bool,
-    /// Last `stretch` event sent (channels waiting for a time-stretched variant).
     last_stretch_pending: Vec<String>,
     last_applied: u64,
     last_xruns: u32,
@@ -68,11 +61,8 @@ pub struct Engine {
     last_prune: Instant,
     fault_reported: bool,
     leak_reported: u32,
-    /// live input: MIDI inputs, recording, audio input (record_ctl.rs).
     pub live: crate::record_ctl::LiveControl,
-    /// launcher: clip launcher commands, grid hits, launch recording (launcher.rs).
     launcher: crate::launcher::LauncherCtl,
-    /// hardware: MIDI outputs, clock out, sync in, launcher-state events (hardware_ctl.rs).
     hardware: crate::hardware_ctl::HardwareCtl,
 }
 
@@ -81,7 +71,6 @@ pub struct EngineParts {
     pub host: PluginHost,
     pub cache: Arc<SampleCache>,
     pub factory_dir: PathBuf,
-    /// Installed sound packs (`--packs-dir`): where `pack:` sample paths resolve.
     pub packs_dir: Option<PathBuf>,
     pub shared: Arc<Shared>,
     pub core: CoreCell,
@@ -90,27 +79,23 @@ pub struct EngineParts {
     pub device: DeviceManager,
     pub telemetry: TelemetryInfo,
     pub names: Arc<Mutex<Names>>,
-    /// live input: control-side queue ends (record::live_channels).
     pub live: crate::record::LiveCtlEnds,
 }
 
 impl Engine {
     pub fn new(p: EngineParts) -> Engine {
         let (internal_tx, rx) = crossbeam_channel::unbounded::<Msg>();
-        // Sample loader thread (playback samples; never queued behind UI jobs).
         let (loader_tx, loader_rx) = crossbeam_channel::unbounded::<PathBuf>();
         {
             let cache = p.cache.clone();
             let tx = internal_tx.clone();
             let _ = std::thread::Builder::new().name("sample-loader".into()).spawn(move || {
                 while let Ok(path) = loader_rx.recv() {
-                    // a sample, or an SFZ instrument (krypt.multisampler)
                     cache.preload(&path);
                     let _ = tx.send(Msg::SampleLoaded(path));
                 }
             });
         }
-        // Worker pool for peaks / sampleInfo / analyzeFile / preview decode.
         let (jobs, jobs_rx) = crossbeam_channel::unbounded::<Job>();
         for i in 0..2 {
             let jr = jobs_rx.clone();
@@ -120,9 +105,6 @@ impl Engine {
                 }
             });
         }
-        // Variant workers: render time-stretched / pitched copies of audio-clip
-        // samples off the audio thread (variants.rs). Stale jobs are cancelled
-        // by the compiler between ~0.5 s chunks.
         let (variant_tx, variant_rx) = crossbeam_channel::unbounded::<VariantJob>();
         for i in 0..VARIANT_WORKERS {
             let rx = variant_rx.clone();
@@ -138,9 +120,9 @@ impl Engine {
             });
         }
         let sr = p.shared.sample_rate.load(Relaxed) as f32;
-        let launcher = crate::launcher::LauncherCtl::new(&p.shared.launch, Some(p.live.sink.clone())); // launcher
-        let hardware = crate::hardware_ctl::HardwareCtl::new(p.shared.clock.clone(), p.live.sink.clone()); // hardware
-        let live = crate::record_ctl::LiveControl::new(p.live, p.out.clone()); // live input
+        let launcher = crate::launcher::LauncherCtl::new(&p.shared.launch, Some(p.live.sink.clone()));
+        let hardware = crate::hardware_ctl::HardwareCtl::new(p.shared.clock.clone(), p.live.sink.clone());
+        let live = crate::record_ctl::LiveControl::new(p.live, p.out.clone());
         let mut session = Session::new(p.host, sr, p.cache.clone(), p.factory_dir.clone(), SampleMode::Async(loader_tx));
         session.variant_tx = Some(variant_tx);
         session.packs_dir = p.packs_dir.clone();
@@ -179,7 +161,6 @@ impl Engine {
         }
     }
 
-    /// Spawn the stdin reader and run until stdin closes or `shutdown`.
     pub fn run(mut self) {
         let tx = self.internal_tx.clone();
         let _ = std::thread::Builder::new().name("stdin".into()).spawn(move || {
@@ -206,8 +187,8 @@ impl Engine {
                 }
                 Ok(Msg::Eof) => {
                     eprintln!("[engine] stdin closed; exiting");
-                    self.live.shutdown(); // live input: finalize a take in progress
-                    self.hardware.shutdown(); // hardware: at-close messages, close outputs
+                    self.live.shutdown();
+                    self.hardware.shutdown();
                     self.device.shutdown();
                     return;
                 }
@@ -224,7 +205,6 @@ impl Engine {
                             }
                             self.samples_dirty = true;
                         }
-                        // The rebuild reports the cached failure (warn, once).
                         VariantOutcome::Failed(_) => self.samples_dirty = true,
                         VariantOutcome::Cancelled => {}
                     }
@@ -245,7 +225,6 @@ impl Engine {
         }
     }
 
-    /// launcher: a launch starts a stopped transport (keep `playing` in step for `toggle`).
     fn launch_push(&mut self, c: crate::launcher::LaunchCmd) {
         if matches!(c, crate::launcher::LaunchCmd::Launch { release: false, .. } | crate::launcher::LaunchCmd::Scene(_)) {
             self.playing = true;
@@ -286,12 +265,12 @@ impl Engine {
         while let Ok(g) = self.garbage_rx.pop() {
             drop(g);
         }
-        self.live.tick(&self.session); // live input: MIDI target, CCs, recorded takes
+        self.live.tick(&self.session);
         for c in self.launcher.tick(&self.session, &self.out) {
-            self.launch_push(c); // launcher: grid-controller notes
+            self.launch_push(c);
         }
         if let Some(p) = self.hardware.tick(&self.session, &self.shared, &self.out) {
-            self.playing = p; // hardware: the sync input started / stopped the transport
+            self.playing = p;
         }
         while let Some(c) = self.backlog.pop_front() {
             if let Err(rtrb::PushError::Full(c)) = self.cmd_tx.push(c) {
@@ -327,9 +306,6 @@ impl Engine {
             self.samples_dirty = false;
             self.rebuild(false);
         }
-        // Third-party plugins (krypt-studio-pluginclient): forward plugin-host
-        // events (crash, editor closed, GUI param edits, load failures) and
-        // re-create instances after a host restart or new registrations.
         for e in krypt_studio_pluginclient::drain_events() {
             match e.get("event").and_then(|x| x.as_str()) {
                 Some("log") => self.out.log(e.get("level").and_then(|x| x.as_str()).unwrap_or("info"), e.get("message").and_then(|x| x.as_str()).unwrap_or("")),
@@ -340,7 +316,6 @@ impl Engine {
             self.session.forget_plugins(true);
             self.rebuild(false);
         } else if krypt_studio_pluginclient::take_retry_request() && !self.session.model.master_id.is_empty() {
-            // (Before the first loadProject there is nothing to retry.)
             self.session.forget_plugins(false);
             self.rebuild(false);
         }
@@ -348,7 +323,6 @@ impl Engine {
             self.last_prune = Instant::now();
             self.cache.prune(&self.session.referenced_samples());
         }
-        // Stretch-cache evictions from worker threads.
         for (level, msg) in self.cache.variants.drain_logs() {
             self.out.log(level, msg);
         }
@@ -379,8 +353,6 @@ impl Engine {
         }
     }
 
-    /// The request's `path`, resolved (`factory:`, `pack:`): None without one,
-    /// Some(Err) when a `pack:` path can't resolve.
     fn path_param(&self, v: &Value) -> Option<Result<(String, PathBuf), String>> {
         let p = v.get("path")?.as_str()?.to_string();
         Some(resolve_path(&p, &self.factory_dir, self.packs_dir.as_deref(), None).map(|resolved| (p, resolved)))
@@ -678,7 +650,6 @@ impl Engine {
                 }));
             }
             "catalog" => self.out.ok(id, catalog_json(&self.host)),
-            // Third-party VST3/CLAP commands: register, configure, editor, state(s), reload, status.
             other if other.starts_with("plugins.") => {
                 let out = self.out.clone();
                 let id = id.clone();
@@ -693,12 +664,11 @@ impl Engine {
             }
             "shutdown" => {
                 self.out.ok(id, json!({}));
-                self.live.shutdown(); // live input: finalize a take in progress
-                self.hardware.shutdown(); // hardware: at-close messages, close outputs
+                self.live.shutdown();
+                self.hardware.shutdown();
                 self.device.shutdown();
                 std::process::exit(0);
             }
-            // launcher: clip launcher commands (launcher.rs, docs/ENGINE_PROTOCOL.md §10).
             "launch" | "launchScene" | "launchStop" | "backToArrangement" | "setLaunchRecord" | "setLaunchGrid" => {
                 match self.launcher.command(cmd, v, &self.session) {
                     Some(Ok((data, cmds))) => {
@@ -711,13 +681,11 @@ impl Engine {
                     None => self.out.err(id, format!("Unknown command '{cmd}'")),
                 }
             }
-            // hardware: MIDI outputs, clock out, sync in (hardware_ctl.rs, docs/ENGINE_PROTOCOL.md §14).
             "listMidiOutputs" | "setMidiOutputs" | "setMidiClock" | "midiSend" | "setMidiSync" => match self.hardware.dispatch(cmd, v) {
                 Some(Ok(data)) => self.out.ok(id, data),
                 Some(Err(e)) => self.out.err(id, e),
                 None => self.out.err(id, format!("Unknown command '{cmd}'")),
             },
-            // live input: MIDI / recording / audio-input commands (record_ctl.rs).
             other => match self.live.dispatch(other, v, &self.session) {
                 Some(Ok(data)) => self.out.ok(id, data),
                 Some(Err(e)) => self.out.err(id, e),

@@ -1,29 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Warp commands for audio clips, Wave 12.2 (research/16-ableton-parity.md
-// §2.2; the contract is shared/schema/warp.ts). The warp map lives on the
-// Audio Clip channel's generator, so every playlist clip of that channel
-// plays the same warped audio. Pure: no I/O. main runs the analyzer's beat
-// tracking and passes the beat times to audio.autoWarp.
-//
-// Invariant kept by every command: `isValidWarp(markers)` (sec AND beat
-// strictly increasing, both >= 0), at most MAX_WARP_MARKERS, and `sec`
-// inside the file when its length is known (SampleRef frames / rate).
-//
-// Ordering rule: an add or a move that would cross (or land on) a
-// neighbouring marker is REFUSED with a message naming the neighbour, never
-// clamped: an agent sees exactly why, and the waveform UI clamps its drag
-// between the neighbours before it dispatches, so a drag never fails.
-//
-// Drag semantics (the waveform UI): dragging a marker moves its `sec` and
-// keeps its `beat`, i.e. it re-pins which moment of the audio lands on that
-// beat (the audio under the marker slides, the grid stays). Agents may move
-// either or both with audio.moveWarpMarker.
-//
-// Playlist clips are left alone by the marker commands (their start / length
-// stay in ticks = beats). audio.autoWarp also writes the Stretch params so
-// they agree with the markers (see its description).
-// ──────────────────────────────────────────────────────────────────────
-
 import { z } from 'zod';
 import { defineCommand, must, CommandError, plural } from './types';
 import type { Channel, Project } from '../schema/project';
@@ -33,7 +7,6 @@ import { AUDIOCLIP, syncBpm } from '../analyzer/tempo';
 import { PPQ, ticksPerBar } from '../schema/time';
 import { keepAudioInPlace } from './audioTiming';
 
-/** Id prefix for warp markers ("wm3"). */
 export const WARP_MARKER_PREFIX = 'wm';
 
 const round = (v: number, d = 3): number => {
@@ -43,14 +16,12 @@ const round = (v: number, d = 3): number => {
 const fmtSec = (s: number): string => `${round(s, 3)} s`;
 const fmtBeat = (b: number): string => `beat ${round(b, 3)}`;
 
-/** The audio-clip channel (anything else is refused with a human message). */
 function audioChannel(d: Project, channelId: string): Channel {
   const ch = must(d.channels[channelId], `Channel ${channelId} not found (was it deleted?)`);
   if (ch.generator.type !== AUDIOCLIP) throw new CommandError(`"${ch.name}" is not an audio clip channel; warping works on audio clips`);
   return ch;
 }
 
-/** The source file's length in seconds when the sample pool knows it. */
 export function sampleDurationSec(d: Project, ch: Channel): number | null {
   const s = ch.generator.sampleId ? d.samples[ch.generator.sampleId] : undefined;
   return s && s.frames && s.sampleRate ? s.frames / s.sampleRate : null;
@@ -65,7 +36,6 @@ function checkInFile(d: Project, ch: Channel, sec: number): void {
   if (dur !== null && sec >= dur) throw new CommandError(`${fmtSec(sec)} is past the end of "${ch.name}" (${fmtSec(dur)} long)`);
 }
 
-/** Why `m` can't sit between `prev` and `next` (null = it fits). */
 function orderProblem(m: { sec: number; beat: number }, prev: WarpMarker | undefined, next: WarpMarker | undefined): string | null {
   if (prev && !(m.sec > prev.sec)) return `it would cross the previous marker (${fmtBeat(prev.beat)} at ${fmtSec(prev.sec)})`;
   if (next && !(m.sec < next.sec)) return `it would cross the next marker (${fmtBeat(next.beat)} at ${fmtSec(next.sec)})`;
@@ -74,7 +44,6 @@ function orderProblem(m: { sec: number; beat: number }, prev: WarpMarker | undef
   return null;
 }
 
-/** Index where a marker at `sec` goes (markers sorted by sec). */
 function insertIndex(markers: WarpMarker[], sec: number): number {
   let i = 0;
   while (i < markers.length && markers[i].sec < sec) i++;
@@ -89,8 +58,6 @@ function assertValid(ch: Channel): void {
 const zChannel = z.string().min(1);
 const zSec = z.number().finite().min(0);
 const zBeat = z.number().finite().min(0).max(1_000_000);
-
-// ── Mode / options ────────────────────────────────────────────────────
 
 export const audioSetWarpMode = defineCommand({
   id: 'audio.setWarpMode',
@@ -133,8 +100,6 @@ export const audioSetWarpOptions = defineCommand({
     return {};
   },
 });
-
-// ── Markers ───────────────────────────────────────────────────────────
 
 export const audioAddWarpMarker = defineCommand({
   id: 'audio.addWarpMarker',
@@ -217,11 +182,8 @@ export const audioClearWarp = defineCommand({
   },
 });
 
-// ── Auto-warp ─────────────────────────────────────────────────────────
-
 export type WarpHint = 'drums' | 'mono' | 'mix';
 
-/** drums → beats, a single voice → tones, anything else → complex. */
 export function modeForHint(hint: WarpHint | undefined): WarpMode {
   return hint === 'drums' ? 'beats' : hint === 'mono' ? 'tones' : 'complex';
 }
@@ -234,26 +196,11 @@ function median(xs: number[]): number {
 
 export interface AutoWarpPlan {
   markers: Array<{ sec: number; beat: number }>;
-  /** Quarter notes per tracked beat (2 = the tracker heard half time). */
   beatUnit: number;
-  /** The source tempo the markers imply (quarter notes per minute). */
   srcBpm: number;
-  /** Tracked beats per tracked bar. */
   beatsPerBar: number;
 }
 
-/**
- * Markers for a beat grid (pure maths, also used by the UI preview / tests).
- * - Beats are sorted, de-duplicated (< 1 ms apart) and cut to the file length.
- * - beatUnit (quarter notes per tracked beat): given, or 0.5 / 1 / 2, whichever puts the tracked
- *   tempo nearest the project tempo (a loop tracked at 70 in a 140 project keeps its speed: each
- *   tracked beat becomes two quarter notes).
- * - The downbeat lands on a bar line of the project's time signature; the grid starts at the
- *   earliest bar that keeps the audio before the first downbeat at beat >= 0 (a pickup up to a
- *   16th before beat 0 is tolerated: it plays just before the clip start).
- * - every 'bar': one marker per tracked bar (downbeat + k × beatsPerBar), plus the last beat so the
- *   tail is pinned too; 'beat': one per tracked beat.
- */
 export function planAutoWarp(input: {
   beatTimes: number[];
   downbeatIndex?: number;
@@ -262,7 +209,6 @@ export function planAutoWarp(input: {
   beatUnit?: number;
   durationSec?: number | null;
   projectBpm: number;
-  /** Project bar length in quarter notes. */
   barQuarters: number;
 }): AutoWarpPlan {
   let times = input.beatTimes.filter((t) => Number.isFinite(t) && t >= 0 && (input.durationSec == null || t < input.durationSec)).sort((a, b) => a - b);
@@ -278,8 +224,7 @@ export function planAutoWarp(input: {
   }
   const bpb = Math.max(1, Math.round(input.beatsPerBar ?? 4));
   const d = Math.min(Math.max(0, Math.round(input.downbeatIndex ?? 0)), times.length - 1);
-  // Beat value of tracked beat j = (j - d) × unit + base, base a multiple of the project bar.
-  const preRoll = (d + times[0] / period) * unit; // quarter notes of audio before the downbeat
+  const preRoll = (d + times[0] / period) * unit;
   const bar = input.barQuarters > 0 ? input.barQuarters : 4;
   const base = Math.max(0, Math.ceil((preRoll - 0.25) / bar)) * bar;
   const beatOf = (j: number): number => (j - d) * unit + base;
@@ -314,9 +259,7 @@ export const audioAutoWarp = defineCommand({
     every: z.enum(['bar', 'beat']).default('bar'),
     hint: z.enum(['drums', 'mono', 'mix']).optional(),
     mode: z.enum(WARP_MODES).optional(),
-    /** Tracked beats per bar (from the analysis; default 4). */
     beatsPerBar: z.number().int().min(1).max(16).optional(),
-    /** Quarter notes per tracked beat (default: automatic, see description). */
     beatUnit: z.number().min(0.25).max(4).optional(),
   }),
   run(d, a, ctx) {

@@ -1,15 +1,3 @@
-//! HT-Demucs v4 (`htdemucs`, Meta, MIT) as a "forward-only" ONNX graph: the
-//! WebNN export `webnn/stem-separator` (MIT) contains `HTDemucs.fwd(x, xt)`
-//! and leaves the rest of `HTDemucs.forward` to us:
-//!
-//! - pre: `_spec` → complex-as-channels `x [1,4,2048,336]`, normalised by its
-//!   own mean/std; the waveform `xt [1,2,343980]` normalised likewise.
-//! - post: `x_out [1,16,2048,336]` × std + mean → per stem/channel complex
-//!   spectrogram → `_ispec`; plus `xt_out [1,8,343980]` × stdt + meant.
-//!
-//! (demucs/htdemucs.py; the split into pre/fwd/post follows the conversion
-//! script in the model repo, tools/convert_htdemucs_fwd_only.py.)
-
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -24,7 +12,6 @@ use super::spec::{self, Spectro, BINS};
 pub const ID: &str = "htdemucs";
 pub const LABEL: &str = "HT-Demucs";
 pub const SAMPLE_RATE: u32 = 44_100;
-/// `int(Fraction(39, 5) * 44100)`: the training segment, the graph's fixed length.
 pub const SEGMENT: usize = 343_980;
 pub const SOURCES: [&str; 4] = ["drums", "bass", "other", "vocals"];
 pub const MODEL_FILE: &str = "htdemucs_fwd.onnx";
@@ -39,7 +26,6 @@ pub enum SegmentError {
     Failed(String),
 }
 
-/// Where the time goes (reported as a log line at the end of a job).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Timing {
     pub load: Duration,
@@ -55,7 +41,6 @@ pub struct HtDemucs {
     pub timing: Timing,
     x: Vec<f32>,
     xt: Vec<f32>,
-    /// One per output signal (stem × channel): the iSTFTs run in parallel.
     workers: Vec<Worker>,
 }
 
@@ -65,7 +50,6 @@ struct Worker {
     im: Vec<f32>,
 }
 
-/// Reads the graph and applies the DirectML compatibility fix (see onnx_patch).
 pub fn load_graph(model_dir: &Path) -> Result<Vec<u8>, String> {
     let path = model_dir.join(MODEL_FILE);
     let weights = model_dir.join(WEIGHTS_FILE);
@@ -98,12 +82,8 @@ impl HtDemucs {
         })
     }
 
-    /// Separates one stereo segment of exactly `SEGMENT` samples. `out` gets
-    /// 8 signals: stem s, channel c at `s * 2 + c` (each `SEGMENT` long).
-    /// `cancelled` is polled while the graph runs; a cancel aborts the run.
     pub fn separate_segment(&mut self, mix: [&[f32]; 2], out: &mut [Vec<f32>], cancelled: &(dyn Fn() -> bool + Sync)) -> Result<(), SegmentError> {
         assert!(mix[0].len() == SEGMENT && mix[1].len() == SEGMENT && out.len() == 8);
-        // ── pre_forward ──
         let t0 = Instant::now();
         std::thread::scope(|s| {
             for ((ch, planes), w) in mix.iter().zip(self.x.chunks_mut(2 * PLANE)).zip(&mut self.workers) {
@@ -120,7 +100,6 @@ impl HtDemucs {
         let (meant, stdt) = mean_std(&self.xt);
         normalize(&mut self.xt, meant, stdt);
 
-        // ── fwd (ONNX) ──
         let fail = |e: ort::Error| SegmentError::Failed(e.to_string());
         let run_options = RunOptions::new().map_err(fail)?;
         let done = AtomicBool::new(false);
@@ -154,11 +133,8 @@ impl HtDemucs {
                 if x_out.len() != 16 * PLANE || xt_out.len() != 8 * SEGMENT {
                     return Err(SegmentError::Failed(format!("unexpected output sizes {} / {}", x_out.len(), xt_out.len())));
                 }
-                // ── post_forward ──
                 let (std, mean) = (std as f32, mean as f32);
                 let (stdt, meant) = (stdt as f32, meant as f32);
-                // Output k = stem k/2, channel k%2: its complex planes are
-                // x_out channels 2k (re) and 2k+1 (im), its waveform xt_out[k].
                 std::thread::scope(|s| {
                     for (k, (o, w)) in out.iter_mut().zip(workers.iter_mut()).enumerate() {
                         let spec_planes = &x_out[2 * k * PLANE..(2 * k + 2) * PLANE];
@@ -203,7 +179,6 @@ fn check_io(session: &Session) -> Result<(), String> {
     Ok(())
 }
 
-/// Mean and unbiased standard deviation (torch `.mean()` / `.std()`).
 fn mean_std(v: &[f32]) -> (f64, f64) {
     let n = v.len() as f64;
     let mean = v.iter().map(|&x| f64::from(x)).sum::<f64>() / n;

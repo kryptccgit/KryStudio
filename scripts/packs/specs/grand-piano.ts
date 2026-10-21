@@ -1,16 +1,7 @@
-// Grand piano: Salamander Grand Piano V3 by Alexander Holm (public domain since 4 March 2022; the author's
-// statement is archived in shared/packs/catalog.ts). Files come from the sfzinstruments mirror of V3 (48 kHz /
-// 24-bit stereo FLAC, two AKG C414 in AB above the strings), pinned to a commit.
-//
-// Upstream: 16 velocity layers sampled every minor third from A0 (A0, C1, D#1, F#1 … A7, C8) plus a chromatic
-// key-release (hammer / damper) sample per key. We use 5 of the 16 layers, every minor third, plus the release
-// samples: about 230 MB to download, and trims that keep the loaded instrument near 210 MB.
-
 import { keySplits, type InstrumentSpec, type Opcodes, type PackSpec, type SampleRef, type SfzGroup } from '../lib';
 
 const SHA = '3382bf9496bba2486f5ab0de55a264d1dfc38404';
 
-/** Sampled notes (scientific pitch, C4 = 60) → MIDI. */
 const NOTES: [string, number][] = [];
 {
   const names = ['A', 'C', 'D#', 'F#'];
@@ -21,7 +12,6 @@ const NOTES: [string, number][] = [];
   }
 }
 
-/** Upstream layer → our velocity band (hard switches; timbre comes from the layer, loudness also from amp_veltrack). */
 const LAYERS: { v: number; lovel: number; hivel: number }[] = [
   { v: 3, lovel: 1, hivel: 40 },
   { v: 6, lovel: 41, hivel: 64 },
@@ -38,7 +28,6 @@ const safe = (name: string) => name.replace('#', 's');
 const notePath = (name: string, v: number) => `samples/${safe(name)}v${v}.flac`;
 const relPath = (k: number) => `samples/rel${k - 20}.flac`;
 
-/** Seconds kept per note: long bass strings ring longest. */
 function keepSeconds(midi: number): number {
   if (midi < 36) return 12;
   if (midi < 48) return 10;
@@ -49,7 +38,6 @@ function keepSeconds(midi: number): number {
   return 3;
 }
 const FADE = 1.2;
-/** Strings from F#6 up have no dampers: they ring after the key is released. */
 const UNDAMPED_FROM = 90;
 
 const samples: SampleRef[] = [];

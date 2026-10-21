@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// A tutorial video (shared/guides/videos.ts) in the Krypt UI kit: the poster
-// with a play button until first play, then the native controls; captions
-// on by default with a toggle; 1× / 1.25× / 1.5× speed. A video that fails
-// to load says so in place, with Try again (never a silent black box), and
-// so do captions that fail. Only one tutorial plays at a time. Used by the
-// {{video:…}} and {{videos}} guide blocks and the Home quickstart card.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Captions, CaptionsOff, Play, RotateCcw, TriangleAlert } from 'lucide-react';
 import { PLAYBACK_RATES, fmtVideoDuration, videoUrls, type ReadyGuideVideo } from '@shared/guides/videos';
@@ -14,7 +5,6 @@ import { cls } from '../utils/format';
 import { FOCUS_RING } from '../home/ui';
 import { mediaErrorMessage } from './videos';
 
-// The viewer's choices hold for the session (every player starts with them).
 let captionsPref = true;
 let ratePref = 1;
 
@@ -33,10 +23,8 @@ export function VideoPlayer({
   className,
 }: {
   video: ReadyGuideVideo;
-  /** Start playing as soon as it mounts (the viewer just asked for it). */
   autoPlay?: boolean;
   onEnded?: () => void;
-  /** More controls at the right end of the caption bar (e.g. "Read the guide"). */
   extra?: ReactNode;
   className?: string;
 }) {
@@ -57,17 +45,15 @@ export function VideoPlayer({
     setStarted(true);
     el.play().catch((err: unknown) => {
       const name = (err as DOMException)?.name;
-      if (name === 'AbortError') return; // a new load or a pause got in first
+      if (name === 'AbortError') return;
       if (name === 'NotAllowedError') {
-        setStarted(false); // autoplay refused: show the play button again
+        setStarted(false);
         return;
       }
-      // A load failure also fires 'error' (with a better message); this covers the rest.
       if (!el.error) setError(`The video couldn't start (${(err as Error)?.message ?? String(err)}).`);
     });
   };
 
-  // A different video (or Try again): back to the poster, unless it should play right away.
   useEffect(() => {
     setError(null);
     setCaptionsError(false);
@@ -76,7 +62,6 @@ export function VideoPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [video.id, attempt]);
 
-  // Captions on / off: the track's mode (re-applied once the track is known).
   const applyCaptions = (): void => {
     const el = ref.current;
     if (!el) return;
@@ -91,7 +76,6 @@ export function VideoPlayer({
     el.playbackRate = rate;
   }, [rate, video.id, attempt]);
 
-  // <track> errors aren't a React event everywhere: listen directly.
   useEffect(() => {
     const t = trackRef.current;
     if (!t) return;
@@ -146,7 +130,6 @@ export function VideoPlayer({
             }}
             onPlay={(e) => {
               setStarted(true);
-              // one tutorial at a time
               for (const other of Array.from(document.querySelectorAll<HTMLVideoElement>('video[data-guide-video]'))) if (other !== e.currentTarget && !other.paused) other.pause();
             }}
             onEnded={onEnded}

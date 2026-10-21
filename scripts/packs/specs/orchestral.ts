@@ -1,9 +1,3 @@
-// Orchestral essentials from Versilian Studios' VS Chamber Orchestra 2: Community Edition (CC0 1.0), pinned to a
-// commit of github.com/sgossner/VSCO-2-CE: string ensemble sustains, spiccato and pizzicato, a brass section for
-// stabs (trumpet, horn and trombone staccato layered), a flute and a concert harp. WAV files; our mapping
-// peak-normalises each velocity layer and skips leading silence. Note names follow VSCO's convention (C3 = MIDI 60)
-// except the harp, which is named in scientific pitch (C4 = 60), as VSCO's own mappings show.
-
 import { melodic, noteIn, safeName, velLayers, type BuildCtx, type InstrumentSpec, type LayerSpec, type Opcodes, type PackSpec, type SampleRef, type Zone } from '../lib';
 
 const SHA = '440300901dfe9275fd84e0b7763af1f8443ae62e';
@@ -12,9 +6,7 @@ interface Section {
   dir: string;
   packDir: string;
   files: string[];
-  /** Layer index of a file. */
   layer: (f: string) => number;
-  /** Note convention: MIDI of C4 in the file names (72 when C3 = 60). */
   c4: number;
 }
 
@@ -30,7 +22,6 @@ const VLN_SUS: Section = {
   layer: (f) => vl(f) - 1,
   c4: 72,
 };
-/** Cello section below the violins' lowest G (the ensemble splits there). */
 const VC_SUS: Section = {
   dir: 'Strings/Cello Section/susvib',
   packDir: 'celli-sus',
@@ -62,12 +53,10 @@ const VLN_PIZZ: Section = {
 const TPT: Section = {
   dir: 'Brass/Trumpet/stac',
   packDir: 'trumpet-stac',
-  // the trumpet plays the top of the section (C4 up): its F2/A2 takes are not needed
   files: notes('C3 D#3 F3 G3 A#3 D4 F4 A4 C5').flatMap((n) => ['v1_rr1', 'v1_rr2', 'v2_rr1', 'v2_rr2', 'v3_rr1', 'v3_rr2'].map((x) => `Sum_SHTrumpet_stac_${n}_${x}.wav`)),
   layer: (f) => vl(f) - 1,
   c4: 72,
 };
-/** The horn plays the middle of the section (D3-D5): takes from C3 to D4 (VSCO names, C3 = 60). */
 const HORN: Section = {
   dir: 'Brass/F Horn/stac',
   packDir: 'horn-stac',
@@ -79,7 +68,6 @@ const TBN: Section = {
   dir: 'Brass/Tenor Trombone/stac',
   packDir: 'trombone-stac',
   files: [
-    // the trombone plays the bottom of the section (up to D4): its F3 takes are not needed
     ...notes('A#0 F1 A#1 F2 D3').flatMap((n) => ['v1_rr1', 'v1_rr2', 'v2_rr1', 'v2_rr2', 'v3_rr1', 'v3_rr2', 'v4_rr1', 'v4_rr2'].map((x) => `tenortbn_stac_${n}_${x}.wav`)),
     ...['v1_rr1', 'v1_rr2', 'v2_rr1', 'v2_rr2', 'v3_rr1', 'v3_rr2', 'v4_rr1', 'v4_r2'].map((x) => `tenortbn_stac_A#2_${x}.wav`),
   ],
@@ -96,7 +84,6 @@ const FLUTE: Section = {
 const HARP: Section = {
   dir: 'Strings/Harp',
   packDir: 'harp',
-  // G1 (mp) peaks near -47 dBFS, far below its neighbours: E1 and B1 cover its keys instead.
   files: ['E1_f', 'B1_mf', 'D2_mf', 'F2_mf', 'A2_mf', 'C3_mf', 'E3_mf', 'G3_mf', 'B3_mf', 'D4_mf', 'F4_mf', 'A4_mf', 'C5_mf', 'E5_mf', 'G5_mf', 'B5_mf', 'D6_mf', 'F6_mf', 'A6_mf', 'B6_mf', 'D7_f', 'F7_f'].map((n) => `KSHarp_${n}.wav`),
   layer: () => 0,
   c4: 60,
@@ -112,7 +99,6 @@ function zonesOf(s: Section, re = NOTE): Zone[] {
 
 const credit = 'VS Chamber Orchestra 2: Community Edition by Versilian Studios (CC0)';
 
-/** Several sections side by side or layered, each with its own key span and velocity layers. */
 function orchestral(path: string, title: string, keys: { lo: number; hi: number }, global: Opcodes, parts: { zones: Zone[]; lo: number; hi: number; layers: LayerSpec[]; volume?: number; keep?: (r: number) => number; fade?: number }[]): InstrumentSpec {
   return {
     path,

@@ -1,31 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Crash recovery (research/06 §4.6). Files under userData/autosave/:
-//   session.lock          present while the app runs; removed on clean exit
-//   current.kstudio       latest snapshot (+ recovery.json bookkeeping)
-//   journal-<gen>.ndjson  every DocChange after snapshot <gen>, flushed ~1 s
-//   assets/cover-*.jpg|png  every cover image the session stored, written
-//                         when it is stored (a project.setCover journaled
-//                         after the last snapshot still finds its bytes)
-//
-// A snapshot is taken on every reset (new/open) and every autosaveSec while
-// dirty. Taking snapshot G switches journaling to journal-G immediately, and
-// older journals are deleted only after the snapshot is durably on disk, so
-// a crash at ANY point leaves snapshot + journals that replay to the last
-// flushed edit. Replay skips lines at or below the snapshot's docVersion and
-// stops at the first version gap.
-//
-// Project tabs (electron/project/tabs.ts) — the choice: ONE recovery store that
-// follows the ACTIVE tab, session-aware rather than per-tab. Each snapshot
-// records the active tab's id (recovery.json tabId); a tab switch is a reset,
-// so it takes a new snapshot right away (and, because resets are never
-// journaled, the version gap stops a replay from mixing two tabs). Inactive
-// tabs don't change, so they are kept by the session files instead
-// (userData/session/tab-<id>.kstudio, written when a tab is switched away
-// from), and a switch's snapshot waits for that file (`after`) before it
-// deletes the previous snapshot + journals. After a crash, the session restore
-// gives the recovered project to the tab whose id it carries.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 import { applyPatches, type Patch } from 'immer';
@@ -38,7 +10,6 @@ export interface RecoveryInfo {
   docVersion: number;
   savedVersion: number;
   projectPath: string | null;
-  /** The project tab this snapshot belongs to (null: before tabs, or tabs not attached). */
   tabId?: string | null;
   gen: number;
   savedAt: number;
@@ -50,13 +21,10 @@ type JournalLine =
 
 export interface RecoveredSession {
   project: Project;
-  /** The recovered project's binary assets (its cover), by entry name. */
   assets: Record<string, Uint8Array>;
   projectPath: string | null;
-  /** The project tab it belongs to (RecoveryInfo.tabId), or null. */
   tabId: string | null;
   dirty: boolean;
-  /** When the last journaled edit was made (ms). */
   editedAt: number;
 }
 
@@ -66,7 +34,6 @@ export class RecoveryStore {
   private flushing: Promise<void> = Promise.resolve();
   private flushTimer: NodeJS.Timeout | null = null;
   private snapshotChain: Promise<void> = Promise.resolve();
-  /** Doc version captured by the latest snapshot (started). */
   snapshotVersion = -1;
 
   constructor(
@@ -88,7 +55,6 @@ export class RecoveryStore {
     return path.join(this.dir, 'assets');
   }
 
-  /** Mirror a newly stored asset (a cover image) so a crash before the next snapshot keeps it. */
   saveAsset(name: string, bytes: Uint8Array): Promise<void> {
     if (!COVER_FILE_RE.test(name)) return Promise.resolve();
     const file = path.join(this.assetDir, name);
@@ -96,12 +62,10 @@ export class RecoveryStore {
     return writeFileAtomic(file, bytes).catch((err) => this.log('warn', `Crash recovery couldn't keep the cover image: ${(err as Error).message}`));
   }
 
-  /** True if the previous session didn't exit cleanly. Call BEFORE begin(). */
   crashedLastTime(): boolean {
     return exists(this.lockFile);
   }
 
-  /** Mark this session as running and start the ~1 s journal flusher. */
   begin(): void {
     try {
       writeFileAtomicSync(this.lockFile, JSON.stringify({ pid: process.pid, startedAt: Date.now() }));
@@ -111,8 +75,6 @@ export class RecoveryStore {
     this.flushTimer = setInterval(() => void this.flush(), 1000);
     this.flushTimer.unref?.();
   }
-
-  // ── Journal ─────────────────────────────────────────────────────────
 
   appendChange(version: number, patches: Patch[]): void {
     this.push({ v: version, p: patches });
@@ -126,11 +88,9 @@ export class RecoveryStore {
     try {
       this.buffer.push({ gen: this.gen, line: JSON.stringify(line) + '\n' });
     } catch {
-      /* unserializable patch: skip (the next snapshot covers it) */
     }
   }
 
-  /** Append buffered lines to their journal files (serialized). */
   flush(): Promise<void> {
     if (this.buffer.length === 0) return this.flushing;
     const batch = this.buffer;
@@ -149,17 +109,7 @@ export class RecoveryStore {
     return this.flushing;
   }
 
-  // ── Snapshots ───────────────────────────────────────────────────────
-
-  /**
-   * Snapshot the project at `info.docVersion`. Journaling switches to the
-   * new generation synchronously; old journals are removed after the write.
-   * `after` (never rejecting): the write waits for it (a tab switch: the outgoing tab's session file is written
-   * first, so its unsaved work is on disk somewhere at every moment).
-   */
   snapshot(project: Project, info: Omit<RecoveryInfo, 'gen' | 'savedAt'>, assets: Record<string, Uint8Array> = {}, after?: Promise<unknown>): Promise<void> {
-    // Generation + bytes are fixed NOW, so every later journal line lands in
-    // this generation's journal; writes are serialized oldest → newest.
     const gen = ++this.gen;
     this.snapshotVersion = info.docVersion;
     let bytes: Uint8Array;
@@ -172,7 +122,7 @@ export class RecoveryStore {
     const job = this.snapshotChain.then(async () => {
       try {
         if (after) await after.catch(() => {});
-        await this.flush(); // older-gen lines land in their journals first
+        await this.flush();
         await writeFileAtomic(this.snapshotFile, bytes);
         await this.removeJournals((g) => g < gen);
       } catch (err) {
@@ -190,13 +140,9 @@ export class RecoveryStore {
         if (m && pred(Number(m[1]))) await removeFile(path.join(this.dir, name));
       }
     } catch {
-      /* best effort */
     }
   }
 
-  // ── Recovery ────────────────────────────────────────────────────────
-
-  /** Rebuild the last session from snapshot + journals, or null if there's nothing usable. */
   async recover(): Promise<RecoveredSession | null> {
     if (!exists(this.snapshotFile)) return null;
     let project: Project;
@@ -231,7 +177,6 @@ export class RecoveryStore {
         if (m) journals.push({ gen: Number(m[1]), name });
       }
     } catch {
-      /* no journals */
     }
     journals.sort((a, b) => a.gen - b.gen);
     let stop = false;
@@ -246,7 +191,7 @@ export class RecoveryStore {
         try {
           line = JSON.parse(raw);
         } catch {
-          stop = true; // torn final line
+          stop = true;
           break;
         }
         if ('saved' in line) {
@@ -272,19 +217,16 @@ export class RecoveryStore {
         }
       }
     }
-    // The cover the replayed project ends on: from the snapshot, else the session's mirrored copy.
     const cover = project.meta.cover?.file;
     if (cover && !assets[cover]) {
       try {
         assets[cover] = await readBytes(path.join(this.assetDir, cover));
       } catch {
-        /* missing: the project opens without its cover (ProjectService drops the reference) */
       }
     }
     return { project, assets, projectPath, tabId: info.tabId ?? null, dirty: version !== savedVersion, editedAt };
   }
 
-  /** Clean exit: flush, then delete the lock, snapshot and journals. */
   async endClean(): Promise<void> {
     if (this.flushTimer) clearInterval(this.flushTimer);
     this.flushTimer = null;
@@ -297,7 +239,6 @@ export class RecoveryStore {
     removeFileSync(this.lockFile);
   }
 
-  /** Discard the previous session's files (after recovery or when nothing was recoverable). */
   async discardPrevious(): Promise<void> {
     await this.removeJournals(() => true);
     await removeFile(this.snapshotFile).catch(() => {});

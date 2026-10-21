@@ -1,18 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Browser-only mock of window.krypt for UI development WITHOUT Electron or
-// the engine: `npx vite` → open http://localhost:5190 in a normal browser.
-// The document side is REAL (the actual DocHost + commands + catalog run
-// in-page), so editors behave exactly like in the app. Engine/file/MCP calls
-// are stubs that resolve with { ok:false, message:'mock' } or empty data.
-// The analyzer (Model Manager, tempo & key, stems, audio → pattern) is a
-// full fake with progress (mockAnalyzer.ts); the mock project starts with
-// one audio clip ("Night Drive") so its clip menu can be tried. The
-// reference library (collections, queue, profiles, focus, originality) is
-// a full fake too (mockLibrary.ts), and so are the vocal tools (Auto-tune
-// vocal, Match key & tempo: mockVocals.ts).
-// main.tsx installs this only when window.krypt is missing.
-// ──────────────────────────────────────────────────────────────────────
-
 import { DocHost, USER, actorKey, type Actor, type DocChange } from '@shared/doc/DocHost';
 import { createDefaultProject } from '@shared/schema/factory';
 import { CATALOG } from '@shared/plugins/catalog';
@@ -34,12 +19,10 @@ import { createMockVoice } from './mockVoice';
 
 const notReady = { ok: false as const, message: 'Not available in browser mock' };
 
-/** A Windows path from parts (no backslash escaping to get wrong). */
 const win = (...parts: string[]): string => parts.join('\\');
 
 export function installMockKrypt(): void {
   ensureAudioClipStretchParams();
-  // Seed (outside history): one long audio clip to try the analyzer menus on.
   const seed = new DocHost(createDefaultProject('Mock Project'), CATALOG);
   const lane = seed.project.playlist.trackOrder[3] ?? seed.project.playlist.trackOrder[0];
   if (lane) seed.exec('playlist.addAudio', { path: 'factory:loops/night-drive.wav', name: 'Night Drive', trackId: lane, start: 0, frames: 48000 * 96, sampleRate: 48000, channels: 2 }, { actor: USER });
@@ -62,7 +45,6 @@ export function installMockKrypt(): void {
     audio: { deviceId: null, bufferFrames: 256, sampleRate: 48000 },
     ui: { scale: 1, showHints: true },
     browserRoots: [],
-    // Home hub: a few recent projects so the "Continue" panel and Projects screen look real.
     recent: [
       win('C:', 'Users', 'you', 'Music', 'Krypt', 'Late Night Drill.kstudio'),
       win('C:', 'Users', 'you', 'Music', 'Krypt', 'Neon Fog remix.kstudio'),
@@ -78,8 +60,6 @@ export function installMockKrypt(): void {
   };
   let playing = false;
 
-  // ── MCP (Home's AI Agents pill): one connected client; flip it from devtools ──
-  // __kryptMockMcp.connect('Cursor') / .disconnect() / .setEnabled(false)
   const mcpSubs = new Set<(s: McpStatus) => void>();
   let mcpStatus: McpStatus = {
     enabled: true,
@@ -108,7 +88,6 @@ export function installMockKrypt(): void {
     })),
   ];
 
-  // ── Plugin Manager (Sounds & Plugins pill): a few fake installed VST3 / CLAP plugins ──
   const fakePlugin = (id: string, name: string, kind: 'instrument' | 'effect', category: string, format: 'vst3' | 'clap'): PluginDescriptor => ({
     id,
     name,
@@ -264,7 +243,7 @@ export function installMockKrypt(): void {
       setTarget: () => {},
       learn: async () => notReady,
       cancelLearn: () => {},
-      virtualIn: () => {}, // no engine in the browser: controller MIDI goes nowhere
+      virtualIn: () => {},
       removeMapping: async () => notReady,
       onInputs: () => () => {},
       onLearn: () => () => {},
@@ -304,8 +283,8 @@ export function installMockKrypt(): void {
     library: createMockLibrary(host, analyzer),
     sounds: createMockSounds(),
     packs: createMockPacks(),
-    voice: createMockVoice(host), // Kokoro voices, a Fish key that unlocks cloud voices, Speak / Sing with progress and a real clip (src/dev/mockVoice.ts)
-    automix: createMockAutomix(host), // canned presets + keyword reader + a run with one real history entry (src/dev/mockAutomix.ts)
+    voice: createMockVoice(host),
+    automix: createMockAutomix(host),
     tabs: {
       state: async () => ({ tabs: [{ id: 'tab_mock', title: 'Untitled', path: null, dirty: false }], activeId: 'tab_mock', closed: [] }),
       onState: () => () => {},
@@ -316,7 +295,7 @@ export function installMockKrypt(): void {
       move: async () => ({ ok: true }),
       reopenClosed: async () => ({ ok: false, message: 'Project tabs need the desktop app.' }),
     },
-    mashup: createMockMashup(), // canned check + a build that edits nothing (src/dev/mockMashup.ts)
+    mashup: createMockMashup(),
     session: {
       launch: async () => ({ ok: false, message: 'The clip launcher needs the engine (desktop app).' }),
       launchScene: async () => ({ ok: false, message: 'The clip launcher needs the engine (desktop app).' }),
@@ -329,7 +308,6 @@ export function installMockKrypt(): void {
       setGridSettings: async () => ({ ok: false, message: 'Grid controllers need the desktop app.' }),
     },
     racks: {
-      // No analyzer in the browser: grid / manual slicing over the sample's known length (else 2 bars).
       sliceToPads: async (source, opts = {}) => {
         const mode = opts.mode ?? (opts.times?.length ? 'manual' : 'onsets');
         if (mode === 'onsets') return { ok: false, message: 'Finding the hits needs the audio analyzer (desktop app). Slice by grid instead.' };
@@ -355,9 +333,8 @@ export function installMockKrypt(): void {
     },
     scripts: createMockScripts(host),
   };
-  // Home's Reference Library pill: start with an AI focus set.
   void api.library.setFocus({ collectionId: 'c-dark', brief: 'dark, sparse, lots of space' });
   (window as any).krypt = api;
-  (window as any).__kryptMockHost = host; // devtools: drive the doc as an "agent"
+  (window as any).__kryptMockHost = host;
   console.info('[krypt] Browser mock installed — DocHost runs in-page, engine calls are stubs.');
 }

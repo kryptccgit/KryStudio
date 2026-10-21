@@ -1,32 +1,3 @@
-//! `sing`: "Sing my notes" (research/21). Speech segments (one per
-//! syllable) are stretched onto note lengths and pitched onto note keys.
-//! Contract: docs/ANALYZER_PROTOCOL.md § Sing.
-//!
-//! Per segment:
-//! 1. measure f0 on the voiced frames (YIN, syllables.rs); fewer than 30 ms
-//!    voiced = unvoiced (consonants, breaths): stretched, never pitched;
-//! 2. time-stretch to `durSec` with formants kept (krypt-studio-stretch:
-//!    Signalsmith Stretch, "Tones" profile). When the note is longer than
-//!    the syllable, the consonants around the voiced part keep their natural
-//!    speed and the vowel takes the stretch (capped at 8×; beyond that the
-//!    consonants stretch too);
-//! 3. pitch, as a curve the stretcher follows hop by hop
-//!    (`stretch_mapped_curve`): `midi − median f0`, minus the speech's own
-//!    smoothed pitch contour (spoken syllables glide by several semitones;
-//!    flattening them makes the note land on its key, so Krypt Tune afterwards
-//!    snaps to the right note), plus a glide into the note from the previous
-//!    one (`glideMs`, raised-cosine, at most half the note) and a gentle
-//!    delayed vibrato (`vibrato` 0..1 → ±0–50 cents at 5.5 Hz, starting after
-//!    35 % of the note and fading in over 250 ms);
-//! 4. 8 ms equal-power crossfades centred on the note edges: each note is
-//!    rendered from 4 ms before its start to 4 ms past its end, using the
-//!    source audio around the segment (plus 40 ms of pre-roll that is
-//!    rendered and dropped, so the stretcher starts "inside" the sound);
-//! 5. added into the output at `outStartSec`.
-//!
-//! The mix is scaled so its peak sits at −1 dBFS (gain capped at +12 dB) and
-//! written as a mono 32-bit float WAV at the source rate. Krypt-original.
-
 use std::sync::atomic::AtomicBool;
 
 use krypt_studio_stretch::{map_out_to_in, stretch_mapped, stretch_mapped_curve, Profile, StretchError, MAX_SEMITONES};
@@ -37,19 +8,15 @@ use crate::syllables::{median_f0, voicing_track, VoiceFrame};
 use crate::{JobCtx, JobError};
 
 pub const MAX_SEGMENTS: usize = 5000;
-/// Longest output (s).
 pub const MAX_OUT_SEC: f64 = 1800.0;
 const XFADE_SEC: f64 = 0.008;
-/// Source context rendered before each segment (then dropped).
 const PRE_ROLL_SEC: f64 = 0.04;
 const VOICE_HOP: f32 = 0.01;
-/// Voiced frames needed to call a segment voiced (×10 ms).
 const MIN_VOICED_FRAMES: usize = 3;
 const VIBRATO_HZ: f64 = 5.5;
 const VIBRATO_MAX_CENTS: f64 = 50.0;
-/// Most the vowel stretches before the consonants stretch too.
 const MAX_VOWEL_RATIO: f64 = 8.0;
-const PEAK_TARGET: f32 = 0.891; // −1 dBFS
+const PEAK_TARGET: f32 = 0.891;
 const MAX_GAIN: f32 = 4.0;
 
 fn fail(m: impl Into<String>) -> JobError {
@@ -85,10 +52,6 @@ fn validate(args: &SingArgs) -> Result<(), JobError> {
     Ok(())
 }
 
-/// Piecewise time map (input frame, output frame) for one segment. `core` =
-/// source frames of the segment, `ext` = extra source frames after it (the
-/// fade-out tail), `out` = output frames of the note, `voiced` = voiced
-/// range inside the core (input frames).
 pub fn knots_for(core: usize, ext: usize, out: usize, voiced: Option<(usize, usize)>) -> (Vec<(f64, f64)>, f64) {
     let (l, d) = (core as f64, out as f64);
     let ratio = d / l;
@@ -119,7 +82,6 @@ pub fn knots_for(core: usize, ext: usize, out: usize, voiced: Option<(usize, usi
     if ext > 0 {
         k.push((l + ext as f64, d + ext as f64 * tail_ratio));
     }
-    // Strictly increasing in both (drop knots that collapsed).
     let mut clean: Vec<(f64, f64)> = Vec::with_capacity(k.len());
     for p in k {
         if clean.last().is_none_or(|q: &(f64, f64)| p.0 > q.0 + 1e-9 && p.1 > q.1 + 1e-9) {
@@ -129,7 +91,6 @@ pub fn knots_for(core: usize, ext: usize, out: usize, voiced: Option<(usize, usi
     (clean, tail_ratio)
 }
 
-/// Cents offset at time `t` (s) into a note of `dur` s.
 pub fn pitch_curve(t: f64, dur: f64, glide_from_cents: f64, glide_sec: f64, vibrato: f64) -> f64 {
     let mut c = 0.0;
     if glide_sec > 0.0 && glide_from_cents != 0.0 && t < glide_sec {
@@ -146,10 +107,6 @@ pub fn pitch_curve(t: f64, dur: f64, glide_from_cents: f64, glide_sec: f64, vibr
     c
 }
 
-/// The speech's own pitch movement inside a segment, in cents relative to
-/// `median` per voicing frame: frames off by more than 7 semitones (octave
-/// slips) and unvoiced frames are filled from their neighbours, then a 50 ms
-/// median and 30 ms mean smooth it (faster jitter stays, which keeps it human).
 pub fn contour(frames: &[VoiceFrame], median: f32) -> Vec<f64> {
     let raw: Vec<Option<f64>> = frames.iter().map(|f| f.f0.map(|v| 1200.0 * f64::from(v / median).log2()).filter(|c| c.abs() <= 700.0)).collect();
     let n = raw.len();
@@ -205,7 +162,6 @@ pub fn run(args: &SingArgs, ctx: &JobCtx) -> Result<SingResult, JobError> {
     Ok(SingResult { path: args.out.clone(), duration_sec: (out.len() as f64 / sr) as f32, segments: segs })
 }
 
-/// The whole render on decoded mono audio (tests call it directly).
 pub fn render(x: &[f32], sr: f64, segments: &[SingSegment], vibrato: f64, glide: f64, ctx: &JobCtx) -> Result<(Vec<f32>, Vec<SungSegment>), JobError> {
     let xf = (XFADE_SEC * sr).round() as usize;
     let h = xf / 2;
@@ -213,7 +169,7 @@ pub fn render(x: &[f32], sr: f64, segments: &[SingSegment], vibrato: f64, glide:
     let mut out = vec![0f32; (end_sec * sr).ceil() as usize + h + 1];
     let mut result = Vec::with_capacity(segments.len());
     let cancel = AtomicBool::new(false);
-    let mut prev: Option<(f64, f64, bool)> = None; // (end sec, midi, voiced)
+    let mut prev: Option<(f64, f64, bool)> = None;
     ctx.progress("singing", 0.0);
     for (i, seg) in segments.iter().enumerate() {
         ctx.check()?;
@@ -222,7 +178,6 @@ pub fn render(x: &[f32], sr: f64, segments: &[SingSegment], vibrato: f64, glide:
         let o0 = (seg.out_start_sec * sr).round() as usize;
         let d = ((seg.dur_sec * sr).round() as usize).max(1);
         if s1 <= s0 + 16 {
-            // Nothing of the source left (past the end of the file): a rest.
             result.push(SungSegment { f0_hz: None, shift_st: 0.0 });
             continue;
         }
@@ -238,8 +193,6 @@ pub fn render(x: &[f32], sr: f64, segments: &[SingSegment], vibrato: f64, glide:
             Some((a, b))
         });
         let shift = f0.map_or(0.0, |f| (12.0 * (midi_hz(seg.midi) / f64::from(f)).log2()).clamp(-MAX_SEMITONES, MAX_SEMITONES));
-        // Context around the segment: up to 40 ms before (rendered, then dropped, so the stretcher is
-        // already "in" the sound at the note start) and enough after it for the fade-out tail.
         let ratio = d as f64 / core.len() as f64;
         let pre = s0.min((PRE_ROLL_SEC * sr) as usize);
         let ext = ((xf as f64 / ratio.clamp(0.125, 1.0)).ceil() as usize).min(x.len() - s1);
@@ -249,10 +202,8 @@ pub fn render(x: &[f32], sr: f64, segments: &[SingSegment], vibrato: f64, glide:
         let pre_out = (pre as f64 * first_slope).round() as usize;
         let mut knots: Vec<(f64, f64)> = if pre > 0 && pre_out > 0 { vec![(0.0, 0.0)] } else { Vec::new() };
         knots.extend(core_knots.iter().map(|&(a, b)| (a + pre as f64, b + pre_out as f64)));
-        // Output: [note start − lead, note end + h); the crossfades are centred on the note edges.
         let lead = h.min(pre_out).min(o0);
         let n_full = pre_out + d + h;
-        // Glide from the previous note when it is voiced and (nearly) touches this one.
         let glide_from = match prev {
             Some((end, midi, true)) if f0.is_some() && seg.out_start_sec - end < 0.06 => ((midi - seg.midi) * 100.0).clamp(-1200.0, 1200.0),
             _ => 0.0,
@@ -261,7 +212,6 @@ pub fn render(x: &[f32], sr: f64, segments: &[SingSegment], vibrato: f64, glide:
         let rendered = match f0 {
             None => stretch_mapped(&[src], sr, &knots, n_full, 0.0, true, Profile::Tones, &cancel),
             Some(median) => {
-                // Semitones per output frame: onto the key, minus the speech's own contour, plus glide + vibrato.
                 let cont = contour(&frames, median);
                 let dur = seg.dur_sec;
                 let (pre_f, pre_o) = (pre as f64, pre_out as f64);
@@ -283,7 +233,6 @@ pub fn render(x: &[f32], sr: f64, segments: &[SingSegment], vibrato: f64, glide:
         .map_err(stretch_err)?;
         let full = rendered.into_iter().next().unwrap_or_default();
         let mut y: Vec<f32> = full[pre_out - lead..].to_vec();
-        // Equal-power fades (the two sides of a join are not phase-coherent).
         let fade_in = lead + h;
         for (k, v) in y.iter_mut().take(fade_in).enumerate() {
             *v *= (std::f64::consts::FRAC_PI_2 * k as f64 / fade_in as f64).sin() as f32;

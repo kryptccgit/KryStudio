@@ -1,20 +1,9 @@
-// ──────────────────────────────────────────────────────────────────────
-// Preset / sound-library logic for the renderer, with no React and no
-// window access (unit-tested in test/sounds-ui.test.ts): labels, the
-// preset browser's search and role grouping, prev/next cycling, the
-// "modified" check behind the preset bar's dot, the drag payload, the
-// factory sample folders and the Save dialog defaults.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { ParamSpec } from '@shared/plugins/types';
 import { GENRES, type GenreId } from '@shared/sounds/genres';
 import { roleFromName } from '@shared/sounds/select';
 import { CHAIN_ROLES, INSTRUMENT_ROLES, SAMPLE_KINDS, type ChainRole, type FactorySample, type InstrumentPreset, type InstrumentRole, type PresetSummary, type SampleKind } from '@shared/sounds/types';
 import { noteName } from '@shared/music/theory';
 
-// ── Labels ────────────────────────────────────────────────────────────
-
-/** Folder names in the Browser and group headers in the preset browser. */
 export const INSTRUMENT_ROLE_LABELS: Record<InstrumentRole, string> = {
   kick: 'Kicks',
   snare: 'Snares',
@@ -44,7 +33,6 @@ export const INSTRUMENT_ROLE_LABELS: Record<InstrumentRole, string> = {
   texture: 'Textures',
 };
 
-/** One-of names for the Save dialog's role picker. */
 export const INSTRUMENT_ROLE_NAMES: Record<InstrumentRole, string> = {
   kick: 'Kick',
   snare: 'Snare',
@@ -126,7 +114,6 @@ export const SAMPLE_KIND_LABELS: Record<SampleKind, string> = {
   retro: 'Retro game',
 };
 
-/** Header / folder label for any preset role. */
 export function roleLabel(role: string, kind: PresetSummary['kind'] = 'instrument'): string {
   if (kind === 'chain') return CHAIN_ROLE_LABELS[role as ChainRole] ?? role;
   return INSTRUMENT_ROLE_LABELS[role as InstrumentRole] ?? role;
@@ -142,22 +129,16 @@ export function genreName(id: string): string {
   return GENRE_NAME.get(id) ?? id;
 }
 
-/** 'krypt.wavetable' → 'wavetable' (search words for a plugin id). */
 function pluginWords(plugin: string | undefined): string {
   return (plugin ?? '').replace(/^krypt\./, '').replace(/[._:-]+/g, ' ');
 }
 
-// ── Search + grouping ────────────────────────────────────────────────
-
 export interface PresetFilter {
   kind?: PresetSummary['kind'];
-  /** Free words; every word must appear in the name, description, tags, role, plugin or genres. */
   text?: string;
   genre?: GenreId | null;
-  /** Every tag must be on the preset. */
   tags?: readonly string[];
   source?: 'all' | 'factory' | 'user';
-  /** Only presets of this instrument plugin. */
   plugin?: string | null;
 }
 
@@ -191,7 +172,6 @@ export function presetMatches(p: PresetSummary, f: PresetFilter): boolean {
   return true;
 }
 
-/** Your own presets first, then by name (numbers in natural order). */
 export function comparePresets(a: PresetSummary, b: PresetSummary): number {
   if (a.source !== b.source) return a.source === 'user' ? -1 : 1;
   return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) || a.id.localeCompare(b.id);
@@ -203,7 +183,6 @@ export interface PresetGroup {
   presets: PresetSummary[];
 }
 
-/** Role order for chain pickers: on the master, master chains first; elsewhere they go last. */
 export function chainRoleOrder(isMaster: boolean): ChainRole[] {
   const rest = CHAIN_ROLES.filter((r) => r !== 'master');
   return isMaster ? ['master', ...rest] : [...rest, 'master'];
@@ -213,10 +192,6 @@ export function defaultRoleOrder(kind: PresetSummary['kind']): readonly string[]
   return kind === 'chain' ? chainRoleOrder(false) : INSTRUMENT_ROLES;
 }
 
-/**
- * The presets matching `f`, grouped by role in `roleOrder` (roles not in the order go last, alphabetically). Empty
- * groups are dropped. Within a group: your presets first, then by name.
- */
 export function groupPresets(presets: readonly PresetSummary[], f: PresetFilter, roleOrder?: readonly string[]): PresetGroup[] {
   const kind = f.kind ?? 'instrument';
   const order = roleOrder ?? defaultRoleOrder(kind);
@@ -236,21 +211,16 @@ export function groupPresets(presets: readonly PresetSummary[], f: PresetFilter,
     .map(([role, list]) => ({ role, label: roleLabel(role, list[0]?.kind ?? kind), presets: list.sort(comparePresets) }));
 }
 
-/** Every tag used by these presets, most common first (for the tag suggestions). */
 export function tagCounts(presets: readonly PresetSummary[]): Array<{ tag: string; count: number }> {
   const m = new Map<string, number>();
   for (const p of presets) for (const t of p.tags) m.set(t.toLowerCase(), (m.get(t.toLowerCase()) ?? 0) + 1);
   return [...m.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
 }
 
-// ── Prev / next ───────────────────────────────────────────────────────
-
-/** The presets the preset bar's arrows step through: same plugin, in browser order. */
 export function cycleList(presets: readonly PresetSummary[], plugin: string): PresetSummary[] {
   return groupPresets(presets, { kind: 'instrument', plugin }).flatMap((g) => g.presets);
 }
 
-/** The next (dir 1) or previous (dir -1) preset after `currentId`, wrapping; from no / an unknown preset: first or last. */
 export function cyclePreset(list: readonly PresetSummary[], currentId: string | null | undefined, dir: 1 | -1): PresetSummary | null {
   const n = list.length;
   if (!n) return null;
@@ -259,14 +229,9 @@ export function cyclePreset(list: readonly PresetSummary[], currentId: string | 
   return list[(i + dir + n) % n];
 }
 
-// ── "Modified" detection ──────────────────────────────────────────────
-
 export interface ChannelSound {
-  /** generator.type */
   type: string;
-  /** generator.params (sparse: missing = plugin default) */
   params: Record<string, number>;
-  /** Path of the channel's sample, or null. */
   samplePath: string | null;
 }
 
@@ -277,11 +242,6 @@ function settle(v: number, s: ParamSpec | undefined): number {
   return x;
 }
 
-/**
- * Param ids whose value differs between the channel and the preset. With the plugin's ParamSpecs, a param missing on
- * either side is its default and values are compared clamped / stepped with a small tolerance; without specs, the
- * union of both param maps is compared as-is.
- */
 export function changedParams(cur: ChannelSound, preset: InstrumentPreset, specs?: readonly ParamSpec[]): string[] {
   const out: string[] = [];
   const ids = specs ? specs.map((s) => s.id) : [...new Set([...Object.keys(cur.params), ...Object.keys(preset.params)])];
@@ -303,14 +263,12 @@ export function changedParams(cur: ChannelSound, preset: InstrumentPreset, specs
   return out;
 }
 
-/** True when the channel's instrument, params or sample no longer match the preset it was loaded from. */
 export function isPresetModified(cur: ChannelSound, preset: InstrumentPreset, specs?: readonly ParamSpec[]): boolean {
   if (cur.type !== preset.plugin) return true;
   if (preset.sample !== undefined && cur.samplePath !== preset.sample) return true;
   return changedParams(cur, preset, specs).length > 0;
 }
 
-/** One line for the dot's hint: what changed. */
 export function modifiedHint(cur: ChannelSound, preset: InstrumentPreset, specs?: readonly ParamSpec[]): string {
   if (cur.type !== preset.plugin) return `Changed: the instrument is no longer the one ${preset.name} uses`;
   const parts: string[] = [];
@@ -320,9 +278,6 @@ export function modifiedHint(cur: ChannelSound, preset: InstrumentPreset, specs?
   return parts.length ? `Changed since you loaded ${preset.name}: ${parts.join(' and ')}. Save preset… keeps it.` : `${preset.name}, as loaded`;
 }
 
-// ── Drag payload ──────────────────────────────────────────────────────
-
-/** dataTransfer type for presets dragged from the Browser (onto the Channel Rack). */
 export const PRESET_MIME = 'application/x-krypt-preset';
 
 export interface PresetDrag {
@@ -335,7 +290,6 @@ export function encodePresetDrag(p: Pick<PresetSummary, 'id' | 'kind' | 'name'>)
   return JSON.stringify({ id: p.id, kind: p.kind, name: p.name });
 }
 
-/** The dragged preset, or null for anything that isn't a well-formed preset payload. */
 export function decodePresetDrag(raw: string | null | undefined): PresetDrag | null {
   if (!raw) return null;
   try {
@@ -348,9 +302,6 @@ export function decodePresetDrag(raw: string | null | undefined): PresetDrag | n
   }
 }
 
-// ── Factory samples ───────────────────────────────────────────────────
-
-/** Root note for tonal sounds ("C5", FL octave numbering like the rest of the UI), length in bars for synced FX. */
 export function sampleDetail(s: Pick<FactorySample, 'rootNote' | 'bars'>): string {
   const parts: string[] = [];
   if (s.rootNote !== undefined && Number.isFinite(s.rootNote)) parts.push(noteName(Math.round(s.rootNote)));
@@ -371,7 +322,6 @@ export function sampleMatches(s: FactorySample, text: string): boolean {
   return words.every((w) => hay.includes(w));
 }
 
-/** Factory samples by kind (SAMPLE_KINDS order; unknown kinds last), each sorted by name. */
 export function groupFactorySamples(samples: readonly FactorySample[], text = ''): SampleGroup[] {
   const by = new Map<string, FactorySample[]>();
   for (const s of samples) {
@@ -390,9 +340,6 @@ export function groupFactorySamples(samples: readonly FactorySample[], text = ''
     .map(([kind, list]) => ({ kind, label: sampleKindLabel(kind), samples: list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }) || a.path.localeCompare(b.path)) }));
 }
 
-// ── Save dialogs ──────────────────────────────────────────────────────
-
-/** "dark, Wide  pluck,dark" → ['dark', 'wide', 'pluck']: lower-case, unique, at most 24 tags of up to 32 chars. */
 export function parseTagList(text: string): string[] {
   const out: string[] = [];
   for (const raw of text.split(/[,;\n]+/)) {
@@ -418,7 +365,6 @@ export interface SaveDefaults {
   description: string;
 }
 
-/** Starting values of the Save preset dialog: from the loaded preset when there is one, else from the channel name. */
 export function presetSaveDefaults(channelName: string, preset?: Pick<InstrumentPreset, 'id' | 'name' | 'role' | 'tags' | 'genres' | 'description'> | null): SaveDefaults {
   if (preset) {
     const mine = preset.id.startsWith('user:');
@@ -433,7 +379,6 @@ export function presetSaveDefaults(channelName: string, preset?: Pick<Instrument
   return { name: channelName.slice(0, 64), role: roleFromName(channelName) ?? 'lead', tags: [], genres: [], description: '' };
 }
 
-/** A chain role for an insert, from its name ("Drum Bus" → drumBus, "Reverb" → reverbSend, "808" → bass). */
 export function guessChainRole(insertName: string, isMaster: boolean): ChainRole {
   if (isMaster) return 'master';
   const n = insertName.toLowerCase();
@@ -482,8 +427,6 @@ export function guessChainRole(insertName: string, isMaster: boolean): ChainRole
   }
 }
 
-// ── Home ▸ Sounds ─────────────────────────────────────────────────────
-
 export interface SoundsCounts {
   factoryPresets: number;
   userPresets: number;
@@ -506,8 +449,6 @@ export function soundsCounts(presets: readonly PresetSummary[], samples: readonl
   return { factoryPresets, userPresets, instrumentPresets, chainPresets, factorySamples: samples?.length ?? 0 };
 }
 
-// ── Browser folders ───────────────────────────────────────────────────
-
 export function folderName(p: string): string {
   const parts = p.replace(/[\\/]+$/, '').split(/[\\/]/);
   return parts[parts.length - 1] || p;
@@ -517,7 +458,6 @@ function pathKey(p: string): string {
   return p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
 }
 
-/** Settings' browserRoots with `path` appended (once: an existing root with the same path, any case / slashes, wins). */
 export function withBrowserRoot(
   roots: ReadonlyArray<{ id: string; name: string; path: string }>,
   path: string,

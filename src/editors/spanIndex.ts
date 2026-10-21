@@ -1,7 +1,3 @@
-// Sorted span index for culling + hit-testing (notes, clips).
-// Items sorted by start; with the running max length, the set overlapping a
-// window is found by binary search on [t0 - maxLen, t1): O(log n + k).
-
 export class SpanIndex<T> {
   readonly items: T[];
   readonly starts: Float64Array;
@@ -29,7 +25,6 @@ export class SpanIndex<T> {
     return this.items.length;
   }
 
-  /** First index whose start >= t. */
   lowerBound(t: number): number {
     let lo = 0;
     let hi = this.starts.length;
@@ -41,7 +36,6 @@ export class SpanIndex<T> {
     return lo;
   }
 
-  /** Visit every item overlapping [t0, t1) in start order. Return false from fn to stop. */
   query(t0: number, t1: number, fn: (item: T, i: number) => boolean | void): void {
     const n = this.starts.length;
     for (let i = this.lowerBound(t0 - this.maxLen); i < n; i++) {
@@ -51,7 +45,6 @@ export class SpanIndex<T> {
     }
   }
 
-  /** Last end (song/pattern content length). */
   lastEnd(): number {
     let m = 0;
     for (let i = 0; i < this.ends.length; i++) if (this.ends[i] > m) m = this.ends[i];
@@ -61,7 +54,6 @@ export class SpanIndex<T> {
 
 export type EdgeZone = 'body' | 'left' | 'right';
 
-/** Which part of a [left, right] px span is under x (edges get ±edgePx, capped at a third of the width). */
 export function edgeZone(x: number, left: number, right: number, edgePx = 5): EdgeZone {
   const e = Math.min(edgePx, (right - left) / 3);
   if (x >= right - e) return 'right';
@@ -76,10 +68,6 @@ export interface NoteShape {
   key: number;
 }
 
-/**
- * Note under (tick, key). Later items (drawn on top) win. `pxPerTick` turns
- * the edge zone into ticks; returns the zone the pointer is in.
- */
 export function hitNote<T extends NoteShape>(
   index: SpanIndex<T>,
   tick: number,
@@ -90,8 +78,6 @@ export function hitNote<T extends NoteShape>(
 ): { note: T; zone: EdgeZone } | null {
   let inside: T | null = null;
   let nearby: T | null = null;
-  // widen by a couple of px so a 1-px-wide note edge is still grabbable,
-  // but a note that really contains the pointer always wins
   const slack = 2 / pxPerTick;
   index.query(tick - slack, tick + slack, (n) => {
     if (n.key !== key || skip?.has(n.id)) return;
@@ -104,7 +90,6 @@ export function hitNote<T extends NoteShape>(
   return { note: b, zone };
 }
 
-/** Notes intersecting a tick × key rectangle (marquee). Keys inclusive. */
 export function notesInRect<T extends NoteShape>(index: SpanIndex<T>, t0: number, t1: number, k0: number, k1: number): T[] {
   const lo = Math.min(k0, k1);
   const hi = Math.max(k0, k1);
@@ -121,7 +106,6 @@ export interface ClipShape {
   length: number;
 }
 
-/** Clip under `tick` in a single lane's index. Later (topmost) wins. */
 export function hitClip<T extends ClipShape>(index: SpanIndex<T> | undefined, tick: number, pxPerTick: number, edgePx = 6): { clip: T; zone: EdgeZone } | null {
   if (!index) return null;
   let best: T | null = null;
@@ -133,7 +117,6 @@ export function hitClip<T extends ClipShape>(index: SpanIndex<T> | undefined, ti
   return { clip: b, zone: edgeZone(tick * pxPerTick, b.start * pxPerTick, (b.start + b.length) * pxPerTick, edgePx) };
 }
 
-/** Nearest point within `radiusPx` (screen space). Points are [x, y] in px. Returns index or -1. */
 export function nearestPoint(points: ArrayLike<{ x: number; y: number }>, x: number, y: number, radiusPx = 6): number {
   let best = -1;
   let bestD = radiusPx * radiusPx;

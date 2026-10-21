@@ -1,15 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Tool dialogs (Quantize, Strum, Arpeggiate, Export, Project info...).
-// Store-driven so canvas controllers and menus can open them, and portalled
-// into the document that asked, so they work in dockview popouts too.
-//
-//   openDialog({ title: 'Quantize', doc: el.ownerDocument, render: (close) => <Form onDone={close} /> });
-//
-// Inside a dialog the global keymap and the typing-keyboard piano are
-// suspended (installInput skips targets under [data-krypt-dialog]).
-// Escape closes; forms submit on Enter through <DialogForm>.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { create } from 'zustand';
@@ -18,18 +6,12 @@ import { cls } from '../utils/format';
 
 interface DialogSpec {
   id: number;
-  /** Opening a dialog with the same key replaces the open one (e.g. one piano-roll tool at a time). */
   key?: string;
   title: string;
   subtitle?: string;
   icon?: LucideIcon;
   doc: Document;
   width?: number;
-  /**
-   * Place the dialog beside this rect (client coords) over an undimmed
-   * backdrop, so a live preview drawn inside the rect stays visible (tool
-   * dialogs). Omitted = centred over a dimmed backdrop.
-   */
   near?: { left: number; top: number; right: number; bottom: number };
   render: (close: () => void) => ReactNode;
   onClose?: () => void;
@@ -38,7 +20,6 @@ interface DialogSpec {
 const useDialogs = create<{ stack: DialogSpec[] }>(() => ({ stack: [] }));
 let seq = 0;
 
-/** Open a dialog; returns a function that closes it. */
 export function openDialog(spec: Omit<DialogSpec, 'id' | 'doc'> & { doc?: Document | null }): () => void {
   const id = ++seq;
   const doc = spec.doc ?? document;
@@ -59,14 +40,12 @@ export function isDialogOpen(): boolean {
   return useDialogs.getState().stack.length > 0;
 }
 
-/** Render once at the app root (next to MenuHost). */
 export function DialogHost() {
   const stack = useDialogs((s) => s.stack);
   const top = stack[stack.length - 1] ?? null;
   const cardRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ id: number; left: number; top: number } | null>(null);
 
-  // "near" placement: right of the rect if it fits, else left of it, else inside its right edge
   useLayoutEffect(() => {
     const card = cardRef.current;
     if (!top?.near || !card) return;
@@ -89,7 +68,6 @@ export function DialogHost() {
         e.stopPropagation();
         closeDialog(top.id);
       } else if (e.key === 'Enter' && !e.shiftKey) {
-        // Enter applies from any field (sliders and checkboxes have no implicit form submit)
         const t = e.target as HTMLElement | null;
         const card = cardRef.current;
         if (!card || !t || !card.contains(t) || t.tagName === 'TEXTAREA' || t.tagName === 'BUTTON' || t.tagName === 'SELECT') return;
@@ -101,7 +79,6 @@ export function DialogHost() {
       }
     };
     doc.addEventListener('keydown', onKey, true);
-    // focus the first field (or the card) so Enter / Escape reach the dialog
     const t = setTimeout(() => {
       const card = cardRef.current;
       if (!card) return;
@@ -172,9 +149,6 @@ export function DialogHost() {
   );
 }
 
-// ── Form building blocks ──────────────────────────────────────────────
-
-/** Body + footer of a dialog; Enter submits, the primary button is the submit. */
 export function DialogForm({
   children,
   onSubmit,
@@ -190,7 +164,6 @@ export function DialogForm({
   submitLabel?: string;
   submitDisabled?: boolean;
   busy?: boolean;
-  /** Left side of the footer (e.g. a "Preview" note or a reset link). */
   extra?: ReactNode;
 }) {
   const submit = (e: FormEvent): void => {
@@ -221,7 +194,6 @@ export function DialogForm({
   );
 }
 
-/** A labelled row: label (+hint) on the left, control on the right. */
 export function Field({ label, hint, children, wide }: { label: string; hint?: string; children: ReactNode; wide?: boolean }) {
   return (
     <div className={cls('flex gap-3', wide ? 'flex-col items-stretch gap-1.5' : 'items-center justify-between')}>
@@ -234,7 +206,6 @@ export function Field({ label, hint, children, wide }: { label: string; hint?: s
   );
 }
 
-/** Slider + numeric readout. `format` renders the value; the slider works in `step` units. */
 export function RangeField({
   label,
   hint,
@@ -279,7 +250,6 @@ export function RangeField({
   );
 }
 
-/** Segmented control (2–6 options). */
 export function Segmented<T extends string | number>({
   value,
   options,
@@ -318,7 +288,6 @@ export function Segmented<T extends string | number>({
   );
 }
 
-/** Compact checkbox with a label. */
 export function Check({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (
     <label className="flex cursor-pointer items-start gap-2 text-[12px] text-white/85">
@@ -331,7 +300,6 @@ export function Check({ checked, onChange, label, hint }: { checked: boolean; on
   );
 }
 
-/** Native select styled for dialogs. */
 export function DialogSelect<T extends string | number>({
   value,
   options,
@@ -363,7 +331,6 @@ export function DialogSelect<T extends string | number>({
   );
 }
 
-/** Small numeric input for dialogs (commits on blur / Enter, clamps). */
 export function NumberBox({
   value,
   onChange,

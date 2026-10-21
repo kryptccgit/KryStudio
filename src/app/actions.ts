@@ -1,9 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// App verbs (File / Edit / View / Transport / Pattern) registered as
-// commands. Menus, the keymap and the toolbar all call these by id, and
-// every one ends in visible feedback.
-// ──────────────────────────────────────────────────────────────────────
-
 import { registerCommands, runCommand } from '../input/commands';
 import { dispatch, getProject } from '../doc/store';
 import { modal, report, toast } from './notify';
@@ -33,7 +27,6 @@ import { newTab, openInTab, tabsAvailable } from './tabs/store';
 import { undoPanelClose } from '../workspace/panelUndo';
 import { shortcutFor } from '../input/keymap';
 
-// Dialogs open in the window that has focus (main or a dockview popout).
 const popouts = new Set<Window>();
 onPopoutWindow((w) => popouts.add(w));
 function focusedDoc(): Document {
@@ -56,7 +49,6 @@ async function call<T extends ActionResult>(fn: () => Promise<T>, what: string):
 
 const isMock = (): boolean => !!(window as unknown as { __kryptMockHost?: unknown }).__kryptMockHost;
 
-/** Ask before throwing away unsaved work (main handles the window-close prompt itself). */
 export async function confirmDiscard(action: string): Promise<boolean> {
   let dirty = false;
   let name = getProject().meta.name;
@@ -67,7 +59,6 @@ export async function confirmDiscard(action: string): Promise<boolean> {
   } catch {
     dirty = isDirty();
   }
-  // The browser mock never tracks dirtiness, so fall back to "edited this session".
   if (!dirty && isMock()) dirty = useProjectStatus.getState().editedSinceStatus;
   if (!dirty) return true;
   return modal.confirm({
@@ -78,12 +69,8 @@ export async function confirmDiscard(action: string): Promise<boolean> {
   });
 }
 
-// ── File ──────────────────────────────────────────────────────────────
-
-/** Ctrl+N / File ▸ New tab: a new project in a NEW tab (research/19). Resolves true when it's open (Home steps aside). */
 export async function newProject(): Promise<boolean> {
   if (tabsAvailable()) return newTab();
-  // Browser mock (no main process): replace the one project, as before tabs.
   if (!(await confirmDiscard('Start a new project'))) return false;
   const r = await call(() => window.krypt.project.newProject(), 'New project');
   if (!report(r)) return false;
@@ -93,10 +80,6 @@ export async function newProject(): Promise<boolean> {
   return true;
 }
 
-/**
- * Open a project (a dialog without a path). With tabs it opens in a new tab (main reuses an untouched new
- * project's tab and just activates an already-open file). Resolves true when it opened (Home steps aside).
- */
 export async function openProject(path?: string): Promise<boolean> {
   if (tabsAvailable()) return openInTab(path);
   if (!(await confirmDiscard('Open another project'))) return false;
@@ -153,7 +136,6 @@ export async function exportAudio(opts: Partial<RenderOptions> = {}, label = 'Ex
     if (opts.stems) {
       const n = d?.stemResults?.length ?? d?.files?.length ?? 0;
       const folder = d?.path ?? '';
-      // Show the folder's contents: select the first stem inside it (the folder itself when there is none).
       const reveal = d?.files?.[0] ?? folder;
       const show = (): void => void call(() => window.krypt.app.showItemInFolder(reveal), 'Show in folder').then((x) => report(x));
       toast.success(`Exported ${n ? `${n} stem${n === 1 ? '' : 's'}` : 'stems'} to ${folder.split(/[\\/]/).pop() || 'the chosen folder'}`, reveal ? { action: { label: 'Show in folder', run: show } } : undefined);
@@ -166,7 +148,6 @@ export async function exportAudio(opts: Partial<RenderOptions> = {}, label = 'Ex
     toast.success(
       d ? `Exported ${file} · ${d.durationSec.toFixed(1)} s · peak ${d.peakDb.toFixed(1)} dB · ${d.lufsIntegrated.toFixed(1)} LUFS` : `Exported ${file}`,
     );
-    // The audio is fine either way; say so when the song info couldn't go in.
     const tagged = d as { tagged?: boolean; tagNote?: string } | undefined;
     if (tagged && tagged.tagged === false && opts.tags !== false) toast.warn(`${file}: the song info and cover couldn't be written (${tagged.tagNote ?? 'unknown reason'}). The audio is fine.`);
     if (extra.openFolder && d?.path) {
@@ -176,19 +157,12 @@ export async function exportAudio(opts: Partial<RenderOptions> = {}, label = 'Ex
   }
 }
 
-/** Ctrl+R: the export dialog (scope, bit depth, tail, normalize). */
 export function openExport(): void {
   openExportDialog((opts, label, extra) => exportAudio(opts, label, extra), focusedDoc());
 }
 
-// ── Edit ──────────────────────────────────────────────────────────────
-
 let undoQueue: Promise<void> = Promise.resolve();
 
-/**
- * Ctrl+Z. If the user closed a panel after their last edit in this tab, the panel comes back where it was
- * (src/workspace/panelUndo.ts); otherwise the normal document undo. Key repeats run one after another.
- */
 export function undo(): Promise<void> {
   undoQueue = undoQueue.then(undoOnce, undoOnce);
   return undoQueue;
@@ -217,8 +191,6 @@ export async function redo(): Promise<void> {
   else toast.error(r.message ?? 'Redo failed');
 }
 
-// ── Transport ─────────────────────────────────────────────────────────
-
 export async function transportAction(action: 'play' | 'stop' | 'pause' | 'toggle'): Promise<void> {
   const r = await transport(action);
   if (!r.ok) toast.error(r.message ? `Transport: ${r.message}` : 'The audio engine did not respond');
@@ -229,9 +201,6 @@ export async function setMode(mode: 'pattern' | 'song'): Promise<void> {
   if (r.ok) flashHint(mode === 'song' ? 'Song mode: plays the Playlist' : 'Pattern mode: loops the active pattern', 'ok');
 }
 
-// ── Patterns ──────────────────────────────────────────────────────────
-
-/** Show the agent panel on a given tab. */
 function openAgentPanel(tab: AgentTab): void {
   useAgents.setState({ agentTab: tab });
   wm.open('agent');
@@ -299,8 +268,6 @@ export async function deletePattern(id: string): Promise<void> {
   }
 }
 
-// ── Registration ──────────────────────────────────────────────────────
-
 let registered = false;
 
 export function registerAppCommands(): void {
@@ -353,7 +320,6 @@ export function registerAppCommands(): void {
         try {
           window.krypt.engine.auditionOff();
         } catch {
-          /* ignore */
         }
         flashHint('All notes off', 'ok');
       },

@@ -1,18 +1,3 @@
-//! Offline analysis of rendered audio — what an AI agent "hears"
-//! (research/04 §6.5). Mirrors `Analysis` in shared/engine/protocol.ts.
-//!
-//! * Loudness: EBU R128 / ITU-R BS.1770-4 via the `ebur128` crate (MIT):
-//!   integrated, max short-term (3 s window, 100 ms hop), loudness range.
-//! * True peak: 4x polyphase interpolation (blocks::truepeak).
-//! * Bands / centroid: Welch-averaged power spectrum (Hann, 4096, 50 % hop).
-//! * Tempo: low-band-weighted spectral-flux onset envelope → autocorrelation
-//!   → comb over beat multiples with a mild prior; reported in the 85–170 BPM
-//!   octave (half/double-time folds into it: 70 → 140, 174 → 87). None when
-//!   the periodicity is weak.
-//!
-//! All dB values are dBFS (RMS-style: a full-scale sine is -3 dB RMS);
-//! silence floors at -120 dB and -70 LUFS so the JSON never holds -inf.
-
 use ebur128::{EbuR128, Mode};
 use rustfft::num_complex::Complex32;
 use rustfft::FftPlanner;
@@ -50,7 +35,6 @@ pub struct Analysis {
     pub lufs_integrated: f32,
     #[serde(serialize_with = "crate::serde_clean::f32")]
     pub lufs_short_term_max: f32,
-    /// Loudness range (LU).
     #[serde(serialize_with = "crate::serde_clean::f32")]
     pub loudness_range: f32,
     #[serde(serialize_with = "crate::serde_clean::f32")]
@@ -58,17 +42,13 @@ pub struct Analysis {
     #[serde(serialize_with = "crate::serde_clean::f32")]
     pub crest_db: f32,
     pub bands: Bands,
-    /// -1..1; 1 = mono.
     #[serde(serialize_with = "crate::serde_clean::f32")]
     pub stereo_correlation: f32,
-    /// Side share of the energy, 0..1: 0 = mono, 0.5 = uncorrelated stereo, 1 = out of phase.
     #[serde(serialize_with = "crate::serde_clean::f32")]
     pub stereo_width: f32,
-    /// Short-term LUFS once per second.
     #[serde(serialize_with = "crate::serde_clean::vec_f32")]
     pub energy_curve: Vec<f32>,
     pub clipping: bool,
-    /// Reported in the 85–170 BPM octave; None when no clear pulse.
     #[serde(serialize_with = "crate::serde_clean::opt_f32")]
     pub estimated_bpm: Option<f32>,
     #[serde(serialize_with = "crate::serde_clean::f32")]
@@ -78,7 +58,6 @@ pub struct Analysis {
 pub const DB_FLOOR: f32 = -120.0;
 pub const LUFS_FLOOR: f32 = -70.0;
 
-/// Band edges in Hz (sub <60, low 60-250, lowMid 250-500, mid 500-2k, highMid 2k-6k, high 6k-20k).
 pub const BAND_EDGES: [(f32, f32); 6] = [(20.0, 60.0), (60.0, 250.0), (250.0, 500.0), (500.0, 2000.0), (2000.0, 6000.0), (6000.0, 20000.0)];
 
 fn to_db(lin: f64) -> f32 {
@@ -104,9 +83,6 @@ fn lufs(v: Result<f64, ebur128::Error>) -> f32 {
     }
 }
 
-/// Analyze a stereo buffer (equal-length channels) at `sample_rate`.
-/// For a mono file pass the same slice twice (dual-mono: +3 LU versus a
-/// single-channel measurement, as BS.1770 specifies for two channels).
 pub fn analyze(left: &[f32], right: &[f32], sample_rate: f32) -> Analysis {
     let n = left.len().min(right.len());
     let (l, r) = (&left[..n], &right[..n]);
@@ -128,7 +104,6 @@ pub fn analyze(left: &[f32], right: &[f32], sample_rate: f32) -> Analysis {
         return a;
     }
 
-    // ── sample statistics (single pass) ──
     let (mut peak, mut sll, mut srr, mut slr) = (0.0f32, 0.0f64, 0.0f64, 0.0f64);
     let mut run = 0usize;
     let mut flat_clip = false;
@@ -160,12 +135,10 @@ pub fn analyze(left: &[f32], right: &[f32], sample_rate: f32) -> Analysis {
     if sll > 1e-20 && srr > 1e-20 {
         a.stereo_correlation = (slr / (sll * srr).sqrt()).clamp(-1.0, 1.0) as f32;
     }
-    // mid/side energies: M = (L+R)/2, S = (L-R)/2
     let em = 0.25 * (sll + srr + 2.0 * slr);
     let es = 0.25 * (sll + srr - 2.0 * slr);
     a.stereo_width = if em + es > 1e-20 { (es / (em + es)).clamp(0.0, 1.0) as f32 } else { 0.0 };
 
-    // The three heavy stages are independent: run them in parallel.
     let (tp, loud, spec, bpm) = std::thread::scope(|scope| {
         let tp = scope.spawn(|| true_peak(l).max(true_peak(r)));
         let loud = scope.spawn(|| loudness(l, r, sr));
@@ -183,12 +156,10 @@ pub fn analyze(left: &[f32], right: &[f32], sample_rate: f32) -> Analysis {
         a.energy_curve = ld.curve;
     }
 
-    // ── spectrum: bands + centroid ──
     if let Some(spec) = spec {
         let bin_hz = sr / spec.n as f32;
         let mut band_p = [0.0f64; 6];
         let (mut num, mut den) = (0.0f64, 0.0f64);
-        // ignore bins >100 dB under the strongest one (window leakage / float noise)
         let floor = spec.power.iter().cloned().fold(0.0f64, f64::max) * 1e-10;
         for (k, &p) in spec.power.iter().enumerate() {
             let f = k as f32 * bin_hz;
@@ -224,7 +195,6 @@ fn round_to(x: f32, decimals: i32) -> f32 {
     ((x as f64 * k).round() / k) as f32
 }
 
-/// Agents read these numbers: keep meaningful precision only.
 fn round_for_humans(a: &mut Analysis) {
     a.duration_sec = round_to(a.duration_sec, 3);
     for v in [&mut a.peak_db, &mut a.true_peak_db, &mut a.lufs_integrated, &mut a.lufs_short_term_max, &mut a.loudness_range, &mut a.rms_db, &mut a.crest_db] {
@@ -247,13 +217,10 @@ struct Loudness {
     curve: Vec<f32>,
 }
 
-/// EBU R128 via the ebur128 crate. Short-term loudness is queried on a
-/// 100 ms grid for files up to a minute; longer files use a coarser grid
-/// (at most ~600 queries: each query re-sums the 3 s window in the crate).
 fn loudness(l: &[f32], r: &[f32], sr: f32) -> Option<Loudness> {
     let n = l.len();
     let mut meter = EbuR128::new(2, sr.round() as u32, Mode::I | Mode::S | Mode::LRA).ok()?;
-    let block = ((sr * 0.1) as usize).max(1); // 100 ms
+    let block = ((sr * 0.1) as usize).max(1);
     let total_blocks = n.div_ceil(block);
     let per_query = total_blocks.div_ceil(600).max(1);
     let mut st_max = f32::NEG_INFINITY;
@@ -265,11 +232,9 @@ fn loudness(l: &[f32], r: &[f32], sr: f32) -> Option<Loudness> {
         meter.add_frames_planar_f32(&[&l[at..e], &r[at..e]]).ok()?;
         at = e;
         k += 1;
-        // one curve point per second (plus the final partial second)
         let second_mark = k.is_multiple_of(10) || at == n;
         if k.is_multiple_of(per_query) || second_mark {
             let st = meter.loudness_shortterm().ok().filter(|v| v.is_finite()).map(|v| v as f32);
-            // short-term needs a full 3 s window (or the whole file) to mean anything
             if at as f32 >= 3.0 * sr || at == n {
                 if let Some(v) = st {
                     st_max = st_max.max(v);
@@ -293,12 +258,9 @@ fn loudness(l: &[f32], r: &[f32], sr: f32) -> Option<Loudness> {
 
 struct Spectrum {
     n: usize,
-    /// one-sided mean-square contribution per bin (sums to the signal's mean square)
     power: Vec<f64>,
 }
 
-/// Welch average power spectrum of the two channels (averaged), scaled so
-/// that the sum over bins equals the mean square of the signal.
 fn average_power_spectrum(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanner<f32>) -> Option<Spectrum> {
     let n = if sr > 60000.0 { 8192 } else { 4096 };
     let len = l.len();
@@ -309,8 +271,6 @@ fn average_power_spectrum(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanne
     let mut buf = vec![Complex32::new(0.0, 0.0); n];
     let mut scratch = vec![Complex32::new(0.0, 0.0); fft.get_inplace_scratch_len()];
     let mut acc = vec![0.0f64; n / 2 + 1];
-    // frames start half a window early and run half a window past the end,
-    // so every sample (including a transient at t=0) sits under two windows
     let mut frames = 0usize;
     let mut start: isize = -(hop as isize);
     while start < len as isize {
@@ -321,7 +281,6 @@ fn average_power_spectrum(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanne
             *c = Complex32::new(x * window[i], y * window[i]);
         }
         fft.process_with_scratch(&mut buf, &mut scratch);
-        // unpack two real spectra from one complex FFT
         for k in 0..=n / 2 {
             let z = buf[k];
             let zc = buf[(n - k) % n].conj();
@@ -337,7 +296,6 @@ fn average_power_spectrum(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanne
     if frames == 0 || len == 0 {
         return None;
     }
-    // Σ_frames Σ_k |X|²/N ≈ (Σw²/hop) · Σ x²  →  mean square = Σ|X|² · hop / (N Σw² len)
     let norm = hop as f64 / (n as f64 * wss * len as f64);
     for v in acc.iter_mut() {
         *v *= norm;
@@ -345,13 +303,12 @@ fn average_power_spectrum(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanne
     Some(Spectrum { n, power: acc })
 }
 
-/// Best-effort tempo estimate (60–200 BPM), None if no clear pulse.
 fn estimate_bpm(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanner<f32>) -> Option<f32> {
     let n = 1024usize;
     let hop = 512usize;
     let len = l.len();
     if (len as f32) < sr * 4.0 {
-        return None; // need a few bars
+        return None;
     }
     let fft = planner.plan_fft_forward(n);
     let window: Vec<f32> = (0..n).map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / n as f32).cos()).collect();
@@ -361,7 +318,6 @@ fn estimate_bpm(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanner<f32>) ->
     let mut scratch = vec![Complex32::new(0.0, 0.0); fft.get_inplace_scratch_len()];
     let mut prev = vec![0.0f32; max_bin];
     let mut cur = vec![0.0f32; max_bin];
-    // beat-level events (kick/snare/bass) dominate the meter; hats mark subdivisions
     let bin_hz = sr / n as f32;
     let weight: Vec<f32> = (0..max_bin)
         .map(|k| {
@@ -377,7 +333,6 @@ fn estimate_bpm(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanner<f32>) ->
         .collect();
     let frames = (len - n) / hop;
     let mut flux = Vec::with_capacity(frames);
-    // two frames per complex FFT (frame A in re, frame B in im)
     let mut f = 0;
     while f < frames {
         let a0 = f * hop;
@@ -412,8 +367,7 @@ fn estimate_bpm(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanner<f32>) ->
     if flux.len() < 64 {
         return None;
     }
-    // remove the local mean (≈0.4 s) and half-wave rectify
-    let fr = sr / hop as f32; // frames per second
+    let fr = sr / hop as f32;
     let w = ((0.4 * fr) as usize).max(3);
     let mut csum = vec![0.0f64; flux.len() + 1];
     for (i, v) in flux.iter().enumerate() {
@@ -427,7 +381,6 @@ fn estimate_bpm(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanner<f32>) ->
             (flux[i] - mean as f32).max(0.0)
         })
         .collect();
-    // widen onset peaks (±2 frames) so beat lags between frames still line up
     let env: Vec<f32> = (0..env.len())
         .map(|i| {
             let mut s = 0.0;
@@ -444,7 +397,6 @@ fn estimate_bpm(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanner<f32>) ->
     if energy < 1e-9 {
         return None;
     }
-    // autocorrelation over lags up to 8 s (many beat multiples → precise tempo)
     let max_lag = ((8.0 * fr) as usize).min(env.len() / 2);
     if max_lag < (2.0 * fr) as usize {
         return None;
@@ -466,7 +418,6 @@ fn estimate_bpm(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanner<f32>) ->
         let t = (x - i as f32) as f64;
         acf[i] * (1.0 - t) + acf[i + 1] * t
     };
-    // comb score: weighted mean of the ACF at every beat multiple that fits
     let mut best = (0.0f64, 0.0f32);
     let mut scores = Vec::with_capacity(1401);
     for step in 0..=1400 {
@@ -481,8 +432,6 @@ fn estimate_bpm(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanner<f32>) ->
             m += 1;
         }
         let mut s = if wsum > 0.0 { s / wsum } else { 0.0 };
-        // tempo prior: log-Gaussian around 128 BPM (σ = 1 octave) nudges
-        // half/double-time ambiguity the way producers usually count
         let o = (bpm / 128.0).log2() as f64;
         s *= (-0.5 * o * o).exp();
         scores.push(s);
@@ -495,7 +444,6 @@ fn estimate_bpm(l: &[f32], r: &[f32], sr: f32, planner: &mut FftPlanner<f32>) ->
     if !confident {
         return None;
     }
-    // refine with a parabola around the peak
     let i = ((best.1 - 60.0) / 0.1).round() as usize;
     let mut est = best.1;
     if i > 0 && i + 1 < scores.len() {
@@ -520,7 +468,6 @@ mod tests {
 
     #[test]
     fn ebu_3341_case1_stereo_minus23() {
-        // EBU Tech 3341 test 1: 1 kHz sine at -23 dBFS in both channels → -23.0 LUFS
         let s = sine(-23.0, 1000.0, 20.0, 48000.0);
         let a = analyze(&s, &s, 48000.0);
         assert!((a.lufs_integrated + 23.0).abs() < 0.1, "{}", a.lufs_integrated);
@@ -533,10 +480,8 @@ mod tests {
         let sr = 48000.0;
         let s = sine(-20.0, 1000.0, 10.0, sr);
         let silent = vec![0.0f32; s.len()];
-        // one channel: -20 dBFS sine → -23.0 LUFS (0 dBFS sine in one channel = -3.01 LUFS)
         let a = analyze(&s, &silent, sr);
         assert!((a.lufs_integrated + 23.0).abs() < 0.5, "{}", a.lufs_integrated);
-        // both channels: +3 LU → -20 LUFS
         let b = analyze(&s, &s, sr);
         assert!((b.lufs_integrated + 20.0).abs() < 0.5, "{}", b.lufs_integrated);
         assert!((b.peak_db + 20.0).abs() < 0.05);

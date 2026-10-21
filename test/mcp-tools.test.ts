@@ -1,6 +1,3 @@
-// The shared MCP / agent tool registry, driven against a real DocHost with a
-// fake EngineClient. Also an end-to-end check of the named-pipe MCP server
-// (2025 initialize era) when running on Windows.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -120,8 +117,6 @@ function notesOf(doc: DocHost, patId: string, chId: string) {
   return Object.values(doc.project.patterns[patId].notes[chId] ?? {});
 }
 
-// ── Registry shape ──────────────────────────────────────────────────────
-
 test('registry: 85 uniquely named tools (incl. write_script / run_script, build_rack / set_macro / slice_to_pads, slice_sample / edit_slices, the 7 reference-library, 3 vocals, 3 release, 4 sound, 3 craft and 1 sound-pack tools, compare_to_reference, study_reference and generate_notes) with descriptions and JSON schemas', () => {
   assert.equal(TOOLS.length, 101, `${TOOLS.length} tools (update docs/MCP.md and the README count when this changes)`);
   for (const n of ['library_status', 'search_references', 'read_reference', 'get_style_profile', 'check_originality', 'library_import', 'library_deep', 'import_audio', 'match_clip', 'tune_vocal', 'set_song_info', 'set_cover', 'export_audio']) assert.ok(TOOLS.some((t) => t.name === n), n);
@@ -138,8 +133,6 @@ test('registry: 85 uniquely named tools (incl. write_script / run_script, build_
     assert.ok(names.has(required), `missing ${required}`);
   }
 });
-
-// ── write_pattern / read_pattern ────────────────────────────────────────
 
 test('write_pattern: creates the pattern from the header, maps aliases, creates missing channels', async () => {
   const { doc, call, broadcasts } = makeDeps();
@@ -163,7 +156,6 @@ test('write_pattern: creates the pattern from the header, maps aliases, creates 
   assert.ok(r.changed.includes(pat.id));
   assert.ok(r.changed.includes(oh.id));
   assert.deepEqual(checkIntegrity(doc.project), []);
-  // Exactly one history entry for the whole call, by the agent.
   const hist = doc.getHistory();
   assert.equal(hist.length, 1);
   assert.equal(hist[0].actorKey, 'agent:test-agent');
@@ -240,7 +232,6 @@ test('write_pattern → read_pattern round-trips through canonical KPN', async (
   assert.match(kpn, /^pattern "Trap A" bars=2 grid=16 key=F#m/);
   assert.match(kpn, /Kick\s*: x\.\.\. \.\.\.\. \.\.x\. \.\.\.\. \| x\.\.\. \.\.\.\. \.x\.\. \.\.x\./);
   assert.match(kpn, /Hat\/32/);
-  // Writing the canonical text back is a no-op.
   const again = await call('write_pattern', { kpn, pattern: 'Trap A' });
   assert.equal(again.ok, false);
   assert.match(again.message, /^No change/);
@@ -249,8 +240,6 @@ test('write_pattern → read_pattern round-trips through canonical KPN', async (
   assert.equal(ch.notes[0].note, 'F#1');
   void doc;
 });
-
-// ── Notes, patterns, transforms ─────────────────────────────────────────
 
 test('add_notes, transform_notes (transpose by degrees, humanize), clear_pattern', async () => {
   const { doc, call } = makeDeps();
@@ -330,8 +319,6 @@ test('create_pattern / select_pattern (no-op detection)', async () => {
   assert.equal(again.ok, false);
 });
 
-// ── Sound ───────────────────────────────────────────────────────────────
-
 test('add_channel picks instruments by name; set_params takes human units and reports before → after', async () => {
   const { doc, call } = makeDeps();
   const r = await call('add_channel', { name: 'Pad', params: { cutoff: '1.2kHz' } });
@@ -383,7 +370,6 @@ test('load_sample: factory, roots and (File access "anywhere") any local file; U
     const r = await call('load_sample', { sample: bad });
     assert.equal(r.ok, false, `should refuse ${bad}`);
   }
-  // The default File access ("anywhere") opens any local audio file; "browser" keeps agents to the roots.
   assert.equal((await call('load_sample', { sample: path.join(OUTSIDE, 'secret.wav') })).ok, true);
   fs.writeFileSync(path.join(OUTSIDE, 'other.wav'), 'RIFF');
   deps.updateSettings({ mcp: { ...deps.getSettings().mcp, fileAccess: 'browser' } });
@@ -399,8 +385,6 @@ test('load_sample: factory, roots and (File access "anywhere") any local file; U
   assert.match(found.text!, /factory:drums\/snare\.wav/);
   assert.match(found.text!, /Tight Snare 01\.wav/);
 });
-
-// ── Arrangement & mixing ────────────────────────────────────────────────
 
 test('arrange tiles patterns over bar ranges, switches to song mode, and is idempotent', async () => {
   const { doc, call } = makeDeps();
@@ -537,7 +521,6 @@ test('delete_objects removes channels and patterns; failures roll back partial e
   const r = await call('delete_objects', { channels: ['Keys'], patterns: ['Tmp'] });
   assert.equal(r.ok, true, r.message);
   assert.equal(doc.project.channelOrder.length, before - 1);
-  // The channel delete succeeds, then the unknown pattern fails → the whole call is rolled back.
   const v = doc.version;
   const bad = await call('delete_objects', { channels: ['Clap'], patterns: ['Nope'] });
   assert.equal(bad.ok, false);
@@ -545,8 +528,6 @@ test('delete_objects removes channels and patterns; failures roll back partial e
   assert.ok(doc.project.channelOrder.some((id) => doc.project.channels[id].name === 'Clap'));
   assert.ok(doc.version > v, 'rollback is itself a document change');
 });
-
-// ── Hearing & transport ─────────────────────────────────────────────────
 
 test('render_preview returns compact analysis, symbolic stats and issues', async () => {
   const { call, renders } = makeDeps();
@@ -584,7 +565,6 @@ test('render_preview without an engine still returns symbolic stats, honestly fa
 test('render_preview never reads an all-zero engine analysis as "0 LUFS"; it measures the WAV instead', async () => {
   const { deps, call } = makeDeps();
   deps.engine.render = async (job) => {
-    // 0.5 s stereo 16-bit sine at -6 dBFS.
     const sr = 48000;
     const n = sr / 2;
     const pcm = Buffer.alloc(n * 4);
@@ -629,8 +609,6 @@ test('play / stop drive the engine transport', async () => {
   assert.equal((await call('stop')).ok, true);
   assert.deepEqual(engineRequests, [{ cmd: 'locate', tick: 3840 }, { cmd: 'transport', action: 'play' }, { cmd: 'transport', action: 'stop' }]);
 });
-
-// ── History & safety ────────────────────────────────────────────────────
 
 test('undo_last undoes only the agent\'s own last call; user edits stay', async () => {
   const { doc, call } = makeDeps();
@@ -723,8 +701,6 @@ test('the KPN cheat sheet examples in tool descriptions parse', () => {
   assert.equal(parse(kpn).ok, true);
 });
 
-// ── Built-in agent loop against a mock Messages API ─────────────────────
-
 test('agent loop: streams, runs tools through the registry, caches, and returns tool_results', async () => {
   const http = await import('node:http');
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
@@ -775,10 +751,8 @@ test('agent loop: streams, runs tools through the registry, caches, and returns 
     const r = await core.send('Make me a one-bar beat');
     assert.equal(r.ok, true, r.message);
     assert.match(r.message ?? '', /Writing the drums\. Done: a one-bar beat\./);
-    // The edit landed as the panel agent, through the shared registry.
     assert.ok(Object.values(doc.project.patterns).some((p) => p.name === 'Agent Beat'));
     assert.equal(doc.getHistory().at(-1)!.actorKey, 'agent:krypt-panel');
-    // Request shape: caching breakpoints, deterministic tools, adaptive thinking, fallbacks.
     const b1 = requests[0].body;
     assert.equal(b1.model, 'claude-opus-5-5');
     assert.equal(b1.stream, true);
@@ -793,7 +767,6 @@ test('agent loop: streams, runs tools through the registry, caches, and returns 
     assert.equal(b1.fallbacks, 'default');
     assert.match(requests[0].beta, /server-side-fallback-2026-07-01/);
     assert.match(b1.messages[0].content[0].text, /^<project_overview doc_version=/);
-    // Turn 2 carries the assistant tool_use and our tool_result, append-only.
     const m2 = requests[1].body.messages;
     assert.equal(m2.length, 3);
     assert.equal(m2[1].role, 'assistant');
@@ -802,14 +775,12 @@ test('agent loop: streams, runs tools through the registry, caches, and returns 
     assert.equal(m2[2].content[0].tool_use_id, 'toolu_1');
     assert.equal(m2[2].content[0].is_error, undefined);
     assert.match(m2[2].content[0].content, /Created and wrote pattern "Agent Beat"/);
-    // Events streamed to the renderer, with usage and an estimated cost.
     const ev = broadcasts.filter((x) => x.channel === MCP_CHANNELS.agentEvent).map((x) => x.payload as { type: string; usage?: { costUsd: number; inputTokens: number } });
     assert.deepEqual([...new Set(ev.map((e) => e.type))], ['text', 'tool_use', 'tool_result', 'done']);
     const done = ev.at(-1)!;
     assert.equal(done.usage!.inputTokens, 20000);
     assert.equal(done.usage!.costUsd, Math.round(((2000 * 4 + 150 * 20 + 18000 * 5) / 1e6) * 10000) / 10000);
     assert.equal(core.history().length, 4);
-    // No key → a clear message, no request.
     const none = createAgentCore(deps, () => null);
     assert.match((await none.send('hi')).message ?? '', /Add your Anthropic API key/);
   } finally {
@@ -842,7 +813,6 @@ test('agent loop (OpenAI-compatible: OpenAI, OpenRouter): streams, runs tools th
   assert.match(r.message ?? '', /Writing the drums\. Done\./);
   assert.ok(Object.values(doc.project.patterns).some((p) => p.name === 'Compat Beat'), 'the tool ran through the registry');
   assert.equal(doc.getHistory().at(-1)!.actorKey, 'agent:krypt-panel', 'as the panel agent: undoable like any agent edit');
-  // Request shape: the endpoint, the key as a bearer token, every tool as a function, streamed with usage.
   assert.equal(requests[0].url, 'https://openrouter.ai/api/v1/chat/completions');
   assert.equal(requests[0].headers.Authorization, 'Bearer sk-or-test');
   assert.equal(requests[0].headers['X-Title'], 'Krypt Studio');
@@ -854,7 +824,6 @@ test('agent loop (OpenAI-compatible: OpenAI, OpenRouter): streams, runs tools th
   assert.deepEqual(b1.tools.map((t: { function: { name: string } }) => t.function.name), TOOLS.map((t) => t.name));
   assert.equal(b1.messages[0].role, 'system');
   assert.match(b1.messages[1].content, /<project_overview doc_version=/);
-  // Turn 2: the assistant's tool call and its answer.
   const m2 = requests[1].body.messages;
   assert.equal(m2.at(-2).role, 'assistant');
   assert.equal(m2.at(-2).tool_calls[0].id, 'call_1');
@@ -865,7 +834,6 @@ test('agent loop (OpenAI-compatible: OpenAI, OpenRouter): streams, runs tools th
   assert.deepEqual([...new Set(ev.map((e) => e.type))], ['text', 'tool_use', 'tool_result', 'done']);
   assert.equal(ev.at(-1)!.usage!.inputTokens, 1900);
   assert.equal(ev.at(-1)!.usage!.costUsd, 0.003);
-  // Errors in plain words; no key → a clear message, no request.
   const http = (status: number) => (async () => new Response(JSON.stringify({ error: { message: 'nope' } }), { status })) as unknown as typeof fetch;
   const bad = createCompatCore(deps, () => ({ provider: 'openai', key: 'sk-test', model: 'gpt-5' }), http(401));
   assert.match((await bad.send('hi')).message ?? '', /OpenAI \(ChatGPT\) key was rejected/);
@@ -873,8 +841,6 @@ test('agent loop (OpenAI-compatible: OpenAI, OpenRouter): streams, runs tools th
   const none = createCompatCore(deps, () => null, fakeFetch);
   assert.match((await none.send('hi')).message ?? '', /Add an API key/);
 });
-
-// ── MCP server over the named pipe (Windows) ────────────────────────────
 
 test('MCP server: pipe auth, initialize, tools/list, write_pattern round trip, kill switch', async () => {
   if (process.platform !== 'win32') return;
@@ -968,7 +934,6 @@ test('MCP server: pipe auth, initialize, tools/list, write_pattern round trip, k
     c.send({ jsonrpc: '2.0', id: 6, method: 'prompts/get', params: { name: 'beat', arguments: { genre: 'trap' } } });
     const pr = await c.next();
     assert.match(pr.result.messages[0].content.text, /trap/i);
-    // Every argument is optional: a bare /krypt-studio:beat (or just an idea) must not block on parameters.
     c.send({ jsonrpc: '2.0', id: 7, method: 'prompts/get', params: { name: 'beat', arguments: {} } });
     const bare = await c.next();
     assert.ok(bare.result, JSON.stringify(bare.error));
@@ -978,7 +943,6 @@ test('MCP server: pipe auth, initialize, tools/list, write_pattern round trip, k
     assert.match(idea.result.messages[0].content.text, /Style card — trap/);
     assert.match(idea.result.messages[0].content.text, /driving at night/);
 
-    // Kill switch: everyone is disconnected and calls are refused.
     const off = await mcp.setEnabled(false);
     assert.equal(off.ok, true);
     assert.equal(mcp.status().clients.length, 0);
@@ -998,8 +962,6 @@ test('MCP server: pipe auth, initialize, tools/list, write_pattern round trip, k
     delete process.env.KRYPT_MCP_PIPE_SUFFIX;
   }
 });
-
-// ── The Rust stdio shim ⇄ pipe ⇄ server (skipped when the shim isn't built) ──
 
 function findShim(): string | undefined {
   const root = path.resolve(process.cwd());
@@ -1102,7 +1064,6 @@ test('shim: a client re-opening its change subscription never starts the app; th
   const { deps } = makeDeps();
   fs.mkdirSync(deps.userDataDir, { recursive: true });
   process.env.KRYPT_MCP_PIPE_SUFFIX = `shim-listen-${process.pid}`;
-  // A stand-in "app" that only leaves a marker, so any launch is visible.
   const marker = path.join(deps.userDataDir, 'launched.txt');
   const fakeApp = path.join(deps.userDataDir, 'fake-app.cjs');
   fs.writeFileSync(fakeApp, `require('fs').writeFileSync(${JSON.stringify(marker)}, 'launched')`);
@@ -1116,7 +1077,7 @@ test('shim: a client re-opening its change subscription never starts the app; th
   try {
     for (let i = 0; i < 100 && !fs.existsSync(path.join(deps.userDataDir, 'mcp-manifest.json')); i++) await sleep(50);
     writeCfg();
-    await mcp.stop(); // the user closed Krypt Studio
+    await mcp.stop();
     const c = await shimClient(shim, ['--config', cfg, '--client', 'claude-code']);
     c.send({ jsonrpc: '2.0', id: 7, method: 'subscriptions/listen', params: { _meta: meta, notifications: { toolsListChanged: true, promptsListChanged: true, resourceSubscriptions: ['krypt://mixer'] } } });
     const ack = await c.next();
@@ -1127,7 +1088,6 @@ test('shim: a client re-opening its change subscription never starts the app; th
     assert.equal((await c.next()).result.tools.length, TOOLS.length, 'discovery still answers offline');
     await sleep(1500);
     assert.equal(fs.existsSync(marker), false, 'a background subscription must not reopen the app');
-    // The user opens Krypt Studio again; the next real call connects and hands the subscription over.
     mcp = await Promise.resolve(startMcp(deps));
     for (let i = 0; i < 100 && !mcp.status().pipeName; i++) await sleep(20);
     writeCfg();

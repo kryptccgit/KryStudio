@@ -1,7 +1,3 @@
-// Per-step "graph editor" lane (FL Ctrl+K style) under the selected
-// channel: velocity or pan bars, drawn by dragging across the steps.
-// One drag = one undo entry.
-
 import { useMemo, useRef, useState } from 'react';
 import type { Note } from '@shared/schema/project';
 import { beginGesture, type Gesture } from '../../doc/gesture';
@@ -61,7 +57,6 @@ export function GraphLane({
     try {
       el.setPointerCapture(e.pointerId);
     } catch {
-      /* ignore */
     }
     const step = stepAt(e.clientX, el);
     g.current = { gesture: beginGesture(lane === 'vel' ? 'Edit step velocities' : 'Edit step pans'), el, last: step };

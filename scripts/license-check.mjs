@@ -1,28 +1,8 @@
-// Licence gate (research/05 §9.5 and §10). Fails on any shipped dependency
-// whose licence is not on the allowlist in scripts/lib/deps.mjs; GPL, AGPL,
-// LGPL, SSPL and friends are denied unless approved in APPROVED below.
-//
-//   npm    production deps + devDeps the app source imports (bundled by Vite)
-//          + the Electron runtime          → must pass
-//          every other devDependency (build tools, never shipped) → warning only
-//   cargo  every crate the engine workspace links or builds for Windows
-//          (engine, dsp, MCP shim, plugin host...) → must pass
-//          dev-only crates (tests/benches) → warning only
-//
-// Usage: npm run license:check   (also runs in CI)
-
 import { cargoCrates, evaluateLicense, npmAll, npmShipped } from './lib/deps.mjs';
 
-/**
- * Explicit approvals for packages whose licence is not on the allowlist.
- * Key: "npm:<name>" or "crate:<name>" (optionally "@<version>").
- * Every entry needs a reason a reviewer can check. Keep this short.
- */
 const APPROVED = {
-  // Example: 'crate:some-lgpl-crate@1.2.3': 'dynamically loaded DLL, user-replaceable, source link in notices',
 };
 
-/** Build tools only (never shipped). Warn instead of fail if their licence is unusual. */
 const KNOWN_DEV_ONLY = {
   'npm:caniuse-lite': 'CC-BY-4.0 browser-support data used by autoprefixer at build time',
   'npm:exif-parser': 'no licence field; transitive dev dependency of jimp (make-ico only)',
@@ -49,7 +29,6 @@ function judge(kind, p, { shipped, label }) {
   else warnings.push(`${desc}${KNOWN_DEV_ONLY[`${kind}:${p.name}`] ? `; known: ${KNOWN_DEV_ONLY[`${kind}:${p.name}`]}` : ''}`);
 }
 
-// npm
 let shippedNpm = [];
 try {
   shippedNpm = npmShipped();
@@ -64,7 +43,6 @@ try {
   errors.push(`reading package-lock.json failed: ${e.message}`);
 }
 
-// cargo
 let crates = [];
 try {
   crates = cargoCrates().crates;

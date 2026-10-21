@@ -1,31 +1,3 @@
-//! Warp markers and warp modes for `krypt.audioclip` channels (Wave 12.2;
-//! contract shared/schema/warp.ts, docs/ENGINE_PROTOCOL.md §11).
-//!
-//! A warped clip is rendered OFF the audio thread like any stretch variant
-//! (variants.rs): the clip's `WarpMap` is resolved into a quantized
-//! `WarpKey` that is part of the variant key, so any change to the mode,
-//! the markers, the mode settings or (when markers are used) the project
-//! tempo renders a new copy, and the audio thread keeps playing plain
-//! buffers.
-//!
-//! Timing (the "time map", source seconds → variant seconds):
-//! - 2 or more markers: piecewise linear through `(sec, beat × 60 / bpm)`; before
-//!   the first / after the last marker the edge segment's rate continues.
-//!   The Stretch group's `stretch` / `tempo_sync` / `src_bpm` are ignored.
-//! - 1 marker: the Stretch params' uniform ratio r, shifted so the marker
-//!   lands on its beat: `out = beat × 60 / bpm + (t − sec) × r`.
-//! - 0 markers: `out = t × r` (the pre-warp timing).
-//!
-//! Markers that change nothing (one marker at `sec × r = beat × 60 / bpm`,
-//! or all markers at `sec = beat × 60 / bpm`) count as no markers.
-//!
-//! The variant starts at beat 0 (variant second 0 = the clip's sample
-//! start): source audio that maps before it is dropped, a map that starts
-//! later leaves leading silence. The sequencer's clip offset (ticks →
-//! seconds at the project tempo) therefore keeps indexing the variant.
-//!
-//! Every mode is deterministic (fixed seeds, no time or thread dependence).
-
 use crate::model_ext::WarpMap;
 use krypt_studio_dsp::blocks::sinc::{apply, SincTable, MAX_TAPS};
 use krypt_studio_stretch::{map_in_to_out, map_out_to_in, stretch_mapped, stretch_planar, Profile, StretchError, StretchSettings, MAX_SEMITONES};
@@ -33,36 +5,22 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Same limit as shared/schema/warp.ts.
 pub const MAX_WARP_MARKERS: usize = 2048;
 pub const DEFAULT_BEATS_FADE_MS: f64 = 20.0;
 pub const DEFAULT_GRAIN_MS: f64 = 80.0;
 pub const DEFAULT_FLUX: f64 = 0.2;
-/// Marker quantum: 1e-9 s / 1e-9 beat.
 const POS_SCALE: f64 = 1e9;
 const BPM_SCALE: f64 = 1e6;
-/// ms settings: 0.01 ms; flux: 1e-4.
 const MS_SCALE: f64 = 100.0;
 const FLUX_SCALE: f64 = 1e4;
-/// Largest marker position accepted (seconds or beats): far past any 30 min file.
 const MAX_POS: f64 = 1e7;
-/// beats/transients: slices longer than this (source seconds) are split evenly,
-/// so material without transients still follows the tempo.
 const MAX_SLICE_S: f64 = 0.25;
-/// beats: fade-in at each slice start (transient slices start on a zero crossing).
 const FADE_IN_TRANSIENT_S: f64 = 0.0001;
 const FADE_IN_GRID_S: f64 = 0.001;
-/// Raised-cosine fade at the variant start (as krypt-studio-stretch).
 const START_FADE_S: f64 = 0.001;
-/// texture: grains overlap 4× (hop = grain / 4).
 const GRAIN_OVERLAP: usize = 4;
 const TEXTURE_SEED: u64 = 0x4b53_5458_5452_0001;
-/// texture: grain jitter at flux 0 (± this fraction of a grain), so that
-/// overlapping grains never sit at one fixed source offset (comb filtering:
-/// measured -18 dB on a 220 + 330 Hz tone at 1.5× without it).
 const TEXTURE_MIN_JITTER: f64 = 0.25;
-/// texture: 1 / sqrt(sum of squared Hann windows at a quarter hop = 1.5):
-/// decorrelated grains add in power, so this keeps the level.
 const TEXTURE_GAIN: f32 = 0.816_496_6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -96,22 +54,16 @@ impl Mode {
     }
 }
 
-/// beats: where slices start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Slice {
     Transients,
-    /// Slices per beat (quarter note): 4 = 1/16, 2 = 1/8, 1 = 1/4.
     Grid(u8),
 }
 
-/// The quantized, render-relevant part of a clip's warp map (variant key).
-/// Settings a mode does not use are zeroed so they never re-render.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WarpKey {
     pub mode: Mode,
-    /// (sec, beat) × 1e9; 0, 1 or >= 2 entries, strictly increasing.
     markers: Vec<(i64, i64)>,
-    /// Project bpm × 1e6 when the output depends on it (markers, beats grid), else 0.
     bpm_q: i64,
     slice: Slice,
     fade_q: i64,
@@ -123,7 +75,6 @@ impl WarpKey {
     pub fn marker_count(&self) -> usize {
         self.markers.len()
     }
-    /// >= 2 markers: the markers define the timing (Stretch timing params ignored).
     pub fn overrides_stretch(&self) -> bool {
         self.markers.len() >= 2
     }
@@ -142,11 +93,9 @@ impl WarpKey {
     pub fn flux(&self) -> f64 {
         self.flux_q as f64 / FLUX_SCALE
     }
-    /// Markers as (source sec, beat).
     pub fn markers(&self) -> Vec<(f64, f64)> {
         self.markers.iter().map(|&(s, b)| (s as f64 / POS_SCALE, b as f64 / POS_SCALE)).collect()
     }
-    /// Identifies the marker timing (0 = none: the ratio alone is the timing).
     pub fn timing_hash(&self) -> u64 {
         if self.markers.is_empty() {
             return 0;
@@ -156,8 +105,6 @@ impl WarpKey {
         self.bpm_q.hash(&mut h);
         h.finish() | 1
     }
-    /// The time map as knots (source frame, variant frame) at `sr`, for the
-    /// Stretch ratio `ratio` (used with < 2 markers).
     pub fn knots(&self, ratio: f64, sr: f64) -> Vec<(f64, f64)> {
         let m = self.markers();
         let spb = 60.0 / self.bpm().max(1e-6);
@@ -170,7 +117,6 @@ impl WarpKey {
             _ => m.iter().map(|&(s, b)| (s * sr, b * spb * sr)).collect(),
         }
     }
-    /// "warp beats, 4 markers @ 128 bpm"
     pub fn describe(&self) -> String {
         let mut s = format!("warp {}", self.mode.name());
         if !self.markers.is_empty() {
@@ -180,15 +126,11 @@ impl WarpKey {
     }
 }
 
-/// A clip's warp map resolved against its Stretch params and the tempo.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Resolved {
     pub warp: Option<WarpKey>,
-    /// Stretch ratio to use (1 when >= 2 markers override it).
     pub ratio: f64,
-    /// Pitch shift to use (0 in repitch: pitch follows speed).
     pub semitones: f64,
-    /// Something in the map was unusable (shown once as a warning).
     pub warning: Option<String>,
 }
 
@@ -200,9 +142,6 @@ fn setting(v: Option<f64>, default: f64, lo: f64, hi: f64) -> f64 {
     v.filter(|x| x.is_finite()).unwrap_or(default).clamp(lo, hi)
 }
 
-/// Resolve `map` (None = no warp) for Stretch params (`ratio`, `semitones`)
-/// at the project tempo `bpm`. Invalid markers fall back to the Stretch
-/// timing (the mode still applies) with a warning.
 pub fn resolve(map: Option<&WarpMap>, ratio: f64, semitones: f64, bpm: f64) -> Resolved {
     let Some(m) = map else {
         return Resolved { warp: None, ratio, semitones, warning: None };
@@ -233,7 +172,6 @@ pub fn resolve(map: Option<&WarpMap>, ratio: f64, semitones: f64, bpm: f64) -> R
     match markers.len() {
         0 => {}
         1 => {
-            // One marker only shifts; at its natural place (shift < 1 µs) it is a no-op.
             let (s, b) = (markers[0].0 as f64 / POS_SCALE, markers[0].1 as f64 / POS_SCALE);
             if (b * 60.0 / bpm - s * ratio).abs() < 1e-6 {
                 markers.clear();
@@ -241,7 +179,6 @@ pub fn resolve(map: Option<&WarpMap>, ratio: f64, semitones: f64, bpm: f64) -> R
         }
         _ => {
             ratio = 1.0;
-            // Every marker at its original time (the clip is warped at its own tempo): no-op.
             if markers.iter().all(|&(s, b)| ((b as f64 / POS_SCALE) * 60.0 / bpm - s as f64 / POS_SCALE).abs() < 1e-6) {
                 markers.clear();
             }
@@ -274,9 +211,6 @@ pub fn resolve(map: Option<&WarpMap>, ratio: f64, semitones: f64, bpm: f64) -> R
     Resolved { warp: Some(warp), ratio, semitones, warning }
 }
 
-/// Render the warped copy of `input` (planar, equal lengths). Blocking:
-/// worker / render threads only. Output length = the time map's position of
-/// the source end, rounded (0 if it maps before beat 0).
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     input: &[&[f32]],
@@ -348,15 +282,6 @@ fn check_cancel(cancel: &AtomicBool) -> Result<(), StretchError> {
     }
 }
 
-// ── beats ────────────────────────────────────────────────────────────────
-
-/// Onset frames of planar audio, sorted, starting with 0: frames (2.5 ms)
-/// whose first-difference energy jumps >= 9 dB over the 3 frames before,
-/// or >= 30 dB over the frame before (a sound right after a short gap), and
-/// is within 50 dB of the loudest frame; onsets are at least 40 ms apart. Each
-/// onset is moved back to where the attack starts (first sample above 20 %
-/// of the attack's peak, from one frame earlier) and then to the preceding
-/// zero crossing (<= 1 ms), so a slice starts on silence, never mid-attack.
 pub fn transients(input: &[&[f32]], sr: f64) -> Vec<usize> {
     let n = input.first().map_or(0, |c| c.len());
     let mut out = vec![0usize];
@@ -398,7 +323,6 @@ pub fn transients(input: &[&[f32]], sr: f64) -> Vec<usize> {
     out
 }
 
-/// Slice starts (source frames, sorted, from 0) for beats mode.
 fn slice_points(input: &[&[f32]], sr: f64, knots: &[(f64, f64)], w: &WarpKey) -> Vec<usize> {
     let n_in = input[0].len();
     let mut pts = match w.slice {
@@ -435,10 +359,6 @@ fn slice_points(input: &[&[f32]], sr: f64, knots: &[(f64, f64)], w: &WarpKey) ->
     pts
 }
 
-/// Each slice plays at its original speed (pitch-shifted on its own at ratio
-/// 1 when `semitones` != 0) from its warped start, for at most its own
-/// length and never past the next slice's warped start, with a raised-cosine
-/// fade-out of `beatsFadeMs` ending where it stops. Gaps stay silent.
 #[allow(clippy::too_many_arguments)]
 fn beats(
     input: &[&[f32]],
@@ -502,9 +422,6 @@ fn beats(
     Ok(out)
 }
 
-// ── texture ──────────────────────────────────────────────────────────────
-
-/// SplitMix64: tiny, seedable, the same everywhere.
 struct SplitMix(u64);
 
 impl SplitMix {
@@ -515,19 +432,11 @@ impl SplitMix {
         z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         z ^ (z >> 31)
     }
-    /// Uniform in [-1, 1).
     fn bipolar(&mut self) -> f64 {
         (self.next() >> 11) as f64 / (1u64 << 52) as f64 - 1.0
     }
 }
 
-/// Granular overlap-add: Hann grains of `grainMs` (a multiple of 4 frames),
-/// one every grain/4 of output. A grain centred on output frame c reads the
-/// source around `map_out_to_in(c) + (0.25 + 0.75 × flux) × grain × u` (u
-/// uniform in [-1, 1) from a fixed-seed generator, drawn once per grain in
-/// order) at `2^(semitones/12)` source frames per output frame
-/// (windowed-sinc resampling, anti-aliased when reading faster). The
-/// decorrelated grains add in power: see TEXTURE_GAIN.
 fn texture(
     input: &[&[f32]],
     sr: f64,
@@ -576,11 +485,6 @@ fn texture(
     Ok(out)
 }
 
-// ── repitch ──────────────────────────────────────────────────────────────
-
-/// Varispeed: output frame o reads the source at `map_out_to_in(o)` with
-/// windowed sinc (anti-aliased when reading faster than 1:1), so the pitch
-/// follows the local speed like a turntable. Pitch params are ignored.
 fn repitch(input: &[&[f32]], knots: &[(f64, f64)], n_out: usize, cancel: &AtomicBool) -> Result<Vec<Vec<f32>>, StretchError> {
     let mut out = zeros(input.len(), n_out)?;
     let table = SincTable::new();

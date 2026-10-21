@@ -1,17 +1,3 @@
-// match_sounds (match-core, research/15 §3.2): the closest factory / pack
-// sounds to each part of the studied reference, measured from its stems.
-//
-//   reference stems (cached separation) ─▶ slices per part (kick / snare /
-//   hat hits from the drum stem, bass notes, chord spans and lead notes on
-//   the other stem) ─▶ analyzer `fingerprint` ─▶ matchSounds (factory index
-//   + installed pack samples) ─▶ best 3 per part with why + tweaks.
-//
-// apply: true loads the best sound onto every channel of that part (the same
-// commands load_preset / load_sample use) and applies its tweaks; the whole
-// call is one undo step (callTool's group, or the agent's open begin_edit).
-// referencePartFingerprints() is exported for audio_to_project /
-// build_from_reference (builder) and review-mix.
-
 import path from 'node:path';
 import { z } from 'zod';
 import type { MainDeps } from '../types';
@@ -31,7 +17,6 @@ import { fingerprintServiceFor, matchSounds, presetLookup } from '../../sounds/f
 
 const zLabel = z.string().max(80).optional().describe("Short description of this change for the user's AI-history panel.");
 
-/** Roles match_sounds can measure in a reference (and the channels it maps). */
 export const MATCHABLE_ROLES = [
   'kick',
   'snare',
@@ -58,10 +43,8 @@ export const MATCHABLE_ROLES = [
 ] as const satisfies readonly InstrumentRole[];
 export type MatchableRole = (typeof MATCHABLE_ROLES)[number];
 
-/** Parts matched when the project has no channels to map. */
 const DEFAULT_PARTS: MatchableRole[] = ['kick', 'snare', 'hat', 'bass', 'chord', 'lead'];
 
-/** Where a part is heard in the reference. */
 export type PartSource = { kind: 'drums'; drumRole: DrumRole } | { kind: 'bass' } | { kind: 'chords' } | { kind: 'lead' };
 
 export function partSource(role: InstrumentRole): PartSource | null {
@@ -111,19 +94,12 @@ function runOpts(ctx: Pick<RunCtx, 'progress' | 'signal'>) {
   return { onProgress: ctx.progress ? (stage: string, fraction: number) => ctx.progress!(fraction, stage || 'measuring') : undefined, signal: ctx.signal };
 }
 
-/** The fingerprints of one part of the reference, or why there are none. */
 export interface PartMeasurement {
   fps: SoundFingerprint[];
-  /** "38 kick hits from the drum stem". */
   from: string;
   problem?: string;
 }
 
-/**
- * Measure parts of a reference from its stems: drum hits (drum stem; the full mix when there are no stems), bass
- * notes (bass stem), chord spans and lead notes (other stem). `stems: 'cached'` never starts a separation; 'run'
- * separates when a stem model is installed. Keys are sourceKey()s; never throws for one part (its problem is set).
- */
 export async function referencePartFingerprints(
   deps: MainDeps,
   track: ReferenceTrack,
@@ -233,9 +209,6 @@ export async function referencePartFingerprints(
   return { parts, stemsNote, analysis };
 }
 
-// ── Channels → parts ──────────────────────────────────────────────────
-
-/** The role a channel plays: its preset's role, else its name ("Kick", "808", "Chords"); null when unmatched. */
 export function channelRole(ch: Channel, lookup: (id: string) => InstrumentPreset | undefined): MatchableRole | null {
   const pid = ch.generator.preset?.id;
   const role = (pid ? lookup(pid)?.role : undefined) ?? roleFromName(ch.name);
@@ -265,8 +238,6 @@ function tweakText(t: Record<string, number>): string {
   return parts.length ? parts.join(', ') : 'none needed';
 }
 
-// ── Apply ─────────────────────────────────────────────────────────────
-
 async function loadOnto(deps: MainDeps, caller: ToolCaller, ctx: RunCtx, plan: { channel: Channel | null; role: MatchableRole }, m: SoundMatch, lookup: (id: string) => InstrumentPreset | undefined): Promise<string> {
   const drum = isDrumTarget(matchTargetFor(plan.role));
   let channelId: string;
@@ -285,7 +256,6 @@ async function loadOnto(deps: MainDeps, caller: ToolCaller, ctx: RunCtx, plan: {
     const sampleId = ctx.exec<{ id: string }>('samples.add', { path: docPath, ...info }).id;
     if (plan.channel) {
       channelId = plan.channel.id;
-      // A fresh sampler: the tweaks are relative to its defaults, not to the previous sound's params.
       ctx.exec('channels.setGenerator', { id: channelId, type: 'krypt.sampler' });
       ctx.exec('channels.setSample', { id: channelId, sampleId });
     } else channelId = ctx.exec<{ id: string }>('channels.add', { type: 'krypt.sampler', name: titleOf(plan.role), sampleId }).id;
@@ -298,8 +268,6 @@ async function loadOnto(deps: MainDeps, caller: ToolCaller, ctx: RunCtx, plan: {
   if (Object.keys(set).length) ctx.exec('channels.set', { id: channelId, ...set });
   return channelId;
 }
-
-// ── The tool ──────────────────────────────────────────────────────────
 
 export const matchSoundsTool = defineTool({
   name: 'match_sounds',
@@ -325,7 +293,6 @@ export const matchSoundsTool = defineTool({
     if (!idx.index) fail(idx.problem ?? 'Sound matching is unavailable.');
     const lookup = presetLookup(deps);
 
-    // Parts: requested roles, else the channels' roles, else the defaults.
     const channels = p0.channelOrder
       .map((id) => p0.channels[id])
       .filter((c): c is Channel => !!c && c.id !== track.channel.id && c.generator.type !== 'krypt.audioclip');
@@ -342,7 +309,6 @@ export const matchSoundsTool = defineTool({
     const warnings: string[] = [];
     if (stemsNote) warnings.push(stemsNote);
 
-    // Pass 1: rank; pass 2 with the median level difference of the best matches removed (balance, not loudness).
     const run = runOpts(ctx);
     const results = new Map<MatchableRole, { matches: SoundMatch[]; measured: PartMeasurement; notes: string[] } | { problem: string }>();
     const raw: number[] = [];
@@ -374,7 +340,6 @@ export const matchSoundsTool = defineTool({
       }
     }
 
-    // Report (+ apply).
     const lines: string[] = [];
     const data: Array<Record<string, unknown>> = [];
     const applied: string[] = [];

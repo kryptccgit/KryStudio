@@ -1,6 +1,3 @@
-// Bottom status bar: the hint bar (hover help, live values, confirmations),
-// render progress, the last document change, telemetry state.
-
 import { useEffect, useRef, useState } from 'react';
 import { Bot, User } from 'lucide-react';
 import { useDocStore } from '../doc/store';

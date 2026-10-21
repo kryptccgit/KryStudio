@@ -1,19 +1,8 @@
-// An MCP Transport over one named-pipe connection: newline-delimited JSON-RPC
-// (the stdio framing; the spec says custom byte streams SHOULD reuse it).
-// The krypt hello/auth line is consumed before this transport sees the socket.
-//
-// Framing is linear in the message size (chunks are collected and joined
-// once per line), so a large request such as import_audio with ~80 MB of
-// base64 audio costs one copy, not one per chunk. A line over the cap is
-// skipped and answered with a JSON-RPC error naming the limit; the
-// connection stays open.
-
 import type { Socket } from 'node:net';
 import { deserializeMessage, serializeMessage, type JSONRPCMessage, type Transport } from '@modelcontextprotocol/server';
 import { MAX_MCP_MESSAGE_BYTES } from './types';
 
 const MB = (n: number): string => `${(n / 1048576).toFixed(1)} MB`;
-/** Bytes kept from the start of an oversized line to find its request id. */
 const HEAD = 4096;
 
 export class PipeTransport implements Transport {
@@ -21,10 +10,8 @@ export class PipeTransport implements Transport {
   onerror?: (error: Error) => void;
   onmessage?: <T extends JSONRPCMessage>(message: T) => void;
 
-  /** The current (unterminated) line, as received. */
   private chunks: Buffer[] = [];
   private size = 0;
-  /** Set while skipping the rest of an oversized line: its first bytes (for the id) and its length so far. */
   private skipping: { head: Buffer; bytes: number } | null = null;
   private started = false;
   private closed = false;
@@ -32,9 +19,7 @@ export class PipeTransport implements Transport {
   constructor(
     private readonly socket: Socket,
     private readonly initial: Buffer,
-    /** Sees every inbound message first (client identity tracking). */
     private readonly onInbound?: (m: JSONRPCMessage) => void,
-    /** Largest accepted line (tests use a small one). */
     private readonly maxBytes = MAX_MCP_MESSAGE_BYTES,
   ) {}
 
@@ -83,12 +68,10 @@ export class PipeTransport implements Transport {
     try {
       this.onInbound?.(msg);
     } catch {
-      /* identity tracking must never break the session */
     }
     this.onmessage?.(msg);
   }
 
-  /** A request over the cap: answer it with an error (when its id can be read) instead of dropping the connection. */
   private rejectOversized(head: Buffer, bytes: number): void {
     const message = `Request too large: ${MB(bytes)}; Krypt Studio accepts up to ${MB(this.maxBytes)} per message (import_audio: up to 60 MB of audio as base64). Send a shorter or compressed file (FLAC, MP3, OGG), or a path inside the user's Browser folders.`;
     this.onerror?.(new Error(message));

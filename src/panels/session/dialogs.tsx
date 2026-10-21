@@ -1,6 +1,3 @@
-// Session view dialogs: the follow-action editor, a custom clip length and a
-// scene tempo. Each applies through one session.* command.
-
 import { useState } from 'react';
 import { Gauge, Ruler, Shuffle } from 'lucide-react';
 import type { FollowAction, FollowRule, LaunchClip, Scene } from '@shared/schema/launcher';
@@ -23,8 +20,6 @@ import {
   ticksToBars,
 } from './model';
 import { setScene, updateClip } from './actions';
-
-// ── Follow actions ───────────────────────────────────────────────────
 
 export function openFollowEditor(clip: LaunchClip, label: string, ts: TimeSig, doc?: Document | null): void {
   openDialog({
@@ -89,8 +84,6 @@ function FollowForm({ clip, ts, onDone }: { clip: LaunchClip; ts: TimeSig; onDon
   );
 }
 
-// ── Clip length ──────────────────────────────────────────────────────
-
 export function openLengthDialog(clip: LaunchClip, label: string, ts: TimeSig, doc?: Document | null): void {
   openDialog({
     key: 'session-length',
@@ -126,8 +119,6 @@ function LengthForm({ clip, ts, onDone }: { clip: LaunchClip; ts: TimeSig; onDon
     </DialogForm>
   );
 }
-
-// ── Scene tempo ──────────────────────────────────────────────────────
 
 export function openSceneTempoDialog(scene: Scene, currentBpm: number, doc?: Document | null): void {
   openDialog({

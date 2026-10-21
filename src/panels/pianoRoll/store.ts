@@ -1,6 +1,3 @@
-// Piano-roll view state (not undoable, not in the document). Module-level so
-// it survives dockview remounts / popouts.
-
 import { create } from 'zustand';
 import { TICKS_PER_STEP } from '@shared/schema/time';
 import type { SnapId } from '../../editors/snap';
@@ -22,23 +19,16 @@ export const PR_TOOLS: EditTool[] = ['draw', 'paint', 'delete', 'mute', 'select'
 export interface PianoRollView {
   tool: EditTool;
   snap: SnapId;
-  /** Scale highlight: pitch class root + scale id, or 'off'. */
   scaleRoot: number;
   scale: string;
   ghosts: boolean;
-  /** Chord stamp quality ('' = single note). */
   chord: string;
   lane: LaneProp;
   laneH: number;
-  /** Last used note length (FL: new notes take it). */
   lastLen: number;
-  /** Page-scroll to keep the playhead in view while playing. */
   follow: boolean;
-  /** FL look: notes in their colour group, velocity as opacity (off = velocity colour ramp). */
   velAlpha: boolean;
-  /** Colour group (0..15) for newly drawn notes. */
   noteColor: number;
-  /** New notes are slide notes (they glide from the previous note). */
   slideMode: boolean;
   set: (patch: Partial<Omit<PianoRollView, 'set'>>) => void;
 }

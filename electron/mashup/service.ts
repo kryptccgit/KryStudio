@@ -1,34 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Auto Mashup (research/18-auto-mashup.md): two songs → one editable
-// mashup project, as ONE undo step. Shared by the IPC handlers (Home ▸
-// Audio Tools, actor = user) and the MCP tool auto_mashup (the agent).
-//
-//   check   read both songs (analysis, stems only when already separated,
-//           per-section vocal activity and pitch profiles of cached stems), plan
-//           (shared/mashup/plan.ts). Never edits, never separates.
-//   build   1 reading     analysis of both songs (cached)
-//           2 separating  the stems the plan needs (HT-Demucs, cached)
-//           3 analyzing   where each vocal sings (vocal stem loudness), and
-//                         what the stems play (pitch profiles of the vocal
-//                         and of the bass + other stems: the key fit)
-//           4 planning    roles, key, tempo, levels, structure (pure); a
-//                         plan that now needs other stems separates them
-//           5 building    ONE history group: (a new project) tempo, audio
-//                         tracks per stem with a clip per section, pitch,
-//                         warp to the grid (tones / beats / complex),
-//                         markers, song mode
-//           6 mixing      the vocal chain (Krypt Tune, EQ + comp from the
-//                         factory vocal chain, reverb / delay sends), the
-//                         bed ducking under the vocal, a master chain,
-//                         transitions at the boundaries (the same code as
-//                         apply_chain / route / sidechain / add_transition)
-//
-// Stages 1-4 never touch the document, so a cancel or a failure there
-// leaves the project as it was. Stage 5-6 run in one group that is rolled
-// back when a command fails; once writing starts, cancel answers "too late"
-// (it's quick, and one undo removes it).
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import type { Actor } from '@shared/doc/DocHost';
 import type { Project, SampleRef } from '@shared/schema/project';
@@ -56,7 +25,6 @@ export interface MashupRun {
   progress?(p: MashupProgress): void;
 }
 
-/** Where the mashup goes: a NEW project (File ▸ New, then one group of `actor`), or the open one (`ctx` = an agent's call group, else a group of `actor`). */
 export type MashupInto = { kind: 'new'; actor: Actor } | { kind: 'current'; actor: Actor; ctx?: RunCtx };
 
 export class MashupCancelled extends Error {
@@ -66,7 +34,6 @@ export class MashupCancelled extends Error {
   }
 }
 
-/** Overall fraction range of each stage (build; check uses reading + planning only). */
 const STAGE_RANGE: Record<MashupStage, [number, number]> = {
   reading: [0, 0.15],
   separating: [0.15, 0.65],
@@ -76,7 +43,6 @@ const STAGE_RANGE: Record<MashupStage, [number, number]> = {
   mixing: [0.9, 1],
 };
 
-/** The factory chains the mix uses (shared/sounds/factory/chains.ts). */
 export const MASHUP_CHAINS = {
   vocal: 'factory:chain/vocal/stem-vocal',
   reverb: 'factory:chain/reverb-send/plate',
@@ -90,23 +56,17 @@ const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
 const letter = (s: Side): string => s.toUpperCase();
 const SIDES: Side[] = ['a', 'b'];
 
-/** The caller the mix tools run under for UI builds (they only use the RunCtx; the actor of the edits is the group's). */
 const UI_CALLER: ToolCaller = { actor: { kind: 'agent', clientId: 'krypt-auto-mashup', name: 'Auto Mashup' }, session: { group: null }, via: 'panel' };
 
 interface Resolved {
   side: Side;
-  /** What the analyzer reads (a clip keeps the stem cache key separate_stems uses). */
   target: AudioTarget;
   abs: string;
-  /** The path stored in the project. */
   docPath: string;
   name: string;
   sample: SampleRef | null;
-  /** The source clip (project clips only). */
   clipId?: string;
-  /** The clip is itself a stem of another song (origin). */
   stemOf?: string;
-  /** Stems of this song already in the project (stem samples whose origin is this sample). */
   projectStems: Partial<Record<MashupStem, string>>;
 }
 
@@ -119,16 +79,13 @@ interface SongRead {
   r: Resolved | null;
   analysis: AudioAnalysis | null;
   stems: Partial<Record<MashupStem, StemFile>>;
-  /** Per analysis section: vocal activity 0 / 1 (null = not measured). */
   vocalBySection: Array<number | null> | null;
-  /** What the stems play (readHarmony): the vocal stem, the bass + other stems. */
   harmony?: { vocal?: StemHarmony | null; bed?: StemHarmony | null };
   problem?: string;
 }
 
 type Say = (stage: MashupStage, within: number, message: string) => void;
 
-/** `say` for one part of a stage: within 0..1 maps onto [lo, hi] of it (two songs share a stage). */
 function part(say: Say, lo: number, hi: number): Say {
   return (stage, within, message) => say(stage, within < 0 ? -1 : lo + (hi - lo) * clamp01(within), message);
 }
@@ -157,7 +114,6 @@ export class MashupService {
     return this.running?.label ?? null;
   }
 
-  /** IPC mashup:cancel / the MCP request's cancellation. */
   cancel(): ActionResult {
     if (this.running) {
       if (this.running.writing) return { ok: false, message: `Too late to cancel "${this.running.label}": the mashup is being written. Undo removes it in one step.` };
@@ -170,8 +126,6 @@ export class MashupService {
     }
     return { ok: false, message: 'No mashup is running' };
   }
-
-  // ── Reading ────────────────────────────────────────────────────────
 
   private stemModelInstalled(): boolean {
     const ears = this.deps.analyzer;
@@ -212,7 +166,6 @@ export class MashupService {
     return { side, target: { path: abs }, abs, docPath: factory ? raw : abs, name, sample: null, projectStems: {} };
   }
 
-  /** Analysis + the stems that are already there (project stems, the stem cache). Never edits, never separates. */
   private async read(r: Resolved, run: MashupRun, opts: { say: Say; check: () => void }): Promise<SongRead> {
     const ears = this.deps.analyzer!;
     const out: SongRead = { r, analysis: null, stems: {}, vocalBySection: null };
@@ -234,7 +187,6 @@ export class MashupService {
     return out;
   }
 
-  /** Separate a song (HT-Demucs, cached per file) for the stems the plan needs. Never edits. */
   private async separate(read: SongRead, run: MashupRun, opts: { say: Say; check: () => void }): Promise<void> {
     const ears = this.deps.analyzer!;
     const r = read.r!;
@@ -254,7 +206,6 @@ export class MashupService {
     opts.say('separating', 1, msg);
   }
 
-  /** Where the vocal sings: the vocal stem's loudness per analysis section (fingerprint, cached). */
   private async vocalActivity(read: SongRead, run: MashupRun, check: () => void): Promise<void> {
     const ears = this.deps.analyzer;
     const voc = read.stems.vocals?.path;
@@ -268,7 +219,6 @@ export class MashupService {
     read.vocalBySection = rms.map((v) => (top > -60 && v > -50 && v >= top - 15 ? 1 : 0));
   }
 
-  /** The notes the stems play (pitch profiles, light analyzer reads, cached per file): the key fit. Stems not there are skipped. */
   private async readHarmony(read: SongRead, run: MashupRun, check: () => void): Promise<void> {
     const ears = this.deps.analyzer;
     if (!ears || !read.r || !read.analysis) return;
@@ -285,13 +235,11 @@ export class MashupService {
     }
     if (!h.bed && read.stems.bass && read.stems.other) {
       const parts = [await light(read.stems.bass.path), await light(read.stems.other.path)];
-      // The key comes from the summed profile (planner), not from either part alone (a bass line reads as minor easily).
       const profile = sumProfiles(parts.map((x) => x?.pitchProfile));
       if (profile) h.bed = { profile, key: null, keyConfidence: 0 };
     }
   }
 
-  /** A SongRead → the planner's input. */
   private songInput(read: SongRead, side: Side, canSeparate: boolean): SongInput {
     const r = read.r;
     const name = r?.name ?? `Song ${letter(side)}`;
@@ -299,7 +247,6 @@ export class MashupService {
     if (!r || !a) {
       return { name, ...(r && 'path' in r.target ? { path: r.abs } : {}), durationSec: 0, bpm: null, bpmAlternatives: [], key: null, keyConfidence: 0, vocalPresence: 0, vocalSource: 'unknown', kind: 'song', stems: [], canSeparate: false, grid: null, sections: [], problem: read.problem ?? 'The song could not be read.' };
     }
-    // Vocal presence: the vocal stem against the loudest stem, else the stem origin / file name, else unknown.
     let vp = 0.5;
     let source: SongInput['vocalSource'] = 'unknown';
     let kind: SongInput['kind'] = 'song';
@@ -335,7 +282,6 @@ export class MashupService {
       }
     }
     const activity = read.vocalBySection;
-    // An a cappella / instrumental file plays as itself: its own notes.
     const own: StemHarmony | null = goodProfile(a.pitchProfile) ? { profile: a.pitchProfile, key: a.key?.name ?? null, keyConfidence: a.key?.confidence ?? 0 } : null;
     const harmony = { vocal: read.harmony?.vocal ?? (kind === 'acapella' ? own : null), bed: read.harmony?.bed ?? (kind === 'instrumental' ? own : null) };
     const lufs = a.levels?.lufsIntegrated;
@@ -365,14 +311,10 @@ export class MashupService {
       try {
         run.progress?.({ stage, fraction: within < 0 ? -1 : lo + (hi - lo) * clamp01(within), message });
       } catch {
-        /* progress is best-effort */
       }
     };
   }
 
-  // ── check ──────────────────────────────────────────────────────────
-
-  /** Read both songs and propose a plan. Edits nothing; separates nothing (stems are used when already there). */
   async check(req: MashupRequest, run: MashupRun = {}): Promise<ActionResult<MashupCheck>> {
     if (!this.deps.analyzer) return { ok: false, message: "Audio analysis isn't available in this session (the analyzer didn't start; see the Krypt Studio log), so the songs can't be read." };
     const ctrl = new AbortController();
@@ -384,7 +326,6 @@ export class MashupService {
     const check = () => {
       if (signal.aborted) throw new MashupCancelled();
     };
-    // check only reads and plans: its own scale, so it ends at 1.
     const say = this.sayer(run, { reading: [0, 0.85], analyzing: [0.85, 0.95], planning: [0.95, 1] });
     try {
       const canSep = this.stemModelInstalled();
@@ -413,8 +354,6 @@ export class MashupService {
     }
   }
 
-  // ── build ──────────────────────────────────────────────────────────
-
   async build(req: MashupRequest, into: MashupInto, run: MashupRun = {}): Promise<ActionResult<MashupOutcome>> {
     const deps = this.deps;
     if (!deps.analyzer) return { ok: false, message: "Audio analysis isn't available in this session (the analyzer didn't start; see the Krypt Studio log), so a mashup can't be built." };
@@ -437,10 +376,8 @@ export class MashupService {
     const startVersion = deps.doc.version;
     try {
       const canSep = this.stemModelInstalled();
-      // 1. Read (cached analysis + stems already there).
       const reads: Record<Side, SongRead> = { a: await this.read(ra, { signal }, { say: part(say, 0, 0.5), check }), b: await this.read(rb, { signal }, { say: part(say, 0.5, 1), check }) };
       for (const side of SIDES) if (reads[side].problem) return { ok: false, message: `Song ${letter(side)} ("${reads[side].r!.name}"): ${reads[side].problem}` };
-      // 2. Separate what the plan needs.
       const first = planMashup(req, this.songInput(reads.a, 'a', canSep), this.songInput(reads.b, 'b', canSep), { noSuggestions: true });
       const toSplit = canSep ? SIDES.filter((side) => first.build.songs[side].needStems.some((s) => !reads[side].stems[s])) : [];
       for (const [i, side] of toSplit.entries()) {
@@ -448,12 +385,10 @@ export class MashupService {
         if (reads[side].problem) return { ok: false, message: `Song ${letter(side)} ("${reads[side].r!.name}"): ${reads[side].problem}` };
       }
       say('separating', 1, 'Stems ready.');
-      // 3. Where each vocal sings, and what the stems play.
       say('analyzing', 0, 'Finding the vocal sections…');
       for (const side of SIDES) await this.vocalActivity(reads[side], { signal }, check);
       say('analyzing', 0.5, 'Reading the notes of the stems…');
       for (const side of SIDES) await this.readHarmony(reads[side], { signal }, check);
-      // 4. Plan. The measured notes can turn the vocal round ('auto'): separate what that plan needs, then plan again.
       say('planning', 0, 'Planning the mashup…');
       let result = planMashup(req, this.songInput(reads.a, 'a', canSep), this.songInput(reads.b, 'b', canSep), { noSuggestions: true });
       const more = canSep ? SIDES.filter((side) => result.build.songs[side].needStems.some((s) => !reads[side].stems[s])) : [];
@@ -469,7 +404,6 @@ export class MashupService {
       const plan = result.build;
       if (result.check.problems.length) return { ok: false, message: `The mashup can't be built yet: ${result.check.problems.join(' ')}` };
       if (!plan.tracks.length) return { ok: false, message: 'Nothing to place: the plan has no audio tracks (check the stem picks).' };
-      // Sample info of every file placed (clip lengths, warp limits).
       const files = new Map<string, { frames?: number; sampleRate?: number; channels?: number }>();
       for (const t of plan.tracks) {
         const f = fileOf(reads[t.song], t);
@@ -478,7 +412,6 @@ export class MashupService {
         files.set(f.abs, si?.ok && si.data ? { frames: si.data.frames, sampleRate: si.data.sampleRate, channels: si.data.channels } : {});
       }
       check();
-      // 5-6. Write: one group, no cancel from here on.
       if (into.kind === 'new' && !deps.project.opensNewTabs?.() && deps.doc.version !== startVersion && deps.project.status().dirty) {
         return { ok: false, message: `The project changed while the songs were being read, so nothing was replaced. Save it, then build the mashup again (the analysis is cached, so it's quick).` };
       }
@@ -502,8 +435,6 @@ export class MashupService {
       this.running = null;
     }
   }
-
-  // ── Writing (one history group) ────────────────────────────────────
 
   private async write(plan: BuildPlan, reads: Record<Side, SongRead>, files: Map<string, { frames?: number; sampleRate?: number; channels?: number }>, into: MashupInto, req: MashupRequest, label: string, say: Say): Promise<{ tracks: number; notes: string[] }> {
     const deps = this.deps;
@@ -533,7 +464,6 @@ export class MashupService {
     }
   }
 
-  /** Tracks, clips per section, pitch, warp, markers, song mode. Returns the placed tracks with their channel / insert. */
   private place(ctx: RunCtx, plan: BuildPlan, reads: Record<Side, SongRead>, files: Map<string, { frames?: number; sampleRate?: number; channels?: number }>, fresh: boolean, notes: string[]): Array<{ t: PlannedTrack; channelId: string; insertId: string }> {
     const doc = this.deps.doc;
     const cat = doc.catalog;
@@ -542,7 +472,6 @@ export class MashupService {
     const has = (id: string) => ac.params.some((s) => s.id === id);
     const p0: Project = doc.project;
     if (fresh) {
-      // The File ▸ New kit makes way for the songs.
       if (p0.channelOrder.length) ctx.exec('channels.remove', { ids: [...p0.channelOrder] });
       for (const id of p0.mixer.insertOrder) if (!p0.mixer.inserts[id].isMaster) ctx.exec('mixer.removeInsert', { id });
       ctx.exec('transport.set', { bpm: plan.bpm, timeSig: { num: 4, den: 4 } });
@@ -555,7 +484,6 @@ export class MashupService {
         notes.push(`The project tempo changed from ${from} to ${plan.bpm} bpm.`);
       }
       if (p0.transport.timeSig.num !== 4 || p0.transport.timeSig.den !== 4) notes.push(`The project is in ${p0.transport.timeSig.num}/${p0.transport.timeSig.den}: the mashup's sections are 4/4 bars, so its markers sit off your bar lines.`);
-      // The source clips would play under the mashup: mute their tracks.
       for (const side of SIDES) {
         const cid = reads[side].r?.clipId;
         const clip = cid ? doc.project.playlist.clips[cid] : undefined;
@@ -565,7 +493,6 @@ export class MashupService {
         }
       }
     }
-    // Mashup bars are 4/4 bars of the shared tempo (a new project is set to 4/4).
     const barTicks = 4 * PPQ;
     const lanes = freeLanes(doc.project);
     const lane = (name: string): string => {
@@ -588,7 +515,6 @@ export class MashupService {
       const info = files.get(f.abs) ?? {};
       const trackId = lane(t.name);
       const r = ctx.exec<{ clipId: string; channelId: string; insertId: string }>('playlist.addAudio', { path: f.docPath, name: t.name, trackId, start: 0, ...(info.frames ? { frames: info.frames } : {}), ...(info.sampleRate ? { sampleRate: info.sampleRate } : {}), ...(info.channels ? { channels: info.channels } : {}) });
-      // Level match: the plan's gain on the channel's own default; a boost past the channel's +1.9 dB goes on its insert.
       const vol0 = doc.project.channels[r.channelId]?.volume ?? 0.78;
       const want = vol0 * Math.pow(10, t.gainDb / 20);
       const chVol = Math.min(1.25, want);
@@ -603,7 +529,6 @@ export class MashupService {
       }
       if (Object.keys(params).length) ctx.exec('channels.setGenParams', { id: r.channelId, params });
       if (t.semitones && !has('pitch')) notes.push(`"${t.name}" should be pitched ${t.semitones} st, but this build's Audio Clip can't pitch-shift.`);
-      // Warp onto the grid from the song's own beats (stems share their mix's timing).
       const d = plan.songs[t.song];
       const a = read.analysis!;
       const grid = a.beats && a.beats.times.length >= 2 ? { beats: a.beats.times, downbeats: a.beats.downbeats, beatsPerBar: a.beats.beatsPerBar || 4 } : null;
@@ -657,7 +582,6 @@ export class MashupService {
     return placed;
   }
 
-  /** The vocal chain + sends, the bed ducking under the vocal, a master chain, transitions. Failures become notes. */
   private async mix(ctx: RunCtx, plan: BuildPlan, placed: Array<{ t: PlannedTrack; channelId: string; insertId: string }>, fresh: boolean, req: MashupRequest, notes: string[]): Promise<void> {
     const deps = this.deps;
     const tryTool = async (def: ToolDef, args: Record<string, unknown>, what: string): Promise<ToolResult | null> => {
@@ -694,7 +618,6 @@ export class MashupService {
         const id = (made?.data as { insertId?: string } | undefined)?.insertId;
         if (id) await tryTool(route, { from_insert: vocal.insertId, to: id, level_db: send.db, exclusive: false }, `Sending the vocal to ${send.name}`);
       }
-      // Carve room for the vocal: the bed's Other stem (or the whole instrumental) ducks a little under it.
       const bed = placed.filter((x) => x.t.song !== vocal.t.song && (x.t.role === 'other' || x.t.role === 'mix'));
       for (const b of bed) await tryTool(sidechain, { source: vocal.insertId, target: b.insertId, style: 'duck', depth: b.t.role === 'other' ? 30 : 20, release_ms: 220 }, `Ducking "${b.t.name}" under the vocal`);
     }
@@ -715,7 +638,6 @@ export class MashupService {
   }
 }
 
-/** The file a planned track plays: the song's stem, or the song itself. */
 function fileOf(read: SongRead, t: PlannedTrack): { abs: string; docPath: string } | null {
   if (!read.r) return null;
   if (t.part === 'mix') return { abs: read.r.abs, docPath: read.r.docPath };
@@ -723,7 +645,6 @@ function fileOf(read: SongRead, t: PlannedTrack): { abs: string; docPath: string
   return s ? { abs: s.path, docPath: s.path } : null;
 }
 
-/** Empty playlist lanes below the last one that holds clips, in order. */
 function freeLanes(p: Project): string[] {
   const used = new Set(Object.values(p.playlist.clips).map((c) => c.trackId));
   let last = -1;
@@ -733,7 +654,6 @@ function freeLanes(p: Project): string[] {
   return p.playlist.trackOrder.slice(last + 1).filter((t) => !used.has(t));
 }
 
-/** A RunCtx over one new history group of `actor`; finish(false) rolls the group back. */
 export function groupCtx(deps: MainDeps, actor: Actor, label: string): { ctx: RunCtx; finish(ok: boolean): void } {
   const doc = deps.doc;
   const groupId = doc.beginGroup(actor, label.slice(0, 120));

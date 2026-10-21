@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Sound packs in the renderer: the PacksState from window.krypt.packs (live
-// via onState) and the verbs behind the Home ▸ Sounds pack cards and the
-// preset browser's "Get pack" buttons. Every verb ends in a toast; a
-// cancelled download is reported by the Cancel click, not again when the
-// install promise settles. Downloads start only from these user clicks.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useCallback, useEffect } from 'react';
 import { create } from 'zustand';
 import type { ActionResult, PackSamplesInfo } from '@shared/types';
@@ -19,21 +11,15 @@ import { useSounds } from './store';
 
 interface PacksStore {
   state: PacksState | null;
-  /** Why state() failed. */
   error: string | null;
-  /** Pack id → the action in flight (button spinners). */
   busy: Record<string, 'install' | 'remove'>;
-  /** Home ▸ Sounds scrolls to and highlights this pack (from a preset's "Get pack" button). */
   highlight: { id: string; nonce: number } | null;
-  /** What sample packs add (counts by kind) and the installed packs' samples (null until main answers). */
   samples: PackSamplesInfo | null;
-  /** Why samples() failed. */
   samplesError: string | null;
 }
 
 export const usePacks = create<PacksStore>(() => ({ state: null, error: null, busy: {}, highlight: null, samples: null, samplesError: null }));
 
-/** Which packs are installed (and at which status): the sample list is re-read only when this changes. */
 let installedSig: string | null = null;
 
 function apply(s: PacksState | null | undefined): void {
@@ -49,7 +35,6 @@ function apply(s: PacksState | null | undefined): void {
   }
 }
 
-/** Re-read the sample packs' sample lists from main (window.krypt.packs.samples). Returns why it failed, or null. */
 export async function refreshPackSamples(): Promise<string | null> {
   try {
     const r = await window.krypt.packs.samples();
@@ -81,7 +66,6 @@ export async function refreshPacks(): Promise<void> {
 
 let started = false;
 
-/** Start loading + following the packs state (idempotent). */
 export function ensurePacks(): void {
   if (started) return;
   started = true;
@@ -93,15 +77,10 @@ export function ensurePacks(): void {
   void refreshPacks();
 }
 
-/** Components that show packs (or pack presets) call this once. */
 export function useEnsurePacks(): void {
   useEffect(() => ensurePacks(), []);
 }
 
-/**
- * For preset lists: the pack a listed preset needs that isn't installed ({id, name}), or null. Factory presets come
- * from the bundle; user presets only once fetched (loading one still checks: packGate).
- */
 export function useMissingPack(): (p: Pick<PresetSummary, 'id' | 'kind'>) => { id: string; name: string } | null {
   useEnsurePacks();
   const state = usePacks((s) => s.state);
@@ -117,7 +96,6 @@ async function call<T>(label: string, fn: () => Promise<ActionResult<T>>): Promi
   }
 }
 
-/** Download (or update) a pack; resolves when it is installed, failed or cancelled. */
 export async function installPack(id: string): Promise<boolean> {
   const st = usePacks.getState().state;
   const e = st?.packs.find((p) => p.id === id);
@@ -163,18 +141,13 @@ export async function openPackLink(url: string): Promise<void> {
   report(await call('Open link', () => window.krypt.app.openExternal(url)));
 }
 
-/** Home ▸ Sounds, scrolled to the pack's card (its licence shows there before the download). */
 export function showPackInHome(id: string): void {
   showHome('sounds');
   usePacks.setState({ highlight: { id, nonce: Date.now() } });
 }
 
-/**
- * Before a pack preset is loaded: true when it can play (no pack needed, or the pack is installed); otherwise a
- * toast says which pack to download (with a button to its card) and the load is skipped.
- */
 export async function packGate(preset: Pick<Preset, 'kind' | 'name'> & { requires?: string; sample?: string }): Promise<boolean> {
-  if (!missingPackFor(preset, { packs: [], dir: '' })) return true; // needs no pack
+  if (!missingPackFor(preset, { packs: [], dir: '' })) return true;
   ensurePacks();
   if (!usePacks.getState().state) await refreshPacks();
   const miss = missingPackFor(preset, usePacks.getState().state);

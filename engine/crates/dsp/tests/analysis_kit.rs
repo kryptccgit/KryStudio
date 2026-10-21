@@ -1,5 +1,3 @@
-//! Analysis on musical material (tempo, speed) and the factory kit.
-
 mod common;
 use common::*;
 
@@ -8,13 +6,12 @@ use krypt_studio_dsp::factory::generate_kit;
 use krypt_studio_dsp::wav::decode_wav;
 use krypt_studio_dsp::{create_instrument, NoteExtras, ProcessContext};
 
-/// Render a 4-on-the-floor + offbeat hat + backbeat clap loop with DrumSynth.
 fn drum_loop(bpm: f64, secs: f32) -> (Vec<f32>, Vec<f32>) {
     let n = (secs * SR) as usize;
     let voices: Vec<(f32, Vec<f64>)> = vec![
-        (0.0, (0..64).map(|b| b as f64).collect()),          // kick on every beat
-        (3.0, (0..64).map(|b| b as f64 + 0.5).collect()),    // closed hat offbeats
-        (2.0, (0..32).map(|b| b as f64 * 2.0 + 1.0).collect()), // clap on 2 and 4
+        (0.0, (0..64).map(|b| b as f64).collect()),
+        (3.0, (0..64).map(|b| b as f64 + 0.5).collect()),
+        (2.0, (0..32).map(|b| b as f64 * 2.0 + 1.0).collect()),
     ];
     let (mut l, mut r) = (vec![0.0f32; n], vec![0.0f32; n]);
     let spb = 60.0 / bpm * SR as f64;
@@ -41,7 +38,6 @@ fn drum_loop(bpm: f64, secs: f32) -> (Vec<f32>, Vec<f32>) {
 
 #[test]
 fn bpm_estimate_on_drum_loops() {
-    // exact inside the reported octave (85–170), folded by an octave outside it
     for i in 0..=24 {
         let bpm = 65.0 + 5.0 * i as f64;
         let (l, r) = drum_loop(bpm, 16.0);
@@ -65,7 +61,7 @@ fn noise_has_no_tempo() {
 #[test]
 fn analyze_three_minutes_is_fast() {
     let (l1, r1) = drum_loop(128.0, 20.0);
-    let reps = 9; // 180 s
+    let reps = 9;
     let mut l = Vec::with_capacity(l1.len() * reps);
     let mut r = Vec::with_capacity(r1.len() * reps);
     let pad = noise(l1.len(), 9, 0.05);
@@ -94,7 +90,6 @@ fn factory_kit_is_written_normalized_and_sane() {
     }
     for p in &paths {
         let bytes = std::fs::read(p).unwrap();
-        // 24-bit PCM at 48 kHz
         assert_eq!(u16::from_le_bytes([bytes[34], bytes[35]]), 24);
         let (sr, ch) = decode_wav(&bytes).unwrap();
         assert_eq!(sr, 48000);
@@ -104,7 +99,6 @@ fn factory_kit_is_written_normalized_and_sane() {
         assert!(a.true_peak_db <= -0.95 && a.true_peak_db >= -1.05, "{name} true peak {}", a.true_peak_db);
         assert!(!a.clipping, "{name} clips");
         assert!(a.duration_sec > 0.03 && a.duration_sec < 3.0, "{name} length {}", a.duration_sec);
-        // starts within a few ms and ends in silence
         let start = ch[0].iter().position(|v| v.abs() > 0.01).unwrap();
         assert!(start < 48 * 30, "{name} starts late");
         let tail = ch.iter().map(|c| peak(&c[c.len() - 16..])).fold(0.0f32, f32::max);

@@ -1,23 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Warp UI for the Audio Clip (Wave 12.2, research/16 §2.2), in the channel's
-// plugin window:
-//  - WarpOverlay, drawn over the sample waveform: the beat grid the clip
-//    plays with (bars brighter, from the warp map, else the Stretch params)
-//    and the warp markers as handles labelled bar.beat.
-//      drag a handle      → the marker's SOURCE time moves, its beat stays:
-//                           you slide the audio under a fixed grid line
-//                           (re-pin which hit lands on that beat). The drag
-//                           is clamped between the neighbours and commits
-//                           once, on release (one undo step).
-//      double-click       → a marker on the nearest 16th of the current grid
-//                           (timing unchanged until you drag it); Alt = no snap
-//      right-click handle → remove it
-//  - WarpSection: mode picker (Off / complex / tones / beats / texture /
-//    re-pitch), the mode's options, Auto-warp (bars or beats, progress from
-//    the analyzer job, a toast with the result) and Clear.
-// Every edit is a doc command via dispatch(); failures toast.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { Eraser, Loader2, WandSparkles } from 'lucide-react';
@@ -55,7 +35,6 @@ function useWarp(channelId: string) {
   return useProject((p) => p.channels[channelId]?.generator.warp);
 }
 
-/** The mapping + bar length the channel plays with now. */
 function useMapping(channelId: string, markers: WarpMarker[]) {
   const ch = useProject((p) => p.channels[channelId]);
   const bpm = useProject((p) => p.transport.bpm);
@@ -63,13 +42,9 @@ function useMapping(channelId: string, markers: WarpMarker[]) {
   return useMemo(() => {
     const tick = audioTickBpm(getProject(), CATALOG, ch).bpm;
     return { map: warpMapping(markers, tick), barQ: ticksPerBar(ts) / PPQ };
-    // bpm: the tick tempo of an unsynced clip follows the project tempo
   }, [ch, bpm, ts, markers]);
 }
 
-// ── Overlay ───────────────────────────────────────────────────────────
-
-/** Minimum spacing between two marker labels (a "12.1" label is ~22 px wide). */
 const LABEL_GAP_PX = 26;
 
 export function WarpOverlay({ channelId, geom }: { channelId: string; geom: WaveGeometry }) {
@@ -113,7 +88,7 @@ export function WarpOverlay({ channelId, geom }: { channelId: string; geom: Wave
     );
   };
 
-  let lastLabelX = -Infinity; // label thinning, see the marker loop
+  let lastLabelX = -Infinity;
   return (
     <div
       ref={root}
@@ -137,8 +112,6 @@ export function WarpOverlay({ channelId, geom }: { channelId: string; geom: Wave
       {markers.map((m, i) => {
         const x = xOf(m.sec);
         const active = drag?.id === m.id;
-        // Dense maps (a marker every bar on a long file): label a marker only when there is room since the last
-        // label; the others show theirs on hover.
         const showLabel = active || i === 0 || x - lastLabelX >= LABEL_GAP_PX;
         if (showLabel) lastLabelX = x;
         return (
@@ -191,9 +164,6 @@ export function WarpOverlay({ channelId, geom }: { channelId: string; geom: Wave
   );
 }
 
-// ── Section ───────────────────────────────────────────────────────────
-
-/** Auto-warp in flight per channel (survives closing the window). */
 const useAutoWarpBusy = create<Record<string, true>>(() => ({}));
 
 async function runAutoWarp(channelId: string, every: 'bar' | 'beat'): Promise<void> {
@@ -225,7 +195,6 @@ function Labelled({ label, children, hint }: { label: string; children: React.Re
   );
 }
 
-/** A number option edited locally while dragging, committed once. */
 function OptionNumber({ label, value, min, max, step, format, onCommit, hint }: { label: string; value: number; min: number; max: number; step: number; format: (v: number) => string; onCommit: (v: number) => void; hint: string }) {
   const [live, setLive] = useState<number | null>(null);
   return (

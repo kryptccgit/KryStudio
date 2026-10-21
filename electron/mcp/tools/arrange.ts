@@ -1,5 +1,3 @@
-// Arrangement (Playlist) and global transport settings.
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import type { Clip, Marker, Project } from '@shared/schema/project';
@@ -20,7 +18,6 @@ function overlaps(c: Clip, start: number, end: number): boolean {
   return c.start < end && c.start + c.length > start;
 }
 
-/** A track for a pattern: the lane already holding it, else the first empty lane, else a new lane. */
 function laneFor(deps: MainDeps, ctx: RunCtx, patternId: string | null, start: number, end: number): string {
   const p = deps.doc.project;
   const clips = Object.values(p.playlist.clips);
@@ -173,7 +170,6 @@ interface ClipFilter {
   kind?: Clip['kind'];
 }
 
-/** Clips matching every given selector (ids, track, bar-range overlap, pattern, kind); fails when none match. */
 function filterClips(p: Project, a: ClipFilter): Clip[] {
   if (!a.ids && a.track === undefined && !a.bars && !a.pattern && !a.kind) fail('Pass ids, or a filter (track, bars, pattern, kind).');
   let clips = Object.values(p.playlist.clips);
@@ -277,7 +273,6 @@ export const editClips = defineTool({
     if (a.shift_bars !== undefined && a.to_bar !== undefined) fail('Pass shift_bars or to_bar, not both.');
     const done: string[] = [];
 
-    // 1. Move / resize / trim / mute / color / gain: one playlist.updateClips.
     let shift = 0;
     if (a.shift_bars !== undefined) shift = Math.round(a.shift_bars * bar);
     if (a.to_bar !== undefined) shift = parsePosition(a.to_bar, ts) - clips[0].start;
@@ -298,7 +293,6 @@ export const editClips = defineTool({
       let length = c.length;
       let offset = c.offset;
       if (a.trim_start_bars !== undefined) {
-        // Like dragging the left edge: start and offset move together; never before the source start or past the end.
         const d = Math.max(-Math.min(offset, start), Math.min(length - 1, Math.round(a.trim_start_bars * bar)));
         start += d;
         offset += d;
@@ -333,7 +327,6 @@ export const editClips = defineTool({
       done.push(`${plural(updates.length, 'clip')}: ${what.join(', ')}`);
     }
 
-    // 2. Split at a song position: every selected clip that spans it.
     let ids = clips.map((c) => c.id);
     if (a.split_at_bar !== undefined) {
       const at = parsePosition(a.split_at_bar, ts);
@@ -349,7 +342,6 @@ export const editClips = defineTool({
       else skipped.push(`no selected clip spans bar ${fmtPos(at, ts)}`);
     }
 
-    // 3. Duplicate (unique copies with make_unique) / make unique in place.
     const created: string[] = [];
     if (a.duplicate) {
       const cur = ids.map((id) => deps.doc.project.playlist.clips[id]).filter(Boolean);
@@ -431,7 +423,6 @@ export const restructureSong = defineTool({
   },
 });
 
-/** restructure_song op fade: fades and crossfades on the matched audio clips (shared/commands/fades.ts). */
 function fadeClips(deps: MainDeps, ctx: RunCtx, matched: Clip[], a: { fade_in?: number; fade_out?: number; crossfade?: number }) {
   if (a.fade_in === undefined && a.fade_out === undefined && a.crossfade === undefined) fail('op fade needs fade_in, fade_out and/or crossfade (in beats).');
   const clips = matched.filter((c) => c.kind === 'audio').sort((x, y) => x.start - y.start);
@@ -458,14 +449,8 @@ function fadeClips(deps: MainDeps, ctx: RunCtx, matched: Clip[], a: { fade_in?: 
   return { ok: true, message: `${msg.charAt(0).toUpperCase()}${msg.slice(1)}.${skipped.length ? ` Skipped ${skipped.slice(0, 5).join('; ')}.` : ''}`, changed: [] };
 }
 
-/** How far set_tempo may move from a studied reference's tempo (at its ×0.5 / ×1 / ×2 reading) without override. */
 export const REFERENCE_TEMPO_TOLERANCE = 0.03;
 
-/**
- * The reference lock (research/15 §0: the agent set 175 bpm on a 143 bpm reference): while the project has a studied
- * reference (a "Reference: …" track whose analysis is cached), a tempo more than 3% off its reading at ×0.5, ×1 or ×2
- * is refused with the reason. null = allowed (no reference, not analysed yet, no steady tempo, or close enough).
- */
 export async function referenceTempoRefusal(deps: MainDeps, bpm: number): Promise<string | null> {
   const ref = findReference(deps.doc.project);
   if (!ref || !deps.analyzer) return null;
@@ -510,7 +495,6 @@ export const setTempo = defineTool({
     }
     const before = deps.doc.project.transport;
     const timeSig = a.time_signature ? { num: Number(a.time_signature.split('/')[0]), den: Number(a.time_signature.split('/')[1]) } : undefined;
-    // The loop is read in the time signature being set, so "9-16" means bars of the new meter.
     let loop: { enabled: boolean; start?: number; end?: number } | undefined;
     if (a.loop === false || a.loop === true) {
       if (a.loop && !(before.loop.end > before.loop.start)) fail('There is no loop region yet: pass the bars, e.g. loop: "9-16".');
@@ -620,7 +604,6 @@ export const addMarker = defineTool({
   },
 });
 
-/** A marker by id, else by name (case-insensitive); fails when none or several match. */
 function findMarker(p: Project, ref: string): Marker {
   const t = ref.trim();
   const byId = p.playlist.markers[t];
@@ -642,7 +625,6 @@ function resolveTarget(
   let ref: string;
   let label: string;
   if (!a.ref && a.chain !== undefined) {
-    // A knob inside a rack (Wave 12.2b inner ParamRefs).
     const param = a.param ?? fail('param is required with chain (e.g. "cutoff", "volume", "pan", or a device param / "mix" with device)');
     if (a.channel) {
       const ch = findChannel(p, a.channel);
@@ -691,7 +673,6 @@ function resolveTarget(
   return { ref, spec, label };
 }
 
-/** A normalized 0..1 automation value in the parameter's own units ("2.0 kHz"). */
 function fmtNorm(spec: ParamSpec, n: number): string {
   const plain = spec.scale === 'log' ? spec.min * Math.pow(spec.max / spec.min, n) : spec.scale === 'gain' ? spec.max * n ** 3 : spec.min + n * (spec.max - spec.min);
   return formatParam(spec, plain);
@@ -762,7 +743,6 @@ const zAutPoint = z.object({
   curve: z.enum(['linear', 'exp', 'log']).optional().describe('Shape of the line from this point to the next.'),
 });
 
-/** An automation by id, by name, or by the id of one of its playlist clips. */
 function findAutomation(p: Project, ref: string): Project['automations'][string] {
   const t = ref.trim();
   const byId = p.automations[t] ?? (p.playlist.clips[t]?.automationId ? p.automations[p.playlist.clips[t].automationId!] : undefined);
@@ -806,7 +786,6 @@ export const editAutomation = defineTool({
     if (a.points && (a.add?.length || a.update?.length || a.remove?.length || a.remove_bars)) fail('points replaces every point: pass it alone, or use add / update / remove.');
     const done: string[] = [];
 
-    // Retarget / rename / recolor.
     const retarget = a.ref !== undefined || a.channel !== undefined || a.insert !== undefined;
     const target = retarget ? resolveTarget(deps, a) : null;
     const set: Record<string, unknown> = {};
@@ -820,7 +799,6 @@ export const editAutomation = defineTool({
       if (set.color) done.push(`colored ${set.color}`);
     }
 
-    // Song position ↔ automation tick, through its first clip (where it plays).
     const clip = Object.values(deps.doc.project.playlist.clips).filter((c) => c.automationId === aut.id).sort((x, y) => x.start - y.start)[0];
     const base = clip ? clip.start - clip.offset : 0;
     const rel = (at: string | number) => {

@@ -1,4 +1,3 @@
-// Transport, samples, generic params, automation, project meta.
 import { z } from 'zod';
 import { rackSampleIds } from './racks';
 import { defineCommand, must, CommandError } from './types';
@@ -8,8 +7,6 @@ import { getParamValue, paramLabel, paramSpecFor, setParamValue } from '../schem
 import { fromNormalized, toNormalized } from '../plugins/types';
 import { fallbackClipLength } from '../schema/factory';
 import { keepAudioInPlace } from './audioTiming';
-
-// ── Transport ─────────────────────────────────────────────────────────
 
 export const transportSet = defineCommand({
   id: 'transport.set',
@@ -50,8 +47,6 @@ export const transportSetMode = defineCommand({
     return {};
   },
 });
-
-// ── Samples ───────────────────────────────────────────────────────────
 
 export const samplesAdd = defineCommand({
   id: 'samples.add',
@@ -100,8 +95,6 @@ export const samplesRelink = defineCommand({
   },
 });
 
-// ── Generic params (ParamRef) ─────────────────────────────────────────
-
 export const paramsSet = defineCommand({
   id: 'params.set',
   label: () => 'Set parameter',
@@ -111,15 +104,12 @@ export const paramsSet = defineCommand({
   run(d, a, ctx) {
     const spec = must(paramSpecFor(d, ctx.catalog, a.ref), `Parameter "${a.ref}" does not exist`);
     const v = a.normalized ? fromNormalized(spec, a.value) : a.value;
-    // An Audio Clip's timing params move its audio on the timeline: keep the clips showing the same audio.
     const gen = /^channel\/([^/]+)\/gen\//.exec(a.ref);
     const err = gen ? keepAudioInPlace(d, ctx.catalog, gen[1], () => setParamValue(d, ctx.catalog, a.ref, v)) : setParamValue(d, ctx.catalog, a.ref, v);
     if (err) throw new CommandError(err);
     return { value: getParamValue(d, ctx.catalog, a.ref) };
   },
 });
-
-// ── Automation ────────────────────────────────────────────────────────
 
 const zPoint = z.object({ tick: z.number().int().min(0), value: z.number().min(0).max(1), tension: z.number().min(-1).max(1).default(0) });
 
@@ -236,8 +226,6 @@ export const automationRemove = defineCommand({
   },
 });
 
-// ── Project meta ──────────────────────────────────────────────────────
-
 export const projectSetMeta = defineCommand({
   id: 'project.setMeta',
   label: () => 'Edit project info',
@@ -248,8 +236,6 @@ export const projectSetMeta = defineCommand({
     return {};
   },
 });
-
-// ── Song info + cover (embedded as tags in exports) ───────────────────
 
 const zInfoText = (max: number) => z.string().max(max).optional();
 

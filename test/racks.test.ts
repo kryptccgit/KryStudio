@@ -1,7 +1,3 @@
-// Device racks, macros, the drum rack and the slicer (shared/commands/racks.ts, research/16 §2.3): every rack.*
-// command through a strict DocHost, undo, integrity (checkIntegrity + rackIntegrity), macros through the normal
-// ParamRef path, presets with racks (save / load round trip, inner samples) and the factory rack presets — all
-// against a fixture catalog that has the rack plugins (test/rack-fixtures.ts).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { installRackFixtures } from './rack-fixtures';
@@ -80,7 +76,6 @@ test('rack.create wraps a channel instrument into chain 1 (params kept), one und
   assert.equal(c.instrument!.type, 'krypt.triosc');
   assert.equal(c.instrument!.params.cutoff, 3000);
   assert.equal(c.zone, undefined, 'instrument-rack chains play every note by default');
-  // Wave 12.2b: automation on the old instrument param follows it into the rack (an inner ParamRef).
   assert.equal(r.clearedAutomation, 0);
   assert.equal(r.movedAutomation, 1);
   assert.ok(Object.values(doc.project.automations).some((a) => a.target === `channel/${keys.id}/rack/${r.chainId}/inst/cutoff`));
@@ -181,7 +176,6 @@ test('instrument racks: zones, choke refused, instruments and their params (clam
   assert.equal(rackOf(doc, ch).chains[lay].instrument!.params.unison, 8);
   ok('rack.mapMacro', { ...t, macro: 2, target: { chainId: lay, kind: 'instrument', param: 'unison' } });
   ok('rack.mapMacro', { ...t, macro: 2, target: { chainId: lay, kind: 'instrument', param: 'cutoff' } });
-  // Swap to the sampler: 'unison' doesn't exist there (map removed), 'cutoff' does (kept); then load a sample.
   const r = ok<{ removedMaps: number }>('rack.setInstrument', { ...t, chainId: lay, type: 'krypt.sampler' });
   assert.equal(r.removedMaps, 1);
   assert.equal(Object.keys(rackOf(doc, ch).macros[1].maps).length, 1);
@@ -262,7 +256,6 @@ test('macros: map (validated, re-map updates range), unmap, rename; values throu
   assert.equal(rackOf(doc, ch).macros[0].name, 'Brightness');
   ok('rack.renameMacro', { ...t, macro: 1, name: '' });
   assert.equal(rackOf(doc, ch).macros[0].name, 'Macro 1');
-  // Macro values are the rack's own params: channel/<ch>/gen/macroN resolves like any instrument param.
   const ref = `channel/${ch}/gen/macro3`;
   assert.equal(paramSpecFor(doc.project, CATALOG, ref)?.group, 'Macros');
   ok('params.set', { ref, value: 0.7 });
@@ -298,7 +291,6 @@ test('variations: store current / given values, recall, delete; randomize is see
   ok('rack.removeVariation', { ...t, variationId: v2 });
   assert.deepEqual(rackOf(doc, ch).variationOrder, [v1.variationId]);
   bad('rack.recallVariation', { ...t, variationId: v2 }, /isn't in this rack/);
-  // Randomize: only the mapped macros by default, the same seed gives the same values.
   ok('rack.mapMacro', { ...t, macro: 2, target: { chainId, kind: 'chain', param: 'pan' } });
   const before = { ...g() };
   const r1 = ok<{ values: number[] }>('rack.randomizeMacros', { ...t, seed: 42 });
@@ -383,7 +375,6 @@ test('rack.sliceToPads: a new drum-rack channel, one pad per slice (start/end), 
   sound();
   doc.undo(USER);
   assert.equal(snap(doc.project), before, 'one undo removes channel, insert, sample and pattern');
-  // Onto an existing channel, without a pattern, every pad choking the others.
   const keys = byName('Keys').id;
   const smp = ok<{ id: string }>('samples.add', { path: 'C:/loops/vox.wav' }).id;
   const r2 = ok<{ channelId: string; patternId?: string }>('rack.sliceToPads', { channelId: keys, sampleId: smp, slices: [0.2, 0.6], lengthSec: 1, pattern: false, choke: 1 });
@@ -433,7 +424,6 @@ test('rack.build: a whole rack from a spec (indices → ids, samples pooled), ma
   assert.equal(dm.target.kind === 'device' && rack.chains[r.chainIds[0]].devices[dm.target.deviceId].type, 'krypt.chorus');
   assert.equal(dm.max, 0.5);
   assert.ok(doc.project.samples[rack.chains[r.chainIds[1]].instrument!.sampleId!]);
-  // Round trip: the captured spec builds the same structure.
   assert.deepEqual(rackToSpec(doc.project, CATALOG, rack), spec);
   bad('rack.build', { channelId: ch, spec: { ...spec, macros: [{ maps: [{ chain: 5, target: 'chain', param: 'pan' }] }] } }, /chain 6/);
   bad('rack.build', { channelId: ch, spec: { ...spec, chains: [{ name: 'x', fx: [{ type: FX_RACK_PLUGIN, params: {} }] }] } }, /Racks inside racks|racks inside racks/);
@@ -462,7 +452,6 @@ test('presets: a rack channel saves and loads back (chains, inner samples as pat
   assert.equal(preset.rack!.chains.length, 2);
   assert.equal(preset.rack!.chains[1].instrument!.sample, 'factory:drums/snare.wav', 'inner samples travel as paths');
   assert.equal(preset.rack!.macros![3].name, 'Kick Tone');
-  // Load it onto another channel: the same rack.
   const keys = byName('Keys');
   ok('presets.applyToChannel', { channelId: keys.id, preset: JSON.parse(JSON.stringify(preset)), withFx: false });
   const loaded = doc.project.channels[keys.id].generator;
@@ -471,7 +460,6 @@ test('presets: a rack channel saves and loads back (chains, inner samples as pat
   assert.deepEqual(rackToSpec(doc.project, CATALOG, loaded.rack!), preset.rack);
   assert.deepEqual(loaded.preset, { id: preset.id, name: 'My Kit' });
   sound();
-  // A plain preset replaces the rack; mismatched rack data is refused.
   const bad = { ...preset, rack: { ...preset.rack!, kind: 'instrument' as const } };
   const r = doc.exec('presets.applyToChannel', { channelId: keys.id, preset: bad }, { actor: USER });
   assert.equal(r.ok, false);
@@ -533,14 +521,12 @@ test('factory rack presets: ≥ 4, valid, stock-only, params on-spec, they load 
   }
   const named = (id: string) => all.find((p) => p.id === id)!;
   const { doc, byName, ok, sound } = host();
-  // Layered keys: velocity + key zones, macros named.
   const keys = byName('Keys').id;
   ok('presets.applyToChannel', { channelId: keys, preset: named('factory:keys/layered-keys-rack') });
   const kr = rackOf(doc, keys);
   assert.ok(chains(kr).some((c) => c.zone && c.zone.velLo > 0), 'a velocity zone');
   assert.ok(chains(kr).some((c) => c.zone && c.zone.keyLo > 0), 'a key zone');
   assert.ok(kr.macros.filter((m) => Object.keys(m.maps).length).length >= 4);
-  // Drum kit: factory samples on pads, the hats choke each other.
   const r = ok<{ channelId: string }>('presets.addChannel', { preset: named('factory:perc/drum-kit-rack') });
   const kit = rackOf(doc, r.channelId);
   const hats = chains(kit).filter((c) => /hat/i.test(c.name));
@@ -548,7 +534,6 @@ test('factory rack presets: ≥ 4, valid, stock-only, params on-spec, they load 
   assert.ok(hats.every((h) => h.choke === 1));
   assert.equal(doc.project.channels[r.channelId].rootKey, 36, 'steps play the kick pad');
   assert.ok(chains(kit).every((c) => c.instrument?.sampleId && doc.project.samples[c.instrument.sampleId].path.startsWith('factory:')));
-  // Lo-fi: the four macros.
   const insId = byName('Clap').insertId;
   ok('presets.applyChain', { insertId: insId, preset: named('factory:chain/character/lofi-rack') });
   const lofi = doc.project.mixer.inserts[insId].slots[doc.project.mixer.inserts[insId].slotOrder[0]];
@@ -556,7 +541,6 @@ test('factory rack presets: ≥ 4, valid, stock-only, params on-spec, they load 
   assert.equal(lofi.params.macro1, 0.5);
   ok('presets.applyChain', { insertId: byName('Snare').insertId, preset: named('factory:chain/vocal/vocal-rack') });
   sound();
-  // Plain role picks prefer plain presets; asking for a rack finds one.
   assert.ok(!isRackPreset(pickPreset(FACTORY_PRESETS, 'keys')!), 'a role-only pick is not a rack');
   assert.ok(pickPreset(FACTORY_PRESETS.filter((p) => p.kind === 'instrument'), 'keys', null, undefined) !== null);
 });

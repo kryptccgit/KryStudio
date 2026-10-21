@@ -1,5 +1,3 @@
-// Mixer verbs shared by strips, menus and the FX chain.
-
 import { createElement } from 'react';
 import { ArrowLeft, ArrowRight, Layers, Palette, Pencil, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { EFFECTS, pluginById } from '@shared/plugins/catalog';
@@ -78,7 +76,6 @@ export function effectPickerItems(insertId: string, index?: number): MenuItem[] 
         onSelect: () => void addEffect(insertId, d.id, index),
       });
   }
-  // Third-party VST3 / CLAP effects (Plugin Manager).
   items.push(...installedPickerItems('effect', (d) => void addEffect(insertId, d.id, index), { disabled: full }));
   return items;
 }
@@ -114,7 +111,6 @@ export async function replaceEffect(insertId: string, slotId: string, type: stri
   }
 }
 
-/** `doc`: the document the menu opened in (dialogs open there too: the Mixer may be in a popout). */
 export function insertMenuItems(id: string, doc?: Document | null): MenuItem[] {
   const p = getProject();
   const ins = p.mixer.inserts[id];

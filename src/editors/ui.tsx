@@ -1,6 +1,3 @@
-// Small Krypt-styled toolbar widgets shared by the editors (DOM chrome only;
-// the editing surfaces are canvas).
-
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { cls } from '../utils/format';
@@ -51,7 +48,7 @@ export function ToolButton({
       aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
-      onPointerDown={(e) => e.preventDefault() /* keep keyboard focus on the editor */}
+      onPointerDown={(e) => e.preventDefault()}
       className={cls(
         'relative inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 transition',
         children ? 'min-w-7' : 'w-7',
@@ -92,7 +89,6 @@ export function ToolSelect<T extends string>({
         value={value}
         onChange={(e) => {
           onChange(e.target.value as T);
-          // hand keyboard focus back to the editor so tool keys keep working
           (e.target.closest('[data-editor-root]') as HTMLElement | null)?.focus({ preventScroll: true });
         }}
         className="h-full cursor-pointer bg-transparent pr-1 font-mono text-[11px] text-white/85 outline-none"
@@ -116,7 +112,6 @@ export interface MenuItem {
   onClick: () => void;
 }
 
-/** Fixed-position context menu; closes on outside pointerdown, Escape, blur or scroll. */
 export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -132,7 +127,6 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
     doc.addEventListener('pointerdown', onDown, true);
     doc.addEventListener('keydown', onKey, true);
     win.addEventListener('blur', onClose);
-    // keep on-screen
     if (el) {
       const r = el.getBoundingClientRect();
       if (r.right > win.innerWidth) el.style.left = `${Math.max(4, win.innerWidth - r.width - 4)}px`;
@@ -177,7 +171,6 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
   );
 }
 
-/** Track + thumb for an imperative ScrollbarCtl (editors/scrollbar.ts). */
 export function ScrollTrack({ axis, trackRef, thumbRef }: { axis: 'x' | 'y'; trackRef: RefObject<HTMLDivElement>; thumbRef: RefObject<HTMLDivElement> }) {
   return (
     <div ref={trackRef} className={axis === 'y' ? 'relative border-l border-white/10 bg-krypt-panel' : 'relative border-t border-white/10 bg-krypt-panel'}>

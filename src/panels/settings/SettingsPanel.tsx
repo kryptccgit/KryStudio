@@ -1,7 +1,3 @@
-// Settings: audio device / buffer / rate, autosave + agent exports, agents
-// (MCP + HTTP + file access), Krypt Voice, interface. Every change
-// confirms or toasts its failure.
-
 import { useEffect, useState, type ReactNode } from 'react';
 import { Loader2, RefreshCw, RotateCcw } from 'lucide-react';
 import type { DeviceInfo } from '@shared/engine/protocol';
@@ -105,7 +101,6 @@ export function SettingsPanel() {
   const exportFolder = settings?.export?.folder;
   const projectPath = useProjectStatus((s) => s.status?.path ?? null);
 
-  // The folder export_audio writes to right now (it follows the setting and whether the project is saved).
   useEffect(() => {
     let live = true;
     window.krypt.project

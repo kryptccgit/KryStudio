@@ -1,7 +1,3 @@
-// The Krypt Voice guide (research/21): text → a voice clip, Sing my notes, local vs cloud, tags, Krypt Tune, the
-// own-voice rule and the honest limits. Kept in its own file; articles.ts lists it in the AI and audio group. Pure data.
-// Every label here matches src/voice/* and the piano roll toolbar.
-
 import type { GuideArticle } from './articles';
 
 export const VOICE_ARTICLE: GuideArticle = {

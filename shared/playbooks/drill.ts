@@ -1,4 +1,3 @@
-// Drill: dark, sliding 808s, syncopated snares and skippy triplet hats at ~142 bpm half-time.
 import type { Playbook } from './types';
 
 export const DRILL: Playbook = {

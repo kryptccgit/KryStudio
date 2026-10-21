@@ -1,10 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// IPC contract: EVERY ipcMain handler lives in this file (kryptguidelines
-// §4.3), mirrored by preload.ts; channel names come from channels.ts.
-// Handlers return ActionResult-style values and never throw across IPC.
-// Broadcasts go to BrowserWindow.getAllWindows() (main + popouts).
-// ──────────────────────────────────────────────────────────────────────
-
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron';
@@ -62,53 +55,30 @@ export interface IpcDeps {
   mcp(): McpController | null;
   agent(): AgentController | null;
   shimExePath: string | null;
-  /** Open-file paths queued until a renderer subscribes. */
   takeQueuedOpenFiles(): string[];
-  /** A real quit (File ▸ Exit): closing the main window only hides it to the tray. */
   quit(): void;
-  /** MIDI inputs, record arm, controller links (electron/input/liveInput.ts). */
   liveInput?: LiveInputController;
-  /** Third-party VST3 / CLAP plugins (electron/plugins). */
   plugins?: PluginService;
-  /** On-device audio ML: analysis, stems, transcription, Model Manager (electron/analyzer). */
   analyzer?: AnalyzerService;
-  /** Reference library: collections, analysis queue, profiles, focus, originality (electron/library). */
   library?: LibraryService;
-  /** Vocals & mashups: Krypt Tune on a clip, match key & tempo (electron/vocals). */
   vocals?: VocalsService;
-  /** The project's cover image (electron/project/cover.ts). */
   covers?: CoverService;
-  /** Exports with song info + cover embedded (electron/project/export.ts). */
   exporter?: ExportService;
-  /** Presets (factory + user), the factory sample index, sample-folder suggestions (electron/sounds). */
   sounds?: SoundsService;
-  /** Sound packs: download / cancel / remove / reveal, from the user's clicks only (electron/packs). */
   packs?: PacksService;
-  /** Clip launcher runtime: launch / stop / launch recording / grid controller (electron/session). */
   session?: SessionController;
-  /** MIDI outputs, clock out, sync in, grid LEDs (electron/midi/hardware.ts). */
   hardware?: HardwareController;
-  /** Krypt Voice: speak, sing my notes, the Fish key, my voice (electron/voice). */
   voice?: VoiceService;
-  /** Project tabs (electron/project/tabs.ts): New / Open / the tab strip. */
   tabs?: TabManager;
 }
-
-// ── Cover drawing requests (main → the main window → main) ────────────
 
 const COVER_DRAW_TIMEOUT_MS = 30_000;
 const coverRequests = new Map<string, { resolve: (r: CoverDrawResult) => void; timer: NodeJS.Timeout; wc: number }>();
 
-/** The main window (not a dockview popout). */
 function mainAppWindow(): BrowserWindow | null {
   return BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && !w.getParentWindow() && !w.webContents.isDestroyed()) ?? null;
 }
 
-/**
- * Ask the main window to draw a generated cover (canvas, so the Chakra Petch font is there) for an agent's
- * set_cover {generate}. Resolves with the window's answer, or ok:false when there is no window or it doesn't
- * answer within 30 s. Never rejects.
- */
 export function requestCoverDrawing(req: { style?: string; seed?: number }): Promise<CoverDrawResult> {
   const win = mainAppWindow();
   if (!win || win.webContents.isLoading()) {
@@ -125,7 +95,6 @@ export function requestCoverDrawing(req: { style?: string; seed?: number }): Pro
   });
 }
 
-/** A renderer's answer, checked field by field (never trust IPC payloads). */
 function coverDrawResult(v: unknown): CoverDrawResult {
   const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
   if (o.ok === true && o.bytes instanceof Uint8Array && (o.mime === 'image/png' || o.mime === 'image/jpeg')) {
@@ -134,15 +103,12 @@ function coverDrawResult(v: unknown): CoverDrawResult {
   return { ok: false, message: typeof o.message === 'string' && o.message ? o.message.slice(0, 300) : "The window couldn't draw the cover" };
 }
 
-// ── Broadcast helpers ─────────────────────────────────────────────────
-
 export function broadcast(channel: string, payload?: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) {
     if (w.isDestroyed() || w.webContents.isDestroyed()) continue;
     try {
       w.webContents.send(channel, payload);
     } catch {
-      /* a window mid-teardown */
     }
   }
 }
@@ -151,7 +117,6 @@ export function sendTo(wc: WebContents, channel: string, payload?: unknown): voi
   if (!wc.isDestroyed()) wc.send(channel, payload);
 }
 
-/** Forward window maximize state changes to that window's renderer. */
 export function wireWindowEvents(win: BrowserWindow): void {
   const send = (): void => {
     if (!win.isDestroyed()) sendTo(win.webContents, EVENT.appMaximizedChanged, win.isMaximized());
@@ -166,11 +131,8 @@ export function sendOpenFile(wc: WebContents, filePath: string): void {
   sendTo(wc, EVENT.appOpenFile, filePath);
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────
-
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** ipcMain.handle with a catch-all: a thrown error becomes {ok:false,message}. */
 function handle(channel: string, fn: (e: IpcMainInvokeEvent, ...args: any[]) => unknown): void {
   ipcMain.removeHandler(channel);
   ipcMain.handle(channel, async (e, ...args) => {
@@ -208,7 +170,6 @@ function fallbackMcpStatus(shimPath: string | null): McpStatus {
   return { enabled: false, pipeName: null, http: { enabled: false, url: null }, clients: [], shimPath };
 }
 
-/** A renderer-supplied AudioTarget, checked field by field (never trust IPC payloads). */
 function audioTarget(t: unknown): AudioTarget | null {
   if (!t || typeof t !== 'object') return null;
   const o = t as Record<string, unknown>;
@@ -231,7 +192,6 @@ function fallbackLibraryState(): LibraryState {
   };
 }
 
-/** Renderer-supplied AudioProjectOptions, checked field by field. */
 function audioProjectOptions(v: unknown): AudioProjectOptions {
   const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
   const out: AudioProjectOptions = {};
@@ -249,12 +209,9 @@ const strList = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filt
 
 const NOT_READY: ActionResult = { ok: false, message: 'The AI agent server is still starting (or failed to start; see the log).' };
 
-// ── Registration ──────────────────────────────────────────────────────
-
 export function registerIpc(d: IpcDeps): void {
   const { doc, engine, project } = d;
 
-  // ───── App / window ─────────────────────────────────────────────────
   handle(INVOKE.appVersion, () => app.getVersion());
   handle(INVOKE.appOpenExternal, (_e, url: string) => openExternal(String(url ?? '')));
   handle(INVOKE.appShowItemInFolder, (_e, p: string) => showItemInFolder(String(p ?? '')));
@@ -274,7 +231,6 @@ export function registerIpc(d: IpcDeps): void {
     for (const p of d.takeQueuedOpenFiles()) sendOpenFile(e.sender, p);
   });
 
-  // ───── Document (actor = user) ──────────────────────────────────────
   handle(INVOKE.docSnapshot, () => ({ version: doc.version, project: doc.project }));
   handle(INVOKE.docExec, (_e, cmd: string, args: unknown, opts?: ExecOpts) => {
     try {
@@ -301,20 +257,15 @@ export function registerIpc(d: IpcDeps): void {
   handle(INVOKE.docToggleEntry, (_e, entryId: string) => doc.toggleEntry(String(entryId), USER));
   handle(INVOKE.docRevertActor, (_e, key: string) => doc.revertActor(actorFromKey(String(key)), USER));
 
-  // ───── Project files ────────────────────────────────────────────────
   handle(INVOKE.projectStatus, () => project.status());
-  // Project tabs (electron/project/tabs.ts): New = a new tab, Open = a new tab (or the untouched new tab, or the
-  // file's open tab), both refused with a message while the active tab is busy.
   const tabs = d.tabs;
   handle(INVOKE.projectNew, () => (tabs ? tabs.newTab() : project.newProject()));
-  // User templates (Wave 12.2b): userData/templates, atomic writes (electron/project/templates.ts)
   handle(INVOKE.projectTemplates, () => ({ ok: true, data: project.listTemplates() }));
   handle(INVOKE.projectSaveTemplate, (_e, name: string) => project.saveAsTemplate(String(name ?? '')));
   handle(INVOKE.projectNewFromTemplate, (_e, id: string) => (tabs ? tabs.newTab({ template: String(id ?? '') }) : project.newFromTemplate(String(id ?? ''))));
   handle(INVOKE.projectRenameTemplate, (_e, id: string, name: string) => project.renameTemplate(String(id ?? ''), String(name ?? '')));
   handle(INVOKE.projectDeleteTemplate, (_e, id: string) => project.deleteTemplate(String(id ?? '')));
   handle(INVOKE.projectOpen, (e, p?: string) => project.open(typeof p === 'string' && p ? p : undefined, winOf(e)));
-  // ───── Project tabs (window.krypt.tabs; handlers: tabs-core) ─────────
   const NO_TABS: ActionResult = { ok: false, message: 'Project tabs are not available in this session' };
   handle(INVOKE.tabsState, () => tabs?.state() ?? { tabs: [], activeId: '', closed: [] });
   handle(INVOKE.tabsNew, (_e, opts?: unknown) => {
@@ -331,10 +282,8 @@ export function registerIpc(d: IpcDeps): void {
   handle(INVOKE.projectImportMidi, (e, p?: string) => project.importMidi(typeof p === 'string' && p ? p : undefined, winOf(e)));
   handle(INVOKE.projectExportMidi, (e, patternId?: string) => project.exportMidi(typeof patternId === 'string' && patternId ? patternId : undefined, winOf(e)));
 
-  // ───── Song info + cover (the bytes stay in main; the doc gets a CoverRef through project.setCover) ─
   const covers = d.covers;
   const NO_COVERS: ActionResult = { ok: false, message: 'Cover art is not available in this session (see the log)' };
-  /** Store an outcome as the cover: one user undo step. */
   const applyCover = (ref: unknown, label: string, message: string): ActionResult => {
     const r = doc.exec('project.setCover', ref, { actor: USER, label });
     return r.ok ? { ok: true, message, data: ref } : { ok: false, message: r.message ?? 'Setting the cover failed' };
@@ -369,13 +318,12 @@ export function registerIpc(d: IpcDeps): void {
   ipcMain.removeAllListeners(SEND.coverRespond);
   ipcMain.on(SEND.coverRespond, (e, id: unknown, result: unknown) => {
     const pending = typeof id === 'string' ? coverRequests.get(id) : undefined;
-    if (!pending || pending.wc !== e.sender.id) return; // only the window that was asked, only once
+    if (!pending || pending.wc !== e.sender.id) return;
     coverRequests.delete(id as string);
     clearTimeout(pending.timer);
     pending.resolve(coverDrawResult(result));
   });
 
-  // ───── Engine ───────────────────────────────────────────────────────
   const resolve = (p: string): string => project.resolveSamplePath(String(p ?? ''));
   handle(INVOKE.engineStatus, () => engine.status());
   handle(INVOKE.engineTelemetryUrl, () => engine.telemetryUrl());
@@ -406,9 +354,6 @@ export function registerIpc(d: IpcDeps): void {
     if (!format) return { ok: false, message: 'Choose WAV (16 / 24 / 32-bit float) or MP3' };
     const exporter = d.exporter;
     if (!exporter) return { ok: false, message: 'Exporting is not available in this session (see the log)' };
-    // Stems (research/15 §3.1): one offline pass, one file per mixer insert ("NN <insert>") plus "Master", written by
-    // the engine into a NEW "<song> stems" folder inside the folder the user picks, so nothing is ever overwritten.
-    // No song info is written into stems, and they are never normalized one by one (that would undo the mix balance).
     if (opts.stems) {
       let base = typeof opts.path === 'string' && opts.path ? opts.path : null;
       if (!base) {
@@ -439,9 +384,8 @@ export function registerIpc(d: IpcDeps): void {
       });
       if (!r.ok || !r.data) {
         try {
-          fs.rmdirSync(dir); // only when the render left it empty
+          fs.rmdirSync(dir);
         } catch {
-          /* it has files in it: keep them */
         }
         return { ok: false, message: r.message ?? 'The stem render failed' };
       }
@@ -461,7 +405,6 @@ export function registerIpc(d: IpcDeps): void {
       if (!out) return { ok: false, message: 'Export cancelled' };
     }
     if (!new RegExp(`\\.${ext}$`, 'i').test(out)) out += `.${ext}`;
-    // An unknown bitrate falls back to 320 (the engine refuses anything off its list with a sentence anyway).
     const kbps = MP3_BITRATES.includes(Number(opts.mp3Kbps) as Mp3Kbps) ? (Number(opts.mp3Kbps) as Mp3Kbps) : 320;
     broadcast(EVENT.engineRenderProgress, 0);
     const r = await exporter.render(out, {
@@ -496,13 +439,11 @@ export function registerIpc(d: IpcDeps): void {
     void engine.request({ cmd: 'auditionOff' }, 2000);
   });
 
-  // ───── Browser ──────────────────────────────────────────────────────
   handle(INVOKE.browserRoots, () => browserRoots(d.browser));
   handle(INVOKE.browserList, (_e, dir: string) => listInRoots(d.browser, String(dir ?? '')));
   handle(INVOKE.browserAddRoot, (e) => addRoot(d.browser, winOf(e)));
   handle(INVOKE.browserRemoveRoot, (_e, id: string) => removeRoot(d.browser, String(id ?? '')));
 
-  // ───── Dialogs ──────────────────────────────────────────────────────
   handle(INVOKE.dialogOpenFile, (e, o: { title?: string; filters?: Array<{ name: string; extensions: string[] }>; multi?: boolean }) =>
     dialogs.openFiles({ ...(o ?? {}), defaultPath: project.defaultDir(), win: winOf(e) }),
   );
@@ -512,16 +453,13 @@ export function registerIpc(d: IpcDeps): void {
     return dialogs.saveFile({ ...opts, defaultPath: def, win: winOf(e) });
   });
 
-  // ───── Settings ─────────────────────────────────────────────────────
   handle(INVOKE.settingsGet, () => d.getSettings());
   handle(INVOKE.settingsUpdate, (_e, patch: Partial<Settings>) => {
     const p = patch && typeof patch === 'object' ? { ...patch } : {};
-    // agent.hasApiKey is owned by the agent backend (setApiKey), not the renderer.
     if (p.agent) p.agent = { ...p.agent, hasApiKey: d.getSettings().agent.hasApiKey, keys: d.getSettings().agent.keys };
     return d.updateSettings(p);
   });
 
-  // ───── MCP / agents (controllers from electron/mcp, electron/agent) ─
   handle(INVOKE.mcpStatus, () => d.mcp()?.status() ?? fallbackMcpStatus(d.shimExePath));
   handle(INVOKE.mcpClientConfigs, () => d.mcp()?.clientConfigs() ?? []);
   handle(INVOKE.mcpInstallClientConfig, (_e, client: string) => d.mcp()?.installClientConfig(String(client)) ?? NOT_READY);
@@ -541,7 +479,6 @@ export function registerIpc(d: IpcDeps): void {
     await d.agent()?.reset();
   });
 
-  // ───── Live input / recording (electron/input/liveInput.ts) ─────────
   const live = d.liveInput;
   const NO_LIVE: ActionResult = { ok: false, message: 'Live input is not available yet' };
   handle(INVOKE.midiInputs, () => live?.inputs() ?? NO_LIVE);
@@ -554,7 +491,6 @@ export function registerIpc(d: IpcDeps): void {
   handle(INVOKE.recordSetArmed, (_e, armed: boolean) => live?.setArmed(!!armed) ?? NO_LIVE);
   handle(INVOKE.recordListInputDevices, () => live?.listInputDevices() ?? NO_LIVE);
   handle(INVOKE.recordSetMeter, (_e, on: boolean) => live?.setMeter(!!on) ?? NO_LIVE);
-  // MIDI outputs, clock out, sync in (electron/midi/hardware.ts).
   const hw = d.hardware;
   const NO_HW: ActionResult = { ok: false, message: 'MIDI outputs are not available yet' };
   handle(INVOKE.midiOutputs, () => hw?.listOutputs() ?? NO_HW);
@@ -565,7 +501,6 @@ export function registerIpc(d: IpcDeps): void {
   ipcMain.on(SEND.midiSetTarget, (_e, channelId: string | null) => live?.setTarget(typeof channelId === 'string' ? channelId : null));
   ipcMain.removeAllListeners(SEND.midiCancelLearn);
   ipcMain.on(SEND.midiCancelLearn, () => live?.cancelLearn());
-  // Gamepads / keyboard pads (shared/live/controllers.ts): the renderer runs the maps, the engine plays the MIDI.
   ipcMain.removeAllListeners(SEND.midiVirtualIn);
   ipcMain.on(SEND.midiVirtualIn, (_e, m: { device?: unknown; bytes?: unknown }) => {
     const device = typeof m?.device === 'string' ? m.device : '';
@@ -576,7 +511,6 @@ export function registerIpc(d: IpcDeps): void {
     });
   });
 
-  // ───── Third-party plugins (VST3 / CLAP; electron/plugins) ──────────
   const plugins = d.plugins;
   const NO_PLUGINS: ActionResult = { ok: false, message: 'Plugin hosting is not available' };
   handle(INVOKE.pluginsState, () => plugins?.currentState() ?? null);
@@ -598,8 +532,6 @@ export function registerIpc(d: IpcDeps): void {
   });
   handle(INVOKE.pluginsReload, () => plugins?.reload() ?? NO_PLUGINS);
 
-  // ───── On-device audio ML (electron/analyzer; actor = user) ─────────
-  // Model downloads start ONLY here (the UI); MCP tools never download.
   const ears = d.analyzer;
   const NO_EARS: ActionResult = { ok: false, message: 'Audio analysis is not available in this session (see the log)' };
   const BAD_TARGET: ActionResult = { ok: false, message: 'Pick an audio clip, a channel with a sample, or an audio file' };
@@ -628,7 +560,6 @@ export function registerIpc(d: IpcDeps): void {
   });
   handle(INVOKE.analyzerCancelJob, (_e, jobId: string) => ears?.cancelJob(String(jobId ?? '')) ?? NO_EARS);
 
-  // ───── Warp (Wave 12.2; electron/warp): beat-track an audio clip channel, then ONE audio.autoWarp (actor = user) ─
   handle(INVOKE.warpAutoWarp, (_e, channelId: unknown, opts?: unknown) => {
     if (typeof channelId !== 'string' || !channelId) return { ok: false, message: 'Pick an audio clip channel to warp' };
     const o = opts && typeof opts === 'object' ? (opts as Record<string, unknown>) : {};
@@ -638,12 +569,7 @@ export function registerIpc(d: IpcDeps): void {
     return autoWarpChannel({ doc, analyzer: ears }, channelId, { every, hint, mode }, userApply(doc));
   });
 
-  // ───── Audio → project (electron/audioProject; actor = user, always a NEW project) ─
-  // With project tabs the result opens in a NEW tab (ProjectService.newProject → tabs); stages 1-4 never touch the
-  // document and the build is one undo step. (Without tabs the renderer asks "save changes?" first, like File ▸ New,
-  // and the new project replaces the open one at the end.) Progress goes to every window.
   let apDeps: MainDeps | null = null;
-  /** MainDeps for main-side services the UI shares with agents (audio → project, "More like this"). */
   const ipcMainDeps = (): MainDeps =>
     (apDeps ??= {
       doc,
@@ -678,11 +604,6 @@ export function registerIpc(d: IpcDeps): void {
   });
   handle(INVOKE.audioProjectCancel, () => audioProject()?.cancel() ?? NO_EARS);
 
-  // ───── Auto Mashup (electron/mashup; actor = user) ─────────────────────
-  // check reads both songs and plans (no edits); build runs the whole pipeline and lands as ONE undo step (a new
-  // project by default: the renderer asks "save changes?" first, like File ▸ New). A `{ path: '' }` song opens a file
-  // dialog here; the picked path comes back in MashupCheck.a/b.path for the build. Paths from the renderer are the
-  // user's own picks (drag & drop, the dialog), like File ▸ Open audio as project. Progress goes to every window.
   const mashup = () => (ears ? mashupFor(ipcMainDeps()) : null);
   const mashupRequest = async (e: IpcMainInvokeEvent, raw: unknown): Promise<MashupRequest | ActionResult> => {
     const req = cleanMashupRequest(raw);
@@ -713,10 +634,6 @@ export function registerIpc(d: IpcDeps): void {
   });
   handle(INVOKE.mashupCancel, () => mashup()?.cancel() ?? NO_EARS);
 
-  // ───── Auto Mix / Auto Master (electron/automix; actor = user) ─────────
-  // run renders and measures the song, sets Krypt-owned slots, re-renders up to 3 passes and lands as ONE history
-  // entry (A/B = doc.toggleEntry(entryId)). masterFile opens the audio in a NEW project tab and masters it; a
-  // `path: ''` opens a file dialog here. understand reads a prompt (the AI when a key is set up, else keywords).
   const automix = () => automixFor(ipcMainDeps());
   const automixProgress = { progress: (pr: unknown) => broadcast(EVENT.automixProgress, pr) };
   handle(INVOKE.automixPresets, () => automix().presets());
@@ -737,7 +654,6 @@ export function registerIpc(d: IpcDeps): void {
     return automix().masterFile(req, USER, automixProgress);
   });
   handle(INVOKE.automixCancel, () => automix().cancel());
-  // Reference matching + album mastering (research/23). Paths are the user's own picks (the dialog, drag & drop).
   const userAudioPath = (p: unknown): string | null => (typeof p === 'string' && p.trim() && path.isAbsolute(p.trim()) && isAudioFile(p.trim()) ? p.trim() : null);
   handle(INVOKE.automixAnalyzeReference, (_e, p: unknown) => {
     const file = userAudioPath(p);
@@ -767,8 +683,6 @@ export function registerIpc(d: IpcDeps): void {
     return r;
   });
 
-  // ───── Vocals & mashups (electron/vocals; actor = user, one undo step per call) ─
-  // The same service as the tune_vocal / match_clip MCP tools.
   const vocals = d.vocals;
   const NO_VOCALS: ActionResult = { ok: false, message: 'The vocal tools are not available in this session (see the log)' };
   handle(INVOKE.vocalsTune, async (_e, target: unknown, opts?: { style?: unknown; key?: unknown; scale?: unknown }) => {
@@ -809,10 +723,6 @@ export function registerIpc(d: IpcDeps): void {
     return r;
   });
 
-  // ───── Krypt Voice (electron/voice; actor = user, one undo step per call) ─
-  // speak / sing render (Local: the analyzer; Cloud: Fish Audio with the user's key) and add ONE clip each; preview
-  // only plays it. The Fish key and "my voice" exist only here (agents never set keys or clone). Progress goes to
-  // every window.
   const voice = d.voice;
   const NO_VOICE: ActionResult = { ok: false, message: 'Krypt Voice is not available in this session (see the log)' };
   const tuneOf = (v: unknown): SpeakRequest['tune'] => (v === 'off' || v === 'natural' || v === 'pop' || v === 'hard' ? v : undefined);
@@ -851,9 +761,6 @@ export function registerIpc(d: IpcDeps): void {
   });
   handle(INVOKE.voiceRemoveMine, (_e, id: unknown) => (voice ? voice.removeMyVoice(str(id).slice(0, 80)) : NO_VOICE));
 
-  // ───── Reference library (electron/library; records only, never deletes user files) ─
-  // Deep analysis (stems) starts here (the UI) or from library_deep, which agents may call only when a stem model is
-  // already installed; nothing here or there downloads a model.
   const lib = d.library;
   const NO_LIB: ActionResult = { ok: false, message: 'The reference library is not available in this session (see the log)' };
   handle(INVOKE.libraryState, () => lib?.state() ?? fallbackLibraryState());
@@ -889,8 +796,6 @@ export function registerIpc(d: IpcDeps): void {
   });
   handle(INVOKE.libraryAddToProject, (_e, trackId: string) => lib?.addToProject(str(trackId)) ?? NO_LIB);
 
-  // ───── Sounds: presets + factory sample index (electron/sounds) ─────
-  // Loading a preset is a doc command (presets.*) the renderer dispatches itself; these only read / store presets.
   const sounds = d.sounds;
   const NO_SOUNDS: ActionResult = { ok: false, message: 'Presets are not available in this session (see the log)' };
   handle(INVOKE.soundsState, () => sounds?.state() ?? { presets: [], factoryCount: 0, userCount: 0, userDir: '' });
@@ -916,8 +821,6 @@ export function registerIpc(d: IpcDeps): void {
     }
   });
 
-  // "More like this" (electron/sounds/similar.ts): the user's own files only from the Browser folders (the same rule
-  // as browser.list). One search at a time: the Browser asks again while pack samples are still being measured.
   let similarQueue: Promise<unknown> = Promise.resolve();
   const similarUserFile = browserFileAccess(() => browserRoots(d.browser).map((r) => r.path));
   handle(INVOKE.soundsSimilar, (_e, source: unknown, query: unknown) => {
@@ -940,7 +843,6 @@ export function registerIpc(d: IpcDeps): void {
     return run;
   });
 
-  // ───── Sound packs (electron/packs): the user's clicks are the ONLY way a pack downloads ─────
   const packs = d.packs;
   const NO_PACKS: ActionResult = { ok: false, message: 'Sound packs are not available in this session (see the log)' };
   handle(INVOKE.packsState, () => packs?.state() ?? { packs: [], dir: path.join(app.getPath('userData'), 'packs') });
@@ -958,8 +860,6 @@ export function registerIpc(d: IpcDeps): void {
   });
   handle(INVOKE.packsSamples, () => packs?.sampleInfo() ?? { packs: [], samples: [] });
 
-  // ───── Racks (Wave 12.2; racks-app): slice audio onto a drum rack, ONE undo step as the user ─────
-  // Editing racks is doc commands (rack.*); only slicing needs main (the analyzer finds the hits).
   handle(INVOKE.racksSliceToPads, async (_e, source: unknown, opts?: unknown) => {
     const t = audioTarget(source);
     if (!t) return { ok: false, message: 'Pick a sample, an audio clip or a channel with a sample to slice' };
@@ -984,7 +884,6 @@ export function registerIpc(d: IpcDeps): void {
     return r;
   });
 
-  // ───── Clip launcher runtime (electron/session; grid edits are session.* doc commands) ─
   const ses = d.session;
   const NO_SESSION: ActionResult = { ok: false, message: 'The clip launcher is not available in this session' };
   handle(INVOKE.sessionLaunch, (_e, clipId: string, release?: boolean) => ses?.launch(str(clipId), release === true) ?? NO_SESSION);
@@ -996,8 +895,6 @@ export function registerIpc(d: IpcDeps): void {
   handle(INVOKE.sessionGridSettings, () => ses?.gridSettings() ?? launchGridSettings(d.getSettings()));
   handle(INVOKE.sessionSetGridSettings, (_e, patch: unknown) => ses?.setGridSettings(patch) ?? NO_SESSION);
 
-  // ───── Krypt Script (Wave 12.2b; scripts): the sandbox runs here, never in a renderer ─────
-  // Saving into the project is the doc command scripts.save; applying is ONE notes.applyScript as the user.
   const scripts = new ScriptService({ userDataDir: app.getPath('userData'), project: () => doc.project });
   const BAD_RUN: ActionResult = { ok: false, message: 'Pick a script, a pattern and a channel first' };
   handle(INVOKE.scriptsList, () => scripts.catalog());
@@ -1022,10 +919,6 @@ export function registerIpc(d: IpcDeps): void {
   });
 }
 
-/**
- * Fan main-side state out to every renderer window: document changes,
- * engine + project status, render progress, settings and log lines.
- */
 export function wireBroadcasts(d: Pick<IpcDeps, 'doc' | 'engine' | 'project'> & { onSettingsChanged(fn: (s: Settings) => void): () => void }): void {
   d.doc.subscribe((c) => {
     if (c.kind === 'reset') broadcast(EVENT.docReset, { version: c.version, project: c.project });

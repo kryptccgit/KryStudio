@@ -1,8 +1,3 @@
-// Guides (research/14 §3.1): the show / guide / playbook / kinds markup, link
-// integrity across every article ("Show me" anchors exist and are placed on a
-// real element in src/, article links and their #headings resolve, genre
-// cards name real playbooks), groups and icons, search ranking + snippets,
-// Related links and the live fact builders.
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -27,22 +22,18 @@ import {
 } from '../src/guides/markup';
 import { blocksOf, orderedArticles, queryTerms, relatedArticles, searchGuides } from '../src/guides/search';
 
-/** The repo root: the first folder up from this (bundled) test that has a package.json. */
 function repoRoot(): string {
   let dir = import.meta.dirname ?? process.cwd();
   for (let i = 0; i < 6; i++) {
     try {
       if (statSync(path.join(dir, 'package.json')).isFile()) return dir;
     } catch {
-      /* keep climbing */
     }
     dir = path.dirname(dir);
   }
   return process.cwd();
 }
 const SRC = path.join(repoRoot(), 'src');
-
-// ── Parser ────────────────────────────────────────────────────────────
 
 test('inline show links: with and without a label, never mistaken for a key', () => {
   const runs = parseInline('Find [[show:transport.tempo|the tempo box]] or [[show:mixer.master]], then press [[F5]].');
@@ -108,8 +99,6 @@ test('links with labels inside table cells keep their | (not split into cells)',
   );
 });
 
-// ── Article integrity ─────────────────────────────────────────────────
-
 test('every article has a known group, an icon in ICONS, and every group has articles', () => {
   for (const a of ARTICLES) {
     assert.ok(GUIDE_GROUPS.includes(a.group), `${a.id}: unknown group ${a.group}`);
@@ -145,7 +134,6 @@ test('every {{playbook:…}} names a real playbook, and no unknown {{…}} block
   }
 });
 
-/** Every file under src/ (ts/tsx). */
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
@@ -165,7 +153,6 @@ test('every GUIDE_ANCHORS id is placed on a real element (data-guide) somewhere 
   const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   for (const id of Object.keys(GUIDE_ANCHORS)) {
     const q = `["']${esc(id)}["']`;
-    // data-guide="id", data-guide={'id'}, data-guide={cond ? 'id' : undefined}, or a { guide: 'id' } entry fed to data-guide.
     const re = new RegExp(`data-guide=(?:${q}|\\{\\s*${q}\\s*\\}|\\{[^}]*\\?\\s*${q})|\\bguide:\\s*${q}`);
     assert.ok(
       texts.some((t) => re.test(t)),
@@ -173,8 +160,6 @@ test('every GUIDE_ANCHORS id is placed on a real element (data-guide) somewhere 
     );
   }
 });
-
-// ── Search + Related ──────────────────────────────────────────────────
 
 const fixture = (id: string, title: string, body: string, group: GuideArticle['group'] = 'Make music', summary = 'A guide.'): GuideArticle => ({ id, title, summary, group, icon: 'book', body });
 
@@ -236,8 +221,6 @@ test('Related: linked articles first, then the same group, never itself, Previou
   );
   for (const a of ARTICLES) assert.ok(!relatedArticles(a).some((r) => r.id === a.id));
 });
-
-// ── Live facts ────────────────────────────────────────────────────────
 
 test('playbook cards: every playbook builds a complete card; unknown ids give null', () => {
   assert.equal(playbookFacts('not-a-genre'), null);

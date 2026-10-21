@@ -1,10 +1,3 @@
-// The go-to factory preset per role in each genre: what a producer of that
-// genre reaches for first. index.ts turns this table into each preset's
-// `defaultFor` (select.ts ranks a genre's default +15 over equally tagged
-// presets of the same role). Values are preset slugs: role + slug = the id
-// 'factory:<role>/<slug>'. One preset per (genre, role); the preset must list
-// the genre in its `genres` (test/presets-factory.test.ts checks both).
-
 import type { GenreId } from '../../genres';
 import type { InstrumentRole } from '../../types';
 

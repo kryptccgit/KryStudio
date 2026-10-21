@@ -1,4 +1,3 @@
-//! Synthetic test signals (deterministic).
 #![allow(dead_code)]
 
 use std::f32::consts::PI;
@@ -39,7 +38,6 @@ pub fn add(buf: &mut [f32], at_sec: f32, sound: &[f32], gain: f32) {
     }
 }
 
-/// Pitch-swept sine kick (150 → 50 Hz), 250 ms.
 pub fn kick() -> Vec<f32> {
     let n = (0.25 * SR) as usize;
     let mut ph = 0.0f32;
@@ -48,13 +46,12 @@ pub fn kick() -> Vec<f32> {
             let t = i as f32 / SR;
             let f = 50.0 + 100.0 * (-t * 30.0).exp();
             ph += 2.0 * PI * f / SR;
-            let tail = ((n - i) as f32 / (0.02 * SR)).min(1.0); // 20 ms fade-out
+            let tail = ((n - i) as f32 / (0.02 * SR)).min(1.0);
             ph.sin() * (-t * 12.0).exp() * tail
         })
         .collect()
 }
 
-/// One-pole high-passed noise (crude but enough for synthetic drums).
 fn hp_noise(rng: &mut Rng, n: usize, a: f32) -> Vec<f32> {
     let mut prev_x = 0.0;
     let mut prev_y = 0.0;
@@ -69,12 +66,10 @@ fn hp_noise(rng: &mut Rng, n: usize, a: f32) -> Vec<f32> {
         .collect()
 }
 
-/// Noise burst (band-ish 1–8 kHz) + 190 Hz body, 180 ms.
 pub fn snare(seed: u64) -> Vec<f32> {
     let mut rng = Rng::new(seed);
     let n = (0.18 * SR) as usize;
     let noise = hp_noise(&mut rng, n, 0.85);
-    // gentle low-pass of the noise (keep below ~8 kHz)
     let mut lp = 0.0f32;
     (0..n)
         .map(|i| {
@@ -86,13 +81,11 @@ pub fn snare(seed: u64) -> Vec<f32> {
         .collect()
 }
 
-/// Bright high-passed noise hat; `decay` is the 1/e time in seconds.
 pub fn hat(seed: u64, decay: f32) -> Vec<f32> {
     let mut rng = Rng::new(seed);
     let n = ((decay * 6.0).max(0.03) * SR) as usize;
     let noise = hp_noise(&mut rng, n, 0.2);
     let noise2 = {
-        // second high-pass stage for more air
         let mut px = 0.0;
         let mut py = 0.0;
         noise
@@ -108,7 +101,6 @@ pub fn hat(seed: u64, decay: f32) -> Vec<f32> {
     (0..n).map(|i| 3.0 * noise2[i] * (-(i as f32 / SR) / decay).exp()).collect()
 }
 
-/// Sine (with optional harmonics) of `secs`, with 10 ms fades.
 pub fn tone(freq: f32, secs: f32, harmonics: &[f32]) -> Vec<f32> {
     let n = (secs * SR) as usize;
     let fade = (0.01 * SR) as usize;
@@ -129,7 +121,6 @@ pub fn midi_hz(m: f32) -> f32 {
     440.0 * 2f32.powf((m - 69.0) / 12.0)
 }
 
-/// Chord of MIDI notes, `secs` long, summed sines with 2 soft harmonics.
 pub fn chord(notes: &[f32], secs: f32, gain: f32) -> Vec<f32> {
     let mut out = vec![0.0; (secs * SR) as usize];
     for &m in notes {
@@ -141,8 +132,6 @@ pub fn chord(notes: &[f32], secs: f32, gain: f32) -> Vec<f32> {
     out
 }
 
-/// A drum groove. Pattern strings are 16 steps per bar ('x' hit, '.' rest).
-/// `swing` (transport scale) delays odd 16ths by swing × half a 16th.
 pub fn groove(bpm: f32, bars: usize, kick_p: &str, snare_p: &str, hat_p: &str, swing: f32, offset: f32) -> Vec<f32> {
     let step = 60.0 / bpm / 4.0;
     let total = offset + bars as f32 * 16.0 * step + 0.5;
@@ -198,8 +187,6 @@ pub fn temp_dir(name: &str) -> PathBuf {
     d
 }
 
-// ── harmonic-rich synths (key regressions) ──────────────────────────────
-
 fn poly_blep(t: f32, dt: f32) -> f32 {
     if t < dt {
         let x = t / dt;
@@ -212,7 +199,6 @@ fn poly_blep(t: f32, dt: f32) -> f32 {
     }
 }
 
-/// Band-limited (PolyBLEP) saw (`square = false`) or square at `freq`.
 pub fn osc(freq: f32, n: usize, square: bool, phase0: f32) -> Vec<f32> {
     let dt = freq / SR;
     let mut ph = phase0.fract();
@@ -235,7 +221,6 @@ pub fn osc(freq: f32, n: usize, square: bool, phase0: f32) -> Vec<f32> {
         .collect()
 }
 
-/// One-pole low-pass (6 dB/oct) at `fc` Hz, applied twice (12 dB/oct).
 pub fn lowpass(x: &mut [f32], fc: f32) {
     let a = 1.0 - (-2.0 * PI * fc / SR).exp();
     for _ in 0..2 {
@@ -247,9 +232,6 @@ pub fn lowpass(x: &mut [f32], fc: f32) {
     }
 }
 
-/// Supersaw-ish pad: per note three saws detuned by ±`spread` cents plus a
-/// square an octave down, low-passed at `cutoff`. `detune` (cents) shifts
-/// everything (an out-of-tune source). Chords are (MIDI notes, seconds).
 pub fn saw_pad(chords: &[(&[f32], f32)], spread: f32, detune: f32, cutoff: f32, gain: f32) -> Vec<f32> {
     let total: f32 = chords.iter().map(|c| c.1).sum();
     let mut out = vec![0f32; (total * SR) as usize + 1];
@@ -284,8 +266,6 @@ pub fn saw_pad(chords: &[(&[f32], f32)], spread: f32, detune: f32, cutoff: f32, 
     out
 }
 
-/// Square bass (low-passed at 300 Hz) playing (MIDI note, seconds) with a
-/// short decay per note, like a plucked synth bass / 808 body.
 pub fn square_bass(notes: &[(f32, f32)], detune: f32, gain: f32) -> Vec<f32> {
     let total: f32 = notes.iter().map(|c| c.1).sum();
     let mut out = vec![0f32; (total * SR) as usize + 1];
@@ -304,7 +284,6 @@ pub fn square_bass(notes: &[(f32, f32)], detune: f32, gain: f32) -> Vec<f32> {
     out
 }
 
-/// Dense trap hats (32nds) and claps on 2 and 4 for `secs` at `bpm`.
 pub fn hats_and_claps(bpm: f32, secs: f32, gain: f32) -> Vec<f32> {
     let mut out = silence(secs);
     let step = 60.0 / bpm / 8.0;

@@ -1,47 +1,26 @@
-//! Live meters and scopes for one watched FX slot (docs/ENGINE_PROTOCOL.md §15, "Meters and scopes").
-//!
-//! NOT audio-thread code: the engine core copies a watched slot's output into a lock-free ring
-//! (engine `meters.rs`), and the telemetry thread feeds those samples here, then sends a snapshot
-//! about 30 times a second while the slot's window is open (the Krypt Analyzer display, the
-//! Krypt EQ's live spectrum). Loudness is EBU R128 / ITU-R BS.1770 through the `ebur128` crate.
-
 use ebur128::{EbuR128, Mode};
 use rustfft::num_complex::Complex;
 use rustfft::{Fft, FftPlanner};
 use serde::Serialize;
 use std::sync::Arc;
 
-/// FFT length of the slot spectrum (≈ 11.7 Hz per bin at 48 kHz).
 pub const SCOPE_FFT: usize = 4096;
-/// Log-spaced spectrum bins, 20 Hz – 20 kHz.
 pub const SCOPE_BINS: usize = 96;
-/// Oscilloscope points sent per snapshot.
 pub const SCOPE_POINTS: usize = 256;
-/// Samples the oscilloscope spans (≈ 21 ms at 48 kHz).
 pub const SCOPE_SPAN: usize = 1024;
-/// Correlation averaging time (seconds).
 const CORR_SEC: f64 = 0.3;
-/// Loudness below this reads as silence (null).
 const LUFS_FLOOR: f64 = -70.0;
 
-/// One snapshot of a watched slot (`TelemetryFrame.scopes[key]`). Levels are rounded for the wire.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ScopeData {
-    /// Momentary loudness (400 ms), LUFS; null = silence.
     pub lufs_m: Option<f32>,
-    /// Short-term loudness (3 s), LUFS.
     pub lufs_s: Option<f32>,
-    /// Integrated loudness since the watch started (gated), LUFS.
     pub lufs_i: Option<f32>,
-    /// Highest true peak since the watch started (4x oversampled), dBTP; null = silence.
     pub true_peak: Option<f32>,
-    /// Stereo correlation −1..1 over the last ~300 ms; null = silence.
     pub correlation: Option<f32>,
-    /// `SCOPE_BINS` log-spaced magnitudes in dBFS (a full-scale sine reads ≈ 0). Every 2nd frame.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spectrum: Option<Vec<f32>>,
-    /// `SCOPE_POINTS` mid-channel samples −1..1, starting at a rising zero crossing. Every 2nd frame.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<Vec<f32>>,
 }
@@ -88,7 +67,6 @@ impl SlotScope {
         self.sr
     }
 
-    /// Feed stereo samples (any count; equal lengths).
     pub fn push(&mut self, l: &[f32], r: &[f32]) {
         let n = l.len().min(r.len());
         if n == 0 {
@@ -109,7 +87,6 @@ impl SlotScope {
         }
     }
 
-    /// Current readings; `full` adds the spectrum and the oscilloscope.
     pub fn snapshot(&mut self, full: bool) -> ScopeData {
         let lufs = |v: Result<f64, ebur128::Error>| v.ok().filter(|x| x.is_finite() && *x > LUFS_FLOOR).map(|x| round1(x as f32));
         let (m, s, i, tp) = match self.meter.as_ref() {
@@ -132,14 +109,13 @@ impl SlotScope {
         }
     }
 
-    /// `SCOPE_BINS` log-spaced bins (max of the FFT bins inside each band), dBFS, rounded to 0.1 dB.
     pub fn spectrum(&mut self) -> Vec<f32> {
         for i in 0..SCOPE_FFT {
             let s = self.hist[(self.pos + i) % SCOPE_FFT];
             self.buf[i] = Complex::new(s * self.window[i], 0.0);
         }
         self.fft.process(&mut self.buf);
-        let norm = 2.0 / (SCOPE_FFT as f32 * 0.5); // Hann coherent gain 0.5
+        let norm = 2.0 / (SCOPE_FFT as f32 * 0.5);
         let half = SCOPE_FFT / 2;
         for (k, m) in self.mags.iter_mut().enumerate() {
             *m = self.buf[k].norm() * norm;
@@ -156,7 +132,6 @@ impl SlotScope {
             let mag = if k0 <= k1 && k0 <= half {
                 self.mags[k0..=k1].iter().fold(0f32, |a, &m| a.max(m))
             } else {
-                // narrower than one FFT bin: interpolate at the band centre
                 let k = ((lo * hi).sqrt() / bin_hz).min(half as f32);
                 let i = k.floor() as usize;
                 let j = (i + 1).min(half);
@@ -168,8 +143,6 @@ impl SlotScope {
         out
     }
 
-    /// The last `SCOPE_SPAN` mid samples from the latest rising zero crossing that leaves room for them
-    /// (a steady picture for periodic signals), reduced to `SCOPE_POINTS` (the largest |x| of each group).
     pub fn scope(&mut self) -> Vec<f32> {
         for i in 0..SCOPE_FFT {
             self.lin[i] = self.hist[(self.pos + i) % SCOPE_FFT];
@@ -216,7 +189,6 @@ mod tests {
         let bins = s.spectrum();
         assert_eq!(bins.len(), SCOPE_BINS);
         let (imax, vmax) = bins.iter().enumerate().fold((0, -999f32), |a, (i, &v)| if v > a.1 { (i, v) } else { a });
-        // 1 kHz sits at log(1000/20)/log(1000) · 96 ≈ 54.4
         assert_eq!(imax, 54, "peak bin");
         assert!(vmax > -1.5 && vmax < 0.5, "peak level {vmax}");
         assert!(bins[10] < -60.0, "far bins stay low: {}", bins[10]);
@@ -224,7 +196,6 @@ mod tests {
 
     #[test]
     fn calibrated_tone_reads_its_loudness() {
-        // ITU-R BS.1770: a 997 Hz sine at −20 dBFS on both channels reads −20 LUFS (EBU Tech 3341 case 1 at −23).
         let sr = 48000.0;
         let x = sine(0.1, 997.0, 4.0, sr);
         let mut s = SlotScope::new(48000);
@@ -242,7 +213,6 @@ mod tests {
         assert_eq!(d.spectrum.as_ref().map(|v| v.len()), Some(SCOPE_BINS));
         let sc = d.scope.unwrap();
         assert_eq!(sc.len(), SCOPE_POINTS);
-        // triggered on a rising zero crossing: starts near 0 and goes up
         assert!(sc[0] >= 0.0 && sc[0] < 0.06 && sc[2] > sc[0], "{:?}", &sc[..4]);
         assert!(sc.iter().fold(0f32, |a, &v| a.max(v.abs())) > 0.095);
     }

@@ -1,26 +1,13 @@
-// Drum feel: the analyzer's 32-step drum grid (shared/library/grid.ts) at a
-// tempo reading, as per-16th hit probabilities, and the same shape measured
-// from a playbook's own KPN drum patterns, so a reference can be compared
-// with every genre. Pure.
-
 import type { DrumRole } from '../analyzer/protocol';
 import type { DrumGrid } from '../library/types';
 import type { Playbook } from '../playbooks/types';
 import { parse, type KpnNote, type KpnParseResult } from '../kpn';
 import type { DrumFeel } from './types';
 
-/** Roles compared and shown, in order (clap counts as snare, as in the analyzer). */
 export const FEEL_ROLES: readonly DrumRole[] = ['kick', 'snare', 'hat', 'openhat', 'perc'];
 
 const r2 = (x: number): number => Math.round(x * 100) / 100;
 
-/**
- * Per role, the probability of a hit on each 16th of ONE bar at a tempo reading `factor` × the detected tempo.
- * The grid holds 32 steps (32nds) per analysed bar:
- * - factor 1: one bar; a 16th has a hit when either of its two 32nds has one.
- * - factor 2 (double time): one analysed bar is two bars here; their 16ths are the analysed 32nds, averaged.
- * - factor 0.5 (half time): one bar here is two analysed bars (the same grid twice); a 16th spans four 32nds.
- */
 export function gridSteps16(grid: DrumGrid, factor: number): Partial<Record<DrumRole, number[]>> {
   const out: Partial<Record<DrumRole, number[]>> = {};
   if (!grid.bars) return out;
@@ -41,12 +28,10 @@ export function gridSteps16(grid: DrumGrid, factor: number): Partial<Record<Drum
   return out;
 }
 
-/** Hits per bar (sum of the 16th probabilities). */
 export function hitsPerBar(steps: number[] | undefined): number {
   return steps ? steps.reduce((a, b) => a + b, 0) : 0;
 }
 
-/** The drum feel of a grid at a reading (`bpm` = the reading, for the roll rate). */
 export function drumFeel(grid: DrumGrid, factor: number, detectedBpm: number, beatsPerBar: number): DrumFeel {
   const steps = gridSteps16(grid, factor);
   const k = steps.kick ?? [];
@@ -62,13 +47,10 @@ export function drumFeel(grid: DrumGrid, factor: number, detectedBpm: number, be
   return { source: grid.source, bars: grid.bars, steps, fourOnFloor, backbeat, hats, rollsPerMin };
 }
 
-/** One character per 16th, grouped by beat: 9 = nearly every bar … 1 = rare, . = never. */
 export function feelLine(steps: number[]): string {
   const ch = steps.map((p) => (p < 0.05 ? '.' : String(Math.min(9, Math.max(1, Math.round(p * 10))))));
   return [0, 4, 8, 12].map((i) => ch.slice(i, i + 4).join('')).join(' ');
 }
-
-// ── A playbook's drums, from its own KPN patterns ───────────────────────
 
 export interface PlaybookDrums {
   steps: Partial<Record<DrumRole, number[]>>;
@@ -78,7 +60,6 @@ export interface PlaybookDrums {
 const PART_TO_FEEL: Record<string, DrumRole | undefined> = { kick: 'kick', snare: 'snare', clap: 'snare', hat: 'hat', openhat: 'openhat', perc: 'perc', rim: 'perc', tom: 'perc' };
 const pbCache = new WeakMap<Playbook, PlaybookDrums | null>();
 
-/** Per role, how often each 16th has a hit across the playbook's drum patterns (bars of every pattern pooled). */
 export function playbookDrums(pb: Playbook): PlaybookDrums | null {
   if (pbCache.has(pb)) return pbCache.get(pb) ?? null;
   const counts: Partial<Record<DrumRole, number[]>> = {};
@@ -119,7 +100,6 @@ export function playbookDrums(pb: Playbook): PlaybookDrums | null {
   return out;
 }
 
-/** Cosine similarity of two step vectors (1 when both are empty). */
 export function cosine(a: number[] | undefined, b: number[] | undefined): number {
   const x = a ?? [];
   const y = b ?? [];

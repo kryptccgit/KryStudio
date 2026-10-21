@@ -1,30 +1,10 @@
-// ──────────────────────────────────────────────────────────────────────
-// FL-feel gesture hook for every continuous control (research/06 §3.1).
-//
-//   drag            vertical (up = more), ~250 px for the full range
-//   Ctrl / Shift    fine (×0.1) while dragging or wheeling
-//   double-click,
-//   Alt-click,
-//   middle-click    reset to default
-//   wheel           1% per notch (Ctrl 0.1%); stepped params move one step
-//   arrows / PgUp   keyboard steps; Home/End = min/max; Delete = reset
-//
-// Works on normalized 0..1 values. The caller maps to plain units.
-// In Electron the cursor is pointer-locked during drags (no screen-edge
-// stalls); in a plain browser it falls back to pointer capture.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface ParamDragOptions {
-  /** Current normalized value. */
   value: number;
-  /** Normalized default (reset target). */
   defaultValue: number;
-  /** Discrete positions (enums / stepped params). */
   steps?: number;
   axis?: 'x' | 'y';
-  /** Pixels for the full range. */
   rangePx?: number;
   disabled?: boolean;
   onBegin?: () => void;
@@ -88,7 +68,6 @@ export function useParamDrag(opts: ParamDragOptions) {
     try {
       el.setPointerCapture(e.pointerId);
     } catch {
-      /* capture is best effort */
     }
     state.current = { active: true, accum: o.current.value, last: o.current.value, pointerId: e.pointerId, locked: false, lockPending: false, x: e.clientX, y: e.clientY };
     if (isElectron() && typeof el.requestPointerLock === 'function') {
@@ -102,12 +81,11 @@ export function useParamDrag(opts: ParamDragOptions) {
               state.current.lockPending = false;
             },
             () => {
-              state.current.lockPending = false; // denied — capture fallback already active
+              state.current.lockPending = false;
             },
           );
         }
       } catch {
-        /* ignore */
       }
     }
     setDragging(true);
@@ -118,8 +96,6 @@ export function useParamDrag(opts: ParamDragOptions) {
     const s = state.current;
     if (!s.active) return;
     const axis = o.current.axis ?? 'y';
-    // Pointer-locked: the cursor is frozen, so only movement deltas exist.
-    // Otherwise use client deltas (movementX/Y is unreliable across DPI / synthetic input).
     const locked = s.locked && !!e.currentTarget.ownerDocument.pointerLockElement;
     const dx = locked ? e.movementX : e.clientX - s.x;
     const dy = locked ? e.movementY : e.clientY - s.y;
@@ -140,7 +116,6 @@ export function useParamDrag(opts: ParamDragOptions) {
     try {
       e.currentTarget.releasePointerCapture(s.pointerId);
     } catch {
-      /* ignore */
     }
     const doc = e.currentTarget.ownerDocument;
     if (doc.pointerLockElement) doc.exitPointerLock();
@@ -197,7 +172,6 @@ export function useParamDrag(opts: ParamDragOptions) {
     o.current.onEnd?.();
   };
 
-  // Wheel needs a non-passive native listener (React's is passive).
   const ref = useCallback((el: HTMLElement | null) => {
     const prev = elRef.current;
     if (prev) prev.removeEventListener('wheel', onWheelNative as EventListener);
@@ -244,7 +218,6 @@ export function useParamDrag(opts: ParamDragOptions) {
       onPointerMove,
       onPointerUp: finish,
       onPointerCancel: finish,
-      // Acquiring pointer lock releases capture: that must not end the drag.
       onLostPointerCapture: (e: React.PointerEvent<HTMLElement>) => {
         if (state.current.locked || state.current.lockPending) return;
         finish(e);

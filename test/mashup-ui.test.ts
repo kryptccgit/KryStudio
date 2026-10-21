@@ -1,6 +1,3 @@
-// Auto Mashup dialog logic (src/mashup/logic.ts): the form reducer (slots, swap, options, stem grid), form →
-// MashupRequest, request keys, tempo chips, score tone + ring, shift labels, the plan timeline layout, suggestion →
-// option mapping, progress stages, failure messages; plus the entry points and guide anchors being wired.
 import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -50,7 +47,6 @@ function repoRoot(): string {
     try {
       if (statSync(path.join(dir, 'package.json')).isFile()) return dir;
     } catch {
-      /* keep climbing */
     }
     dir = path.dirname(dir);
   }
@@ -257,12 +253,10 @@ test('timeline: blocks placed by bar, toned by the songs they use, labelled with
   assert.equal(t.blocks[1].shift, 'vocal +2 st, ×1.04');
   assert.equal(t.blocks[0].shift, '', 'B is untouched');
   assert.deepEqual(t.ticks, [0, 16, 32, 48]);
-  // Sections past plan.bars widen the total; empty sections are dropped.
   const t2 = timelineLayout({ ...PLAN, bars: 0, sections: [...PLAN.sections, { name: 'Tag', startBar: 48, bars: 16, uses: 'A' }, { name: 'Nothing', startBar: 64, bars: 0, uses: 'B' }] });
   assert.equal(t2.total, 64);
   assert.equal(t2.blocks.length, 5);
   assert.ok(t2.blocks.every((b) => b.left + b.width <= 1 + 1e-9));
-  // The planner's grid is 1-based and its `uses` name the songs (shortened to ~24 characters).
   const names = { a: 'Midnight City (Extended Club Mix)', b: 'Nightcall' };
   const t3 = timelineLayout(
     {
@@ -303,7 +297,6 @@ test('suggestions → options: tempo readings, vocal direction, anchor, style, t
   assert.deepEqual(suggestionPatch('Try Krypt Tune off: the vocal is already in tune'), { tune: 'off' });
   assert.deepEqual(suggestionPatch('Use 64 bars: the beat has only 64 bars of material'), { bars: 64 });
   assert.deepEqual(suggestionPatch('Without transitions the hard cuts suit this pair'), { transitions: false });
-  // The planner's own wording (shared/mashup/plan.ts).
   assert.deepEqual(suggestionPatch('Use A at double time: it plays ×1.02 instead of ×0.51.'), { factorA: 2 });
   assert.deepEqual(suggestionPatch('Anchor "middle": each song stretches at most ×1.09 instead of ×1.19.'), { anchor: 'middle' });
   assert.deepEqual(suggestionPatch('Take the vocal from B instead: a better fit (score 81 vs 70).'), { vocalFrom: 'b' });

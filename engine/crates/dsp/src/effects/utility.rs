@@ -1,6 +1,3 @@
-//! krypt.utility — gain, balance, M/S width, mono, polarity, DC filter.
-//! Every control is smoothed (polarity flips crossfade through zero).
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::filters::DcBlock;
 use crate::blocks::{db_to_gain, Smooth};
@@ -34,7 +31,6 @@ pub fn descriptor() -> PluginDescriptor {
 
 pub struct Utility {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     gain: Smooth,
     gl: Smooth,

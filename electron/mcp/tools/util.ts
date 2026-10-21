@@ -1,9 +1,3 @@
-// Shared helpers for tools: name/id resolution (names over UUIDs, research/04
-// §4.3), human units (dB, bars.steps, "1.2kHz"), patch → changed ids, and the
-// user-path policy (research/04 §7.1 T6): the File access setting (anywhere /
-// ask / browser), the files the open project already uses, and the refusals
-// that hold in every mode. Asking the user is electron/mcp/consent.ts.
-
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Patch } from 'immer';
@@ -18,9 +12,6 @@ import { AUDIO_FILE_RE } from '@shared/audio/formats';
 import { packById } from '@shared/packs/catalog';
 import { parsePackPath, PACK_SCHEME } from '@shared/packs/types';
 
-// ── Strings ─────────────────────────────────────────────────────────────
-
-/** Strip control / bidi characters and cap length: names are user data, never instructions. */
 export function safeName(s: string | null | undefined, max = 80): string {
   const clean = String(s ?? '')
     .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, '')
@@ -40,8 +31,6 @@ function listNames(names: string[], max = 12): string {
   const shown = names.slice(0, max).join(', ');
   return names.length > max ? `${shown}, … (+${names.length - max})` : shown || '(none)';
 }
-
-// ── Units ───────────────────────────────────────────────────────────────
 
 export function gainToDb(g: number): number {
   return g <= 0 ? -Infinity : 20 * Math.log10(g);
@@ -66,13 +55,10 @@ export function fmtPan(p: number): string {
   return `${Math.round(Math.abs(p) * 100)}${p < 0 ? 'L' : 'R'}`;
 }
 
-// ── Time ────────────────────────────────────────────────────────────────
-
 export function barTicksOf(p: Project): number {
   return ticksPerBar(p.transport.timeSig);
 }
 
-/** "3" → bar 3 start; "3.5" → bar 3, 16th step 5 (1-based). Numbers are bars. */
 export function parsePosition(v: string | number, ts: TimeSig): number {
   const bar = ticksPerBar(ts);
   const step = PPQ / 4;
@@ -88,7 +74,6 @@ export function parsePosition(v: string | number, ts: TimeSig): number {
   return (b - 1) * bar + (s - 1) * step;
 }
 
-/** "17-24" → [start, end) ticks; "5" → bar 5 only. */
 export function parseBarRange(v: string, ts: TimeSig): { start: number; end: number; bars: number } {
   const bar = ticksPerBar(ts);
   const m = /^\s*(\d+)\s*(?:[-–:]\s*(\d+))?\s*$/.exec(v);
@@ -111,8 +96,6 @@ export function fmtBars(ticks: number, ts: TimeSig): string {
   const b = ticks / ticksPerBar(ts);
   return Number.isInteger(b) ? plural(b, 'bar') : `${round(b, 2)} bars`;
 }
-
-// ── Plugins ─────────────────────────────────────────────────────────────
 
 const PLUGIN_ALIASES: Record<string, string> = {
   synth: 'krypt.triosc',
@@ -196,7 +179,6 @@ export function pluginName(catalog: PluginCatalog, id: string): string {
   return catalog.plugins.find((p) => p.id === id)?.name ?? id;
 }
 
-/** Parse a human value for a ParamSpec: 1200, "1.2kHz", "-6dB", "50%", "250ms", "Saw", "on". */
 export function parseParamValue(spec: ParamSpec, v: number | string | boolean): number {
   if (typeof v === 'boolean') return v ? Math.min(spec.max, Math.max(spec.min, 1)) : spec.min;
   if (typeof v === 'number') {
@@ -241,8 +223,6 @@ export function describeValue(spec: ParamSpec, v: number): string {
   return formatParam(spec, v);
 }
 
-// ── Entity resolution ───────────────────────────────────────────────────
-
 const CHANNEL_ALIASES: string[][] = [
   ['kick', 'bd', 'bassdrum', 'kickdrum'],
   ['snare', 'sd', 'snr'],
@@ -256,7 +236,6 @@ function aliasGroup(n: string): string[] | undefined {
   return CHANNEL_ALIASES.find((g) => g.includes(n));
 }
 
-/** Resolve a channel by id, name (case-insensitive), loose name or common drum alias. null when not found. */
 export function tryFindChannel(p: Project, ref: string): { id: string } | { ambiguous: string[] } | null {
   if (p.channels[ref]) return { id: ref };
   const chans = p.channelOrder.map((id) => p.channels[id]);
@@ -308,12 +287,10 @@ export function tryFindPattern(p: Project, ref: string): Pattern | null {
   }
 }
 
-/** Mixer insert by id, "master", mixer index (0 = master), insert name, or a channel (its routed insert). */
 export function findInsert(p: Project, ref: string | number): MixerInsert {
   const ins = p.mixer.inserts;
   const asText = String(ref).trim();
   if (typeof ref === 'string') {
-    // Names first: channels and inserts are often called "808".
     const byName = p.mixer.insertOrder.filter((id) => ins[id].name.toLowerCase() === asText.toLowerCase());
     if (byName.length === 1) return ins[byName[0]];
     if (/^\d+$/.test(asText)) {
@@ -376,8 +353,6 @@ export function findSlot(ins: MixerInsert, ref: string | number, catalog: Plugin
   fail(`No effect "${safeName(r)}" on ${safeName(ins.name)}. Chain: ${listNames(ins.slotOrder.map((s, i) => `${i + 1}. ${pluginName(catalog, ins.slots[s].type)}`))}`);
 }
 
-// ── Patches → changed ids ───────────────────────────────────────────────
-
 export function idsFromPatches(patches: Patch[]): string[] {
   const out = new Set<string>();
   for (const p of patches) {
@@ -439,41 +414,28 @@ export function touchedFromIds(ids: string[]): Array<{ kind: string; id: string 
   return ids.map((id) => ({ kind: KIND_BY_PREFIX[id.split('_')[0]] ?? id, id }));
 }
 
-// ── User file paths (allow-list + consent) ──────────────────────────────
-
 export const AUDIO_EXT = AUDIO_FILE_RE;
-/** Images a tool may read (set_cover only). */
 export const IMAGE_EXT = /\.(png|jpe?g)$/i;
 export const MIDI_EXT = /\.(mid|midi|smf)$/i;
 
-/** What a path argument must point at. */
 export type UserPathKind = 'audio' | 'folder' | 'audio-or-folder' | 'image' | 'midi';
 
-/** Files / folders the user allowed beyond the Browser folders (PathConsent: "Allow this file", this app session). */
 export interface PathGrants {
   granted(real: string, isDir: boolean): boolean;
 }
 
-/**
- * The File access mode a caller gets: the setting (absent = 'anywhere', the default), except that the optional
- * HTTP endpoint never gets 'anywhere' (it is capped at 'ask'): any local process that reads the token from the
- * profile could talk to it, while the pipe is reached through the shim the user's own MCP client launched.
- */
 export function fileAccessMode(settings: Pick<Settings, 'mcp'>, via?: ToolCaller['via']): FileAccessMode {
   const m = settings.mcp.fileAccess ?? 'anywhere';
   return via === 'http' && m === 'anywhere' ? 'ask' : m;
 }
 
-/** Everything a path check needs: the mode, the Browser folders (+ factory), this session's grants, the project's files. */
 export interface PathAccess {
   mode: FileAccessMode;
   roots: string[];
   grants?: PathGrants;
-  /** Absolute paths of the files the open project uses (always readable, whatever the mode). */
   projectFiles: string[];
 }
 
-/** The files the open project references: samples the user dropped in, recordings, stems, imports. */
 export function projectFilePaths(deps: Pick<MainDeps, 'doc' | 'project'>): string[] {
   const out: string[] = [];
   for (const s of Object.values(deps.doc.project.samples)) {
@@ -481,7 +443,6 @@ export function projectFilePaths(deps: Pick<MainDeps, 'doc' | 'project'>): strin
     try {
       out.push(deps.project.resolveSamplePath(s.path));
     } catch {
-      /* unresolvable: not a file the project can use either */
     }
   }
   return out;
@@ -491,7 +452,6 @@ export function pathAccess(deps: MainDeps, caller?: Pick<ToolCaller, 'via'>): Pa
   return { mode: fileAccessMode(deps.getSettings(), caller?.via), roots: deps.project.allowedRoots(), grants: deps.consent, projectFiles: projectFilePaths(deps) };
 }
 
-/** Old-style callers: a plain list of roots (+ grants) is the ask / browser policy without project files. */
 function toAccess(a: PathAccess | string[], grants?: PathGrants): PathAccess {
   return Array.isArray(a) ? { mode: grants ? 'ask' : 'browser', roots: a, grants, projectFiles: [] } : a;
 }
@@ -506,7 +466,6 @@ function realKey(p: string): string | null {
   }
 }
 
-/** Whether a real path is one of the project's files (compared after resolving links). */
 export function isProjectFile(real: string, files: string[]): boolean {
   if (!files.length) return false;
   const k = keyOf(real);
@@ -514,13 +473,11 @@ export function isProjectFile(real: string, files: string[]): boolean {
   return false;
 }
 
-/** C:\ (a whole drive): never a folder an agent reads, in any mode. */
 export function isDriveRoot(p: string): boolean {
   const r = path.resolve(p);
   return r.toLowerCase() === path.parse(r).root.toLowerCase();
 }
 
-/** Whether the policy lets an agent read this (already validated) path without asking anyone. */
 export function accessAllows(acc: PathAccess, real: string, isDir: boolean): boolean {
   if (insideRoots(real, acc.roots, isDir)) return true;
   if (!isDir && isProjectFile(real, acc.projectFiles)) return true;
@@ -529,21 +486,18 @@ export function accessAllows(acc: PathAccess, real: string, isDir: boolean): boo
   return false;
 }
 
-/** The refusal for a path the policy doesn't cover (browser mode, or ask mode with nobody to ask). */
 export function outsideMessage(input: string, acc: PathAccess, what: 'file' | 'folder' = 'file'): string {
   const roots = acc.roots.length ? acc.roots.map((r) => safeName(r, 120)).join('; ') : 'none added yet';
   const setting = acc.mode === 'browser' ? ' (Settings ▸ Agents ▸ File access is set to "Browser folders only")' : '';
   return `"${safeName(input, 200)}" is outside the folders Krypt Studio lets agents read${setting}. Allowed: the factory kit, the files this project already uses, and the Browser folders (${roots}). Ask the user to add its ${what === 'folder' ? 'parent folder' : 'folder'} in the Browser panel${acc.mode === 'browser' ? ', or to set File access to "Anywhere" or "Ask me" in Settings ▸ Agents' : ''}.`;
 }
 
-/** One pair of surrounding quotes (straight or curly) and stray whitespace removed: "C:\My Music\x.mp3" → C:\My Music\x.mp3. */
 export function unquotePath(s: string): string {
   const t = s.trim();
   const m = /^(["'“‘])(.*)(["'”’])$/.exec(t);
   return (m ? m[2] : t).trim();
 }
 
-/** A path-shaped argument (drive letter, UNC / device, factory:), as opposed to a clip id or a channel name. */
 export function looksLikePath(s: string): boolean {
   const t = unquotePath(s);
   return /^[A-Za-z]:[\\/]/.test(t) || /^[\\/]{2}/.test(t) || t.startsWith('factory:');
@@ -553,17 +507,9 @@ function isNetworkPath(s: string): boolean {
   return /^[\\/]{2}/.test(s);
 }
 
-/**
- * Validate a local path an agent passed: absolute on a drive letter; no network (UNC), device (\\.\, \\?\) or
- * alternate-data-stream paths; existing; an audio file (extension from shared/audio/formats.ts, checked on the
- * name AND on the real target) or a folder. Returns the canonical real path. These checks REFUSE outright: the
- * user is never asked about such a path.
- */
 export function realUserPath(input: string, kind: UserPathKind): { real: string; isDir: boolean } {
   const s = unquotePath(input);
   const what = kind === 'folder' ? 'folder' : 'file';
-  // UNC first, before touching the disk: even probing \\host\share makes Windows sign in to that host, which can leak
-  // the user's Windows login (NTLM hash) to whoever runs it.
   if (isNetworkPath(s)) fail(`Network (UNC) and device paths are not allowed; use a local ${what} on this PC (opening a \\\\host\\share path would send your Windows login to that host)`);
   if (kind === 'image' || kind === 'midi') return realTypedFile(s, kind);
   if (!/^[A-Za-z]:[\\/]/.test(s)) fail(kind === 'folder' ? 'folder must be an absolute path, e.g. C:\\Music\\Dark Trap' : `Paths must be absolute (C:\\...\\kick.wav)${kind === 'audio' ? ' or "factory:drums/kick.wav"' : ''}`);
@@ -576,7 +522,6 @@ export function realUserPath(input: string, kind: UserPathKind): { real: string;
   } catch {
     fail(`${kind === 'folder' ? 'Folder' : 'File'} not found: ${safeName(s, 200)}`);
   }
-  // A link may lead somewhere the input didn't say: the target is what gets read.
   if (isNetworkPath(real) || !/^[A-Za-z]:[\\/]/.test(real)) fail(`"${safeName(s, 200)}" leads to a network or device location, which agents can't read`);
   let isDir = false;
   try {
@@ -592,8 +537,6 @@ export function realUserPath(input: string, kind: UserPathKind): { real: string;
   return { real, isDir };
 }
 
-/** realUserPath for a PNG / JPEG (set_cover): the same refusals, image extensions instead of audio ones. */
-/** A PNG / JPEG (set_cover) or a MIDI file (import_midi): absolute, local, that type, a file. */
 function realTypedFile(s: string, kind: 'image' | 'midi'): { real: string; isDir: boolean } {
   const ext = kind === 'image' ? IMAGE_EXT : MIDI_EXT;
   const notType = (p: string) => `"${safeName(path.basename(p))}" is not ${kind === 'image' ? 'a PNG or JPEG image' : 'a MIDI file (.mid)'}`;
@@ -618,7 +561,6 @@ function realTypedFile(s: string, kind: 'image' | 'midi'): { real: string; isDir
   return { real, isDir: false };
 }
 
-/** Whether a real path lies inside one of the roots (a root itself counts only when allowRoot). */
 export function insideRoots(real: string, roots: string[], allowRoot = false): boolean {
   return roots.some((root) => {
     let r: string;
@@ -632,12 +574,6 @@ export function insideRoots(real: string, roots: string[], allowRoot = false): b
   });
 }
 
-/**
- * Validate a sample path an agent asked for. Returns the path to store in the
- * project ('factory:...' stays as-is) and the absolute file path.
- * Rejects UNC / device / ADS / relative / non-audio paths in every mode, and
- * whatever the File access policy doesn't cover (see accessAllows).
- */
 export function checkSamplePath(input: string, access: PathAccess | string[], resolveFactory: (p: string) => string, grants?: PathGrants): { docPath: string; abs: string } {
   const s = unquotePath(input);
   if (s.startsWith('factory:')) {
@@ -649,7 +585,6 @@ export function checkSamplePath(input: string, access: PathAccess | string[], re
     return { docPath: s, abs };
   }
   if (s.startsWith(PACK_SCHEME)) {
-    // A sound pack's sample (find_samples lists the installed ones). Agents never download packs.
     const pp = parsePackPath(s);
     if (!pp) fail(`"${safeName(s)}" is not a valid sound-pack sample path (pack:<pack>/<file>)`);
     if (!AUDIO_EXT.test(pp.path)) fail(`"${safeName(s)}" is not an audio file (wav, aiff, flac, mp3, ogg)`);
@@ -670,12 +605,10 @@ export function checkSamplePath(input: string, access: PathAccess | string[], re
   return { docPath: real, abs: real };
 }
 
-/** checkSamplePath under the caller's File access policy (the setting, the Browser folders, grants, project files). */
 export function agentSamplePath(deps: MainDeps, input: string, caller?: Pick<ToolCaller, 'via'>): { docPath: string; abs: string } {
   return checkSamplePath(input, pathAccess(deps, caller), (s) => deps.project.resolveSamplePath(s));
 }
 
-/** A PNG / JPEG an agent asked for (set_cover): the same policy as audio files, image extensions instead. */
 export function agentImagePath(deps: MainDeps, input: string, caller?: Pick<ToolCaller, 'via'>): string {
   const s = unquotePath(input);
   const { real } = realUserPath(s, 'image');
@@ -684,7 +617,6 @@ export function agentImagePath(deps: MainDeps, input: string, caller?: Pick<Tool
   return real;
 }
 
-/** A .mid file an agent asked for (import_midi): the same policy as audio files, MIDI extensions instead. */
 export function agentMidiPath(deps: MainDeps, input: string, caller?: Pick<ToolCaller, 'via'>): string {
   const s = unquotePath(input);
   const { real } = realUserPath(s, 'midi');

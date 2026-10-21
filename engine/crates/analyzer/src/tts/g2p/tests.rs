@@ -9,9 +9,9 @@ fn dictionary_words_in_kokoro_phonemes() {
     let cases = [
         ("hello", "həlˈO"),
         ("world", "wˈɜɹld"),
-        ("water", "wˈɔɾəɹ"),   // US flap
-        ("party", "pˈɑɹɾi"),   // flap after R
-        ("button", "bˈʌtən"),  // no flap before final -ən
+        ("water", "wˈɔɾəɹ"),
+        ("party", "pˈɑɹɾi"),
+        ("button", "bˈʌtən"),
         ("music", "mjˈuzɪk"),
         ("thinking", "θˈɪŋkɪŋ"),
         ("judge", "ʤˈʌʤ"),
@@ -32,24 +32,19 @@ fn function_words_are_weak() {
     assert_eq!(ph("of"), "əv");
     assert_eq!(ph("to"), "tə");
     assert_eq!(word("and").1, Source::Function);
-    // "the" before a vowel sound.
     assert!(phonemize("the apple").phonemes.starts_with("ði "));
     assert!(phonemize("the beat").phonemes.starts_with("ðə "));
 }
 
 #[test]
 fn out_of_dictionary_words() {
-    // Suffixes and compounds against the dictionary.
     assert_eq!(word("beatmakers"), ("bˈitmˌAkəɹz".to_string(), Source::Derived));
     assert_eq!(word("vibing").1, Source::Derived);
     assert_eq!(ph("vibing"), "vˈIbɪŋ");
     assert_eq!(ph("lovesick"), "lˈʌvsˌɪk");
-    // Dropped g.
     assert_eq!(ph("vibin'"), "vˈIbɪn");
-    // Acronyms are spelled.
     assert_eq!(word("DJ"), ("dˌiʤˈA".to_string(), Source::Spelled));
     assert_eq!(ph("MC"), "ˌɛmsˈi");
-    // Letter-to-sound rules for made-up words.
     assert_eq!(word("zorblax"), ("zˈɔɹblæks".to_string(), Source::Rules));
     assert_eq!(ph("krypt"), "kɹˈɪpt");
     assert_eq!(ph("skrrt"), "skɹt");
@@ -82,7 +77,6 @@ fn punctuation_and_word_spans() {
         let s: String = chars[w.start..w.end].iter().collect();
         assert_eq!(s, ph(&w.text.to_lowercase()), "{}", w.text);
     }
-    // Every output character is a Kokoro token.
     let all = phonemize("Zany quixotic jukebox vibes, 1,234 ways — whoa… (FYI) \"quoted\"; colon: done!");
     let (ids, _) = super::super::vocab::encode(&all.phonemes);
     assert_eq!(ids.len(), all.phonemes.chars().count(), "{}", all.phonemes);

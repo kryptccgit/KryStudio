@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-//! Test helpers shared by the integration tests.
 
 use std::sync::Arc;
 
@@ -12,7 +11,6 @@ pub fn ctx(frames: usize, beat_pos: f64, bpm: f64, playing: bool) -> ProcessCont
     ProcessContext { sample_rate: SR, bpm, beats_per_bar: 4.0, playing, beat_pos, frames }
 }
 
-/// A decaying stereo test sample: 440 Hz sine + 2nd harmonic at `sr`.
 pub fn test_sample(sr: f32, secs: f32, root: Option<u8>) -> Arc<SampleData> {
     let n = (secs * sr) as usize;
     let l: Vec<f32> = (0..n)
@@ -26,14 +24,12 @@ pub fn test_sample(sr: f32, secs: f32, root: Option<u8>) -> Arc<SampleData> {
     Arc::new(SampleData { sample_rate: sr, channels: vec![l, r], root_key: root })
 }
 
-/// Pure sine sample (mono) for pitch tests.
 pub fn sine_sample(sr: f32, hz: f64, secs: f32, root: Option<u8>) -> Arc<SampleData> {
     let n = (secs * sr) as usize;
     let l = (0..n).map(|i| (0.5 * (std::f64::consts::TAU * hz * i as f64 / sr as f64).sin()) as f32).collect();
     Arc::new(SampleData { sample_rate: sr, channels: vec![l], root_key: root })
 }
 
-/// Render an instrument for `frames`, returning (L, R).
 pub fn render_inst(inst: &mut dyn Instrument, frames: usize) -> (Vec<f32>, Vec<f32>) {
     let mut l = vec![0.0f32; frames];
     let mut r = vec![0.0f32; frames];
@@ -46,7 +42,6 @@ pub fn render_inst(inst: &mut dyn Instrument, frames: usize) -> (Vec<f32>, Vec<f
     (l, r)
 }
 
-/// Run an effect over a stereo signal in blocks, in place, with an optional sidechain.
 pub fn run_fx(fx: &mut dyn Effect, l: &mut [f32], r: &mut [f32], bpm: f64, sc: Option<(&[f32], &[f32])>) {
     let frames = l.len();
     let mut at = 0;
@@ -80,7 +75,6 @@ pub fn noise(n: usize, seed: u32, amp: f32) -> Vec<f32> {
         .collect()
 }
 
-/// Estimate the fundamental from rising zero crossings.
 pub fn zc_freq(x: &[f32], sr: f32) -> f32 {
     let mut first = None;
     let mut last = 0usize;

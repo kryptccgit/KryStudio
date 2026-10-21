@@ -1,7 +1,3 @@
-// MCP gaps closed in the release / file / recording tools: setup_recording (the Recording Studio's document side,
-// never the mic), export_audio stems, export_midi, import_midi, save_project, set_cover clear and the project info
-// in set_song_info, plus the services they use (ExportService.exportStemsNew / writeNewFile, ProjectService.saveNew).
-// The new tools run through a local runner that mirrors callTool (input parse, path consent, one agent group).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -75,7 +71,6 @@ function rig(over: Partial<MainDeps> = {}, status: { path: string | null; dirty:
     ...over,
   };
   const caller: ToolCaller = { actor: { kind: 'agent', clientId: 'rr', name: 'RR Agent' }, session: newSession(), via: 'test' };
-  /** A tool through the same steps as callTool: input parse, path consent, one agent group. */
   const runDef = async (def: ToolDef, raw: unknown = {}): Promise<{ ok: boolean; message: string; data?: unknown }> => {
     const parsed = def.input.safeParse(raw);
     if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? 'bad input' };
@@ -107,8 +102,6 @@ function rig(over: Partial<MainDeps> = {}, status: { path: string | null; dirty:
   return { doc, deps, runDef, call, saved, root };
 }
 
-// ── setup_recording ──────────────────────────────────────────────────
-
 test('setup_recording: reports the setup read-only, sets up vocals with a chain, retargets, never touches the mic', async () => {
   let armed = false;
   const { doc, runDef } = rig({ recorder: { status: () => ({ armed, input: null }) } });
@@ -130,14 +123,12 @@ test('setup_recording: reports the setup read-only, sets up vocals with a chain,
   assert.match(r.message, /New insert \+ new track "Lead Vox" with the ".+" chain set as the recording target/);
   assert.equal(doc.getHistory().filter((h) => h.actorKey === 'agent:rr').length, 1, 'one undo step');
 
-  // A second run reuses (and renames) them; "none" loads no chain and keeps the effects.
   const again = await runDef(setupRecording, { vocals: 'Vocals', chain: 'none' });
   assert.equal(again.ok, true, again.message);
   assert.equal(doc.project.mixer.inserts[ins.id].name, 'Vocals');
   assert.equal(doc.project.mixer.inserts[ins.id].slotOrder.length, ins.slotOrder.length);
   assert.match(again.message, /Renamed insert \+ renamed track "Vocals" \(its effects unchanged\)/);
 
-  // Retarget by name / clear; the master is refused; arguments that don't go together are refused.
   assert.equal((await runDef(setupRecording, { insert: null, track: null })).ok, true);
   assert.equal(doc.project.recording, undefined);
   assert.match((await runDef(setupRecording, { insert: 'Master' })).message, /master/i);
@@ -147,8 +138,6 @@ test('setup_recording: reports the setup read-only, sets up vocals with a chain,
   assert.match((await runDef(setupRecording)).message, /; armed\./);
   assert.match(setupRecording.description, /You CAN'T arm, record, pick the microphone or turn monitoring on/);
 });
-
-// ── set_song_info (project info) / set_cover clear ───────────────────
 
 test('set_song_info writes the project name, author and notes too; set_cover clear removes the cover', async () => {
   const { doc, call } = rig();
@@ -169,8 +158,6 @@ test('set_song_info writes the project name, author and notes too; set_cover cle
   assert.equal(doc.project.meta.cover, undefined);
   assert.match((await call('set_cover', { clear: true, generate: true })).message, /only one of them/);
 });
-
-// ── export_audio stems (tool + ExportService) ────────────────────────
 
 test('export_audio stems: a NEW "<name> stems" folder each time, one file per insert + Master, never normalized', async () => {
   const music = path.join(TMP, 'music');
@@ -203,14 +190,11 @@ test('export_audio stems: a NEW "<name> stems" folder each time, one file per in
   const b = await call('export_audio', { stems: true, name: 'Demo' });
   assert.equal((b.data as { dir: string }).dir, `${dir} 2`, 'never into an existing folder');
   assert.match((await call('export_audio', { stems: true, normalize: true })).message, /never normalized/);
-  // A failed render leaves no empty folder behind.
   const failing = new ExportService({ ...(exporter as unknown as { deps: object }).deps, engine: { render: async () => ({ ok: false, message: 'engine down' }) } } as never);
   const f = await failing.exportStemsNew({ scope: { kind: 'song' }, format: 'wav24', name: 'Broken' });
   assert.equal(f.ok, false);
   assert.equal(fs.existsSync(path.join(music, 'Krypt Studio', 'Broken stems')), false);
 });
-
-// ── export_midi / import_midi ────────────────────────────────────────
 
 test('export_midi writes a NEW .mid that reads back; import_midi makes a pattern from a .mid, same file rules as audio', async () => {
   const music = path.join(TMP, 'music-midi');
@@ -240,7 +224,6 @@ test('export_midi writes a NEW .mid that reads back; import_midi makes a pattern
   r2.doc.exec('patterns.add', { name: 'Empty' }, { actor: { kind: 'user' } as never });
   assert.match((await r2.runDef(exportMidi, { pattern: 'Empty' })).message, /has no notes to export/);
 
-  // import: the exported file, from the Browser folder.
   const mid = path.join(ROOT, 'hook.mid');
   fs.writeFileSync(mid, writeSmf(patternToSmf(r2.doc.project, patId)));
   const before = doc.project.patternOrder.length;
@@ -254,15 +237,12 @@ test('export_midi writes a NEW .mid that reads back; import_midi makes a pattern
   assert.deepEqual(keys.sort((a, b) => a[0] - b[0]), [[0, 60], [960, 64]]);
   assert.match(im.message, /Imported 1 track \(2 notes\) into pattern "hook"/);
   assert.equal(doc.getHistory().filter((h) => h.actorKey === 'agent:rr').length, 1, 'one undo step');
-  // Outside the Browser folders in 'browser' mode, and not a MIDI file: refused before anything changes.
   fs.writeFileSync(path.join(OUTSIDE, 'x.mid'), fs.readFileSync(mid));
   const v = doc.version;
   assert.equal((await runDef(importMidi, { path: path.join(OUTSIDE, 'x.mid') })).ok, false);
   assert.match((await runDef(importMidi, { path: path.join(ROOT, 'hook.wav') })).message, /not a MIDI file/);
   assert.equal(doc.version, v);
 });
-
-// ── save_project (tool + ProjectService.saveNew) ─────────────────────
 
 test('save_project: saves a saved project to its file, refuses a never-saved one without a name, else a NEW file', async () => {
   const saved = rig({}, { path: path.join(TMP, 'Song.kstudio'), dirty: true });
@@ -278,7 +258,6 @@ test('save_project: saves a saved project to its file, refuses a never-saved one
   assert.equal((await fresh.runDef(saveProject, { name: 'First Song' })).ok, true);
   assert.deepEqual(fresh.saved, ['new:First Song']);
 
-  // The real service: a NEW file in the default folder, "(2)" when the name is taken; a saved project refuses.
   const root = path.join(TMP, 'svc');
   fs.mkdirSync(root, { recursive: true });
   const doc = new DocHost(createDefaultProject('Svc'), CATALOG);

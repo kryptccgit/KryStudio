@@ -1,8 +1,3 @@
-//! Stock insert effects. Every effect processes in place, reports its
-//! latency, clears tails in `reset()`, and never allocates in `process`.
-
-// Per-sample index loops over parallel buffers are the clearest DSP style;
-// smoothers expose `next()` deliberately (they are not iterators).
 #![allow(clippy::needless_range_loop, clippy::should_implement_trait)]
 
 pub mod analyzer;
@@ -37,19 +32,16 @@ mod meter_tests;
 
 use crate::ProcessContext;
 
-/// Frames to process this block (defensive against short buffers).
 #[inline]
 pub(crate) fn frames(ctx: &ProcessContext, buf: &[&mut [f32]; 2]) -> usize {
     ctx.frames.min(buf[0].len()).min(buf[1].len())
 }
 
-/// Sample-rate guard shared by effects.
 #[inline]
 pub(crate) fn sane_sr(sr: f32) -> f32 {
     crate::instruments::sampler::sanitize_sr(sr)
 }
 
-/// Replace non-finite samples in a block with silence (cheap insurance).
 #[inline]
 pub(crate) fn sanitize_block(buf: &mut [&mut [f32]; 2], n: usize) {
     for ch in buf.iter_mut() {

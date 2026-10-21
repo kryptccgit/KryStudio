@@ -1,29 +1,3 @@
-//! krypt.gate — "Krypt Gate/Time": tempo-locked time and volume
-//! manipulation in the spirit of the classic beat-slicing workflow.
-//!
-//! Time engine: every input sample is written to a ring buffer (16 s, i.e.
-//! 4 bars at 60 bpm). Each pattern maps the position inside its cycle `u`
-//! (in beats, locked to `ctx.beat_pos`) to a LAG ≥ 0 behind the present —
-//! stutters hold the lag at slice multiples, half-time grows it at half
-//! speed, reverse at double speed, tape stop and scratch follow smooth speed
-//! curves. Lags are never negative (look-back only), so the plugin adds no
-//! latency. Wherever the lag jumps (slice restarts, cycle wraps, engaging
-//! or releasing) two read heads crossfade over the Smoothing time.
-//!
-//! Volume engine: each pattern also yields a gain (gates, triplet chops,
-//! tape-stop fade) smoothed by the same Smoothing time.
-//!
-//! Trigger: "Always" runs the patterns on the bar grid while the transport
-//! plays. "Active param" runs them only while `active` is on (meant for
-//! automation); each activation restarts the pattern from the 1/16 grid
-//! line at or before the activation point.
-//!
-//! Custom steps (pattern 10): up to 16 steps of one division, each with a
-//! time mode (`STEP_MODES`) and a gain. Consecutive steps with the same mode
-//! form a RUN (runs never wrap past step 1): half speed, reverse, repeat and
-//! the tape curves span the whole run, rolls work per step. Still look-back
-//! only, so still no latency.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::delay::DelayLine;
 use crate::blocks::lfo::sane_bpm;
@@ -45,13 +19,10 @@ pub const PATTERNS: [&str; 11] = [
     "Custom steps",
 ];
 
-/// Index of "Custom steps" in `PATTERNS`.
 pub const CUSTOM: usize = 10;
 
-/// Time mode of one custom step (shared/plugins/gateSteps.ts mirrors this list).
 pub const STEP_MODES: [&str; 9] = ["Play", "Roll x2", "Roll x3", "Roll x4", "Repeat prev", "Half speed", "Reverse", "Tape stop", "Tape start"];
 const STEP_DIVS: [&str; 4] = ["1/32", "1/16", "1/8", "1/4"];
-/// Length of each `STEP_DIVS` entry in beats.
 const STEP_DIV_BEATS: [f64; 4] = [0.125, 0.25, 0.5, 1.0];
 pub const MAX_STEPS: usize = 16;
 
@@ -62,7 +33,6 @@ param_table! {
     Depth => lin("depth", "Depth", 0.0, 1.0, 1.0, "%", "Gate/Time"),
     Smoothing => logp("smoothing", "Smoothing", 0.5, 50.0, 6.0, "ms", "Gate/Time"),
     Mix => lin("mix", "Mix", 0.0, 1.0, 1.0, "%", "Output"),
-    // Custom steps (appended: the wave-2 snapshot only allows appending)
     StepDiv => choice("stepDiv", "Step length", &STEP_DIVS, 1, "Steps"),
     StepCount => stepped("stepCount", "Steps", 1.0, 16.0, 16.0, "", 1.0, "Steps"),
     S1 => choice("s1", "Step 1", &STEP_MODES, 0, "Steps"),
@@ -117,12 +87,9 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
-/// Ring buffer length (seconds).
 const MAX_SECONDS: f32 = 16.0;
-/// A lag change larger than this (samples, per sample) is a jump → crossfade.
 const JUMP: f64 = 4.0;
 
-/// (cycle length in beats, beat where the action starts, one-shot)
 fn pattern_cycle(p: usize) -> (f64, f64, bool) {
     match p {
         0 => (4.0, 0.0, false),
@@ -136,12 +103,9 @@ fn pattern_cycle(p: usize) -> (f64, f64, bool) {
 const TRANCE: [u8; 16] = [1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1];
 const TRESILLO: [u8; 8] = [1, 1, 0, 1, 1, 0, 1, 0];
 
-/// Lag (beats, ≥ 0) and gain (0..1) of pattern `p` at cycle position `u`.
-/// `depth` scales the lag (time warp amount) and the gate depth.
 pub fn pattern_eval(p: usize, u: f64, depth: f32) -> (f64, f32) {
     let d = depth.clamp(0.0, 1.0) as f64;
     let (lag, gain): (f64, f32) = match p {
-        // the first half of the bar stretched over the whole bar
         0 => (u * 0.5, 1.0),
         1 => (u - u.rem_euclid(0.5), 1.0),
         2 => (u - u.rem_euclid(0.25), 1.0),
@@ -154,20 +118,15 @@ pub fn pattern_eval(p: usize, u: f64, depth: f32) -> (f64, f32) {
             if u < 2.0 {
                 (0.0, 1.0)
             } else {
-                // speed (1 - w/T)², position T/3·(1 - (1 - w/T)³)
                 let t = 2.0;
                 let w = (u - 2.0).min(t);
                 let k = 1.0 - w / t;
                 let s = t / 3.0 * (1.0 - k * k * k);
-                // level drops with the square root of the speed
                 (w - s, k as f32)
             }
         }
-        // play the previous beat backwards: source = beat start − u
         5 => (2.0 * u, 1.0),
         6 => {
-            // baby scratch over the 1/4 beat before each beat: the record is
-            // pulled back and pushed forward twice per beat
             let a = 0.25;
             let ph = std::f64::consts::TAU * 2.0 * u;
             let s = -a * 0.5 * (1.0 - ph.cos());
@@ -188,16 +147,12 @@ pub fn pattern_eval(p: usize, u: f64, depth: f32) -> (f64, f32) {
     (lag.max(0.0) * d, 1.0 - depth.clamp(0.0, 1.0) * (1.0 - gain))
 }
 
-/// The custom step pattern, precomputed off the per-sample path (no allocation).
 #[derive(Clone, Copy, Debug)]
 pub struct Steps {
-    /// Step length in beats.
     pub len: f64,
     pub count: usize,
-    /// `STEP_MODES` index per step.
     pub modes: [u8; MAX_STEPS],
     pub gains: [f32; MAX_STEPS],
-    /// First step of the run each step belongs to, and that run's length (steps).
     run_start: [u8; MAX_STEPS],
     run_len: [u8; MAX_STEPS],
 }
@@ -215,7 +170,6 @@ impl Steps {
         s
     }
 
-    /// Group consecutive steps with the same mode into runs (never wrapping past step 1).
     fn runs(&mut self) {
         let n = self.count;
         let mut i = 0;
@@ -232,12 +186,10 @@ impl Steps {
         }
     }
 
-    /// Cycle length in beats.
     pub fn cycle(&self) -> f64 {
         self.len * self.count as f64
     }
 
-    /// Lag (beats, ≥ 0) and gain (0..1) at cycle position `u`, before depth.
     pub fn eval(&self, u: f64) -> (f64, f32) {
         let l = self.len;
         let i = ((u / l).max(0.0) as usize).min(self.count - 1);
@@ -250,17 +202,13 @@ impl Steps {
             1 => (roll(2.0), 1.0),
             2 => (roll(3.0), 1.0),
             3 => (roll(4.0), 1.0),
-            // every step of the run replays the step just before the run
             4 => ((i - rs + 1) as f64 * l, 1.0),
             5 => (t * 0.5, 1.0),
-            // the audio before the run, backwards
             6 => (2.0 * t, 1.0),
-            // same curve as the built-in tape stop, over the run
             7 => {
                 let k = 1.0 - (t / span).min(1.0);
                 (t - span / 3.0 * (1.0 - k * k * k), k as f32)
             }
-            // speed ramps 0 → 1 over the run
             8 => (t - t * t / (2.0 * span), 1.0),
             _ => (0.0, 1.0),
         };
@@ -268,7 +216,6 @@ impl Steps {
     }
 }
 
-/// `Steps::eval` with depth applied like the built-in patterns.
 pub fn steps_eval(steps: &Steps, u: f64, depth: f32) -> (f64, f32) {
     let (lag, gain) = steps.eval(u);
     let d = depth.clamp(0.0, 1.0);
@@ -289,7 +236,6 @@ pub struct Gate {
     mix: Smooth,
     gain: f32,
     gain_coef: f32,
-    /// current and fading read-head lags (samples)
     lag: f64,
     old_lag: f64,
     xf: f32,
@@ -349,12 +295,10 @@ impl Gate {
         self.steps = Steps::new(len, p.idx(P::StepCount as usize), modes, gains);
     }
 
-    /// (cycle length in beats, action start, one-shot) of the current pattern.
     fn cycle(&self) -> (f64, f64, bool) {
         if self.pattern == CUSTOM { (self.steps.cycle(), 0.0, false) } else { pattern_cycle(self.pattern) }
     }
 
-    /// Pattern position for the beat `b`, or None when disengaged.
     #[inline]
     fn position(&mut self, b: f64, engaged: bool) -> Option<f64> {
         let (cycle, start, one_shot) = self.cycle();
@@ -368,7 +312,6 @@ impl Gate {
         }
         if !self.was_engaged {
             self.was_engaged = true;
-            // restart from the 1/16 grid line at or before the activation
             self.anchor = (b / 0.25).floor() * 0.25;
         }
         let t = (b - self.anchor).max(0.0);
@@ -416,7 +359,6 @@ impl Effect for Gate {
             };
             let target = (lag_beats * spb).clamp(0.0, max_lag);
             if (target - self.lag).abs() > JUMP {
-                // the outgoing head keeps playing forward at normal speed
                 self.old_lag = self.lag;
                 self.xf = 0.0;
             }
@@ -482,7 +424,6 @@ mod tests {
 
     #[test]
     fn custom_steps_only_look_back_and_stay_bounded() {
-        // a deterministic mix of every mode, runs of 1..3 steps, every division and count
         let mut seed = 7u32;
         let mut rnd = || {
             seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -511,29 +452,23 @@ mod tests {
     fn custom_step_modes() {
         let mut modes = [0u8; MAX_STEPS];
         let mut gains = [1.0f32; MAX_STEPS];
-        modes[1] = 3; // roll x4
-        modes[4] = 6; // reverse over steps 5-6
+        modes[1] = 3;
+        modes[4] = 6;
         modes[5] = 6;
-        modes[8] = 4; // repeat prev over steps 9-10
+        modes[8] = 4;
         modes[9] = 4;
-        modes[12] = 7; // tape stop
+        modes[12] = 7;
         gains[14] = 0.0;
         let st = Steps::new(0.25, 16, modes, gains);
         let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
         assert!(near(st.eval(0.1).0, 0.0), "play");
-        // roll x4 inside step 2 (0.25..0.5): every 1/16 of a beat restarts
         assert!(near(st.eval(0.25 + 0.07).0, 0.0625) && near(st.eval(0.25 + 0.2).0, 0.1875));
-        // reverse run starts at beat 1: at beat 1.3 we hear beat 0.7
         assert!(near(1.3 - st.eval(1.3).0, 0.7));
-        // repeat prev: steps 9 and 10 both replay step 8 (beats 1.75..2)
         assert!(near(2.05 - st.eval(2.05).0, 1.8) && near(2.3 - st.eval(2.3).0, 1.8));
-        // tape stop: the level falls over the step and ends silent
         assert!(st.eval(3.01).1 > 0.9 && st.eval(3.249).1 < 0.01);
-        // a muted step and depth scaling
         assert_eq!(st.eval(3.6).1, 0.0);
         assert_eq!(steps_eval(&st, 3.6, 0.5).1, 0.5);
         assert!(near(steps_eval(&st, 1.3, 0.5).0, 0.3));
-        // runs never wrap: step 16 (play) after a reverse run starting at 0 stays separate
         modes[0] = 6;
         modes[15] = 6;
         let st = Steps::new(0.25, 16, modes, gains);

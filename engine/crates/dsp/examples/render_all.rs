@@ -1,11 +1,3 @@
-//! Render a short musical phrase through every stock instrument and effect
-//! (plus the factory kit) into WAV files, for listening tests.
-//!
-//!   cargo run --release -p krypt-studio-dsp --example render_all -- <out-dir>
-//!
-//! Effects use the FX-slot wet/dry rule: out = dry·(1-mix) + wet·mix, with
-//! the descriptor's defaultMix unless a preset says otherwise.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,7 +12,6 @@ const SR: f32 = 48000.0;
 const BPM: f64 = 120.0;
 const BLOCK: usize = 256;
 
-/// (beat, length in beats, key, velocity, slide)
 type Note = (f64, f64, u8, f32, bool);
 
 fn frames(beats: f64) -> usize {
@@ -34,7 +25,6 @@ fn set(inst: &mut dyn Instrument, id: &str, params: &[(&str, f32)]) {
     }
 }
 
-/// Render notes through an instrument with sample-accurate events.
 fn play(inst: &mut dyn Instrument, notes: &[Note], beats: f64) -> (Vec<f32>, Vec<f32>) {
     let n = frames(beats);
     let mut ev: Vec<(usize, bool, u8, f32, bool)> = Vec::new();
@@ -42,7 +32,7 @@ fn play(inst: &mut dyn Instrument, notes: &[Note], beats: f64) -> (Vec<f32>, Vec
         ev.push((frames(b), true, key, vel, slide));
         ev.push((frames(b + len), false, key, 0.0, false));
     }
-    ev.sort_by_key(|e| (e.0, e.1)); // note-offs before note-ons on the same frame
+    ev.sort_by_key(|e| (e.0, e.1));
     let (mut l, mut r) = (vec![0.0f32; n], vec![0.0f32; n]);
     let (mut at, mut ei) = (0usize, 0usize);
     while at < n {
@@ -65,7 +55,6 @@ fn play(inst: &mut dyn Instrument, notes: &[Note], beats: f64) -> (Vec<f32>, Vec
 
 fn write(dir: &Path, name: &str, l: &[f32], r: &[f32]) {
     let peak = l.iter().chain(r).fold(0.0f32, |m, v| m.max(v.abs()));
-    // only scale down if a render would clip
     let g = if peak > 0.98 { 0.98 / peak } else { 1.0 };
     let l: Vec<f32> = l.iter().map(|v| v * g).collect();
     let r: Vec<f32> = r.iter().map(|v| v * g).collect();
@@ -90,9 +79,6 @@ fn sample(ch: &[Vec<f32>]) -> Arc<SampleData> {
     Arc::new(SampleData { sample_rate: SR, channels: ch.to_vec(), root_key: None })
 }
 
-/// A synthetic "singer" for the vocal effects: a band-limited glottal buzz
-/// through three moving formants (a different vowel per note), noise
-/// consonants, portamento and vibrato. `cents` detunes each note.
 fn synth_voice(notes: &[(f64, f64, u8)], cents: &[f32], beats: f64) -> Vec<f32> {
     const VOWELS: [(f64, f64); 5] = [(730.0, 1090.0), (530.0, 1840.0), (280.0, 2250.0), (570.0, 840.0), (320.0, 900.0)];
     let n = frames(beats);
@@ -108,7 +94,7 @@ fn synth_voice(notes: &[(f64, f64, u8)], cents: &[f32], beats: f64) -> Vec<f32> 
         let beat = i as f64 / frames(1.0) as f64;
         let Some(k) = notes.iter().position(|&(b, len, _)| beat >= b && beat < b + len) else { continue };
         let (b, len, key) = notes[k];
-        let t = (beat - b) * 60.0 / BPM; // seconds into the note
+        let t = (beat - b) * 60.0 / BPM;
         let target = key as f64 + cents[k % cents.len()] as f64 * 0.01;
         pitch += (target - pitch) * (1.0 - (-1.0 / (0.035 * sr)).exp());
         let vib = if t > 0.15 { 0.18 * (std::f64::consts::TAU * 5.5 * t).sin() * ((t - 0.15) * 4.0).min(1.0) } else { 0.0 };
@@ -116,7 +102,7 @@ fn synth_voice(notes: &[(f64, f64, u8)], cents: &[f32], beats: f64) -> Vec<f32> 
         let dt = f0 / sr;
         let buzz = blep_wave(Shape::Saw, ph, dt);
         ph = (ph + dt).fract();
-        tilt += (buzz - tilt) * 0.18; // glottal spectral tilt
+        tilt += (buzz - tilt) * 0.18;
         let (va, vb) = (VOWELS[k % 5], VOWELS[(k + 1) % 5]);
         let m = (t / (len * 60.0 / BPM)).clamp(0.0, 1.0) * 0.4;
         f1.design(SvfMode::Bandpass, va.0 + (vb.0 - va.0) * m, 6.0, 0.0, sr);
@@ -135,8 +121,6 @@ fn synth_voice(notes: &[(f64, f64, u8)], cents: &[f32], beats: f64) -> Vec<f32> 
     out
 }
 
-/// Run an effect over a stereo signal in blocks with an optional sidechain;
-/// `each_block(fx, frame)` may change params before a block (automation).
 fn run_effect(fx: &mut dyn Effect, l: &mut [f32], r: &mut [f32], sc: Option<(&[f32], &[f32])>, mut each_block: impl FnMut(&mut dyn Effect, usize)) {
     let n = l.len();
     let mut at = 0;
@@ -167,7 +151,6 @@ fn main() {
     let kit: HashMap<&str, Vec<Vec<f32>>> = render_kit().into_iter().collect();
 
     println!("instruments:");
-    // sampler: a 2-bar beat from the factory kit
     let pattern: [(&str, &[f64]); 5] = [
         ("kick.wav", &[0.0, 1.5, 2.5, 4.0, 5.5, 6.75]),
         ("clap.wav", &[1.0, 3.0, 5.0, 7.0]),
@@ -187,7 +170,6 @@ fn main() {
     let (beat_l, beat_r) = mixdown(&parts);
     write(&inst_dir, "sampler-factory-beat.wav", &beat_l, &beat_r);
 
-    // sampler: the factory 808 as a pitched, mono bassline
     let mut s = create_instrument("krypt.sampler", SR, BLOCK).unwrap();
     s.set_sample(Some(sample(&kit["808.wav"])));
     s.set_voice_mode(true, 0.0);
@@ -195,14 +177,12 @@ fn main() {
     let (l, r) = play(s.as_mut(), &bass, 8.0);
     write(&inst_dir, "sampler-808-melody.wav", &l, &r);
 
-    // sampler: reverse + resonant filter + pitch envelope
     let mut s = create_instrument("krypt.sampler", SR, BLOCK).unwrap();
     s.set_sample(Some(sample(&kit["clap.wav"])));
     set(s.as_mut(), "krypt.sampler", &[("reverse", 1.0), ("cutoff", 3000.0), ("reso", 0.4), ("pitchEnvAmount", -12.0), ("pitchEnvDecay", 300.0)]);
     let (l, r) = play(s.as_mut(), &[(0.0, 1.0, 60, 1.0, false), (2.0, 1.0, 67, 1.0, false), (4.0, 1.0, 55, 1.0, false)], 6.0);
     write(&inst_dir, "sampler-reverse-filter-penv.wav", &l, &r);
 
-    // audio clip: the beat as an audio clip, forwards and reversed
     for (name, rev) in [("audioclip.wav", 0.0), ("audioclip-reverse.wav", 1.0)] {
         let mut c = create_instrument("krypt.audioclip", SR, BLOCK).unwrap();
         c.set_sample(Some(sample(&[beat_l.clone(), beat_r.clone()])));
@@ -211,7 +191,6 @@ fn main() {
         write(&inst_dir, name, &l, &r);
     }
 
-    // TriOsc: default patch chords, a plucky arp, a mono glide lead
     let chords: Vec<Note> = [[60u8, 63, 67], [56, 60, 63], [51, 55, 58], [58, 62, 65]]
         .iter()
         .enumerate()
@@ -236,7 +215,6 @@ fn main() {
     let (l, r) = play(t.as_mut(), &lead, 8.5);
     write(&inst_dir, "triosc-mono-glide-lead.wav", &l, &r);
 
-    // 808: overlapping notes glide (mono + 60 ms), plus a slide note
     let mut k = create_instrument("krypt.kick808", SR, BLOCK).unwrap();
     k.set_voice_mode(true, 60.0);
     set(k.as_mut(), "krypt.kick808", &[("decay", 1400.0)]);
@@ -244,15 +222,14 @@ fn main() {
         (0.0, 1.0, 36, 1.0, false),
         (1.5, 0.5, 36, 0.9, false),
         (2.0, 1.6, 39, 1.0, false),
-        (3.5, 0.5, 43, 1.0, false), // overlaps the previous note → glides up
+        (3.5, 0.5, 43, 1.0, false),
         (4.0, 1.5, 36, 1.0, false),
-        (5.0, 1.0, 48, 1.0, true), // slide note → glides an octave up
+        (5.0, 1.0, 48, 1.0, true),
         (6.5, 1.0, 34, 1.0, false),
     ];
     let (bl, br) = play(k.as_mut(), &line, 8.5);
     write(&inst_dir, "kick808-bassline.wav", &bl, &br);
 
-    // DrumSynth: every voice on its own, then a beat
     let ds = descriptor("krypt.drumsynth").unwrap();
     let voices = ds.params[0].options.clone().unwrap();
     let mut ds_parts = Vec::new();
@@ -280,7 +257,6 @@ fn main() {
     let (dl, dr) = mixdown(&parts);
     write(&inst_dir, "drumsynth-beat.wav", &dl, &dr);
 
-    // Krypt FM: the default e-piano, then bells, bass, pad and organ patches
     let mut f = create_instrument("krypt.fm", SR, BLOCK).unwrap();
     let (l, r) = play(f.as_mut(), &chords, 8.5);
     write(&inst_dir, "fm-epiano-chords.wav", &l, &r);
@@ -349,7 +325,6 @@ fn main() {
     let (l, r) = play(f.as_mut(), &chords, 8.5);
     write(&inst_dir, "fm-organ.wav", &l, &r);
 
-    // Krypt Wave: default, supersaw, PWM pad, formant lead, digital bass, harmonic sweep
     let mut w = create_instrument("krypt.wavetable", SR, BLOCK).unwrap();
     let (l, r) = play(w.as_mut(), &chords, 8.5);
     write(&inst_dir, "wave-default-chords.wav", &l, &r);
@@ -392,7 +367,6 @@ fn main() {
     let (l, r) = play(w.as_mut(), &chords, 8.5);
     write(&inst_dir, "wave-harmonic-sweep.wav", &l, &r);
 
-    // effects: beat + chords + 808 as the source; the kick feeds sidechains
     println!("effects:");
     let n = beat_l.len().min(cl.len()).min(bl.len());
     let (src_l, src_r) = mixdown(&[(&beat_l[..n], &beat_r[..n], 0.8), (&cl[..n], &cr[..n], 0.6), (&bl[..n], &br[..n], 0.5)]);
@@ -465,7 +439,6 @@ fn main() {
             fx.process(&ctx, [&mut l[at..at + m], &mut r[at..at + m]], sc);
             at += m;
         }
-        // wet/dry like an FX slot, with the dry path delayed by the reported latency
         let lat = fx.latency();
         if mix < 1.0 {
             for i in 0..n {
@@ -477,7 +450,6 @@ fn main() {
         write(&fx_dir, &format!("{}-{}.wav", id.trim_start_matches("krypt."), name), &l, &r);
     }
 
-    // vocal chain demos on a synthetic, slightly out-of-tune "singer"
     let melody: Vec<(f64, f64, u8)> = [60u8, 63, 65, 67, 67, 65, 63, 60].iter().enumerate().map(|(i, &k)| (i as f64, 0.95, k)).collect();
     let voice = synth_voice(&melody, &[35.0, -30.0, 25.0, -40.0, 15.0, -25.0, 30.0, -20.0], 8.0);
     write(&fx_dir, "_voice-off-key.wav", &voice, &voice);
@@ -494,23 +466,19 @@ fn main() {
         l.extend(std::iter::repeat_n(0.0, lat));
         let mut r = l.clone();
         run_effect(fx.as_mut(), &mut l, &mut r, None, |_, _| {});
-        // latency-compensated, like the engine's PDC
         write(&fx_dir, &format!("{name}.wav"), &l[lat..], &r[lat..]);
     }
-    // vocoder: TriOsc chords as the carrier, the singer as the voice
     let nv = voice.len().min(cl.len());
     let (mut l, mut r) = (cl[..nv].to_vec(), cr[..nv].to_vec());
     let mut fx = create_effect("krypt.vocoder", SR, BLOCK).unwrap();
     fx_param(fx.as_mut(), "krypt.vocoder", "bands", 24.0);
     run_effect(fx.as_mut(), &mut l, &mut r, Some((&voice[..nv], &voice[..nv])), |_, _| {});
     write(&fx_dir, "vocoder-chords-carrier.wav", &l, &r);
-    // no sidechain: the singer is the input, the internal saw the carrier
     let (mut l, mut r) = (voice.clone(), voice.clone());
     let mut fx = create_effect("krypt.vocoder", SR, BLOCK).unwrap();
     fx_param(fx.as_mut(), "krypt.vocoder", "carrierNote", 43.0);
     run_effect(fx.as_mut(), &mut l, &mut r, None, |_, _| {});
     write(&fx_dir, "vocoder-internal-saw.wav", &l, &r);
-    // Gate/Time on automation: a 1/16 stutter only on beats 4 and 8 of the beat
     let (mut l, mut r) = (beat_l[..n].to_vec(), beat_r[..n].to_vec());
     let mut fx = create_effect("krypt.gate", SR, BLOCK).unwrap();
     fx_param(fx.as_mut(), "krypt.gate", "trigger", 1.0);

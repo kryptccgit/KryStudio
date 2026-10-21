@@ -1,6 +1,3 @@
-// Loading splash while the first document snapshot arrives (and the error
-// state if it never does).
-
 export function Splash({ error, onRetry }: { error?: string | null; onRetry?: () => void }) {
   return (
     <div className="relative flex h-full items-center justify-center bg-krypt-void">

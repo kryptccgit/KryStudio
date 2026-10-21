@@ -31,8 +31,8 @@ export const playlistRemoveTrack = defineCommand({
     delete d.playlist.tracks[a.id];
     d.playlist.trackOrder = d.playlist.trackOrder.filter((t) => t !== a.id);
     for (const c of Object.values(d.playlist.clips)) if (c.trackId === a.id) delete d.playlist.clips[c.id];
-    removeLaunchClipsWhere(d, (c) => c.trackId === a.id); // its launcher column goes too
-    dropTakeRefs(d, { trackIds: [a.id] }); // and its take lanes
+    removeLaunchClipsWhere(d, (c) => c.trackId === a.id);
+    dropTakeRefs(d, { trackIds: [a.id] });
     if (d.recording?.trackId === a.id) d.recording.trackId = null;
     return {};
   },
@@ -111,7 +111,6 @@ export const playlistAddAudio = defineCommand({
     sampleRate: z.number().min(1).optional(),
     channels: z.number().int().min(1).optional(),
     hash: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/).optional(),
-    /** Route the new channel to this existing insert (the Recording Studio's vocal insert) instead of a new one. */
     insertId: z.string().optional(),
   }),
   run(d, a, ctx) {

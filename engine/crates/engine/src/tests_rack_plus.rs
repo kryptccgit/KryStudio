@@ -1,9 +1,3 @@
-//! Wave 12.2b (rack-plus): automation of params INSIDE racks (ParamRef
-//! `<host>/rack/<chain>/…` → TargetKind::RackInst / RackFx, an override in the
-//! rack's target), the macro-vs-automation rule (automation wins; released when
-//! the automation goes away), and instrument latency in PDC (an instrument rack
-//! with a latent device stays sample-aligned with other channels).
-
 use super::*;
 use crate::rack::{AUTO_BASE, RACK_PLUGIN};
 
@@ -42,7 +36,6 @@ fn add_rack_slot(p: &mut Value, ins: &str, sid: &str, r: Value) {
     p["mixer"]["inserts"][ins]["slots"][sid]["rack"] = r;
 }
 
-/// An automation clip over the first bar (song mode) with normalized points (tick, value).
 fn automate(p: &mut Value, id: &str, target: &str, pts: &[(f64, f64)]) {
     let points: serde_json::Map<String, Value> =
         pts.iter().enumerate().map(|(i, (t, v))| (format!("p{i}"), json!({ "id": format!("p{i}"), "tick": t, "value": v, "tension": 0 }))).collect();
@@ -50,7 +43,6 @@ fn automate(p: &mut Value, id: &str, target: &str, pts: &[(f64, f64)]) {
     add_clip(p, &format!("k-{id}"), "automation", 0.0, 3840.0, json!({ "automationId": id }));
 }
 
-/// Song mode, one pattern clip over bar 1 holding key 60 on `ch` the whole bar.
 fn song_with_held_note(p: &mut Value, ch: &str) {
     add_note(p, "pa", ch, "n", 0.0, 3840.0, 60);
     if p["playlist"]["clips"].get("kp").is_none() {
@@ -58,11 +50,8 @@ fn song_with_held_note(p: &mut Value, ch: &str) {
     }
 }
 
-// ── Automation of inner params ───────────────────────────────────────────
-
 #[test]
 fn automation_reaches_params_inside_instrument_and_effect_racks() {
-    // Instrument rack: channel/c1/rack/a/pan sweeps −1 → 1.
     let mut p = base(120.0, "song");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     add_rack_channel(&mut p, "c1", "i1", rack("instrument", vec![chain("a", Some("test.dc"))]));
@@ -74,7 +63,6 @@ fn automation_reaches_params_inside_instrument_and_effect_racks() {
     assert!(near(o.l[48_000], DC1, 0.01) && near(o.r[48_000], DC1, 0.01), "middle: centre {} {}", o.l[48_000], o.r[48_000]);
     assert!(o.l[95_900] < 0.01 && near(o.r[95_900], DC1, 1e-4), "end: hard right {} {}", o.l[95_900], o.r[95_900]);
 
-    // The instrument's own param: channel/c1/rack/a/inst/cutoff (the test sine records its cutoffs).
     let mut p = base(120.0, "song");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     add_rack_channel(&mut p, "c1", "i1", rack("instrument", vec![chain("a", Some("test.sine"))]));
@@ -89,8 +77,6 @@ fn automation_reaches_params_inside_instrument_and_effect_racks() {
     let last = CUTOFFS.with(|c| *c.borrow().last().expect("the automation set the inner cutoff"));
     assert!((last - 20.0 * 1000f32.powf(0.5)).abs() < 0.01, "log-scale cutoff at normalized 0.5: {last}");
 
-    // Effect rack: a device param (gain −24..24 dB: normalized 0.625 = +6 dB), the device mix
-    // and the chain volume (0..2 gain: normalized 0.5 = 0.25).
     let fx = |target: &str, v: f64| {
         let mut p = base(120.0, "song");
         add_insert(&mut p, "i1", json!({ "m": 1 }));
@@ -107,7 +93,6 @@ fn automation_reaches_params_inside_instrument_and_effect_racks() {
     let g6 = 10f32.powf(6.0 / 20.0);
     assert!(near(fx("insert/i1/slot/s1/rack/a/dev/g/gain", 0.625), DC1 * g6, 1e-4));
     assert!(near(fx("insert/i1/slot/s1/rack/a/volume", 0.5), DC1 * 0.25, 1e-5));
-    // Mix 0 skips the device: the +6 dB gain set in the doc can't reach the signal.
     let mut p = base(120.0, "song");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     let mut a = chain("a", None);
@@ -120,7 +105,6 @@ fn automation_reaches_params_inside_instrument_and_effect_racks() {
     let o = render_p(&p, RenderScope::Song, 0.0);
     assert!(near(o.l[48_000], DC1, 1e-5), "mix automated to 0: {}", o.l[48_000]);
 
-    // A ref to something not in the rack warns and is ignored.
     let mut p = base(120.0, "song");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     add_rack_channel(&mut p, "c1", "i1", rack("instrument", vec![chain("a", Some("test.dc"))]));
@@ -133,11 +117,8 @@ fn automation_reaches_params_inside_instrument_and_effect_racks() {
     assert!(near(o.l[48_000], DC1, 1e-5), "the rack plays its document values");
 }
 
-// ── Macro + automation on one inner param ────────────────────────────────
-
 #[test]
 fn automation_wins_over_a_macro_on_the_same_inner_param_until_released() {
-    // Directly on the rack: target 3 = chain a's instrument cutoff (volume, pan, gain, cutoff).
     let mut p = base(120.0, "pattern");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     let mut r = rack("instrument", vec![chain("a", Some("test.sine"))]);
@@ -164,19 +145,16 @@ fn automation_wins_over_a_macro_on_the_same_inner_param_until_released() {
     assert!((last() - 2000.0).abs() < 1e-3);
     inst.set_param(AUTO_BASE + 3, f32::NAN);
     assert!((last() - 20000.0).abs() < 0.5, "released: the macro (at 1) takes over: {}", last());
-    inst.set_param(AUTO_BASE + 999, 5.0); // no such target: ignored
-    // Unmapped target: the override wins over the base, and releasing returns to the base.
-    inst.set_param(8 + 7 + 4 * 3 + 1, 0.0); // target 3's macro field → unmapped (base = doc 8000)
+    inst.set_param(AUTO_BASE + 999, 5.0);
+    inst.set_param(8 + 7 + 4 * 3 + 1, 0.0);
     assert!((last() - 8000.0).abs() < 0.5, "unmapped → its document value: {}", last());
     inst.set_param(AUTO_BASE + 3, 300.0);
     assert!((last() - 300.0).abs() < 1e-3);
-    inst.set_param(8 + 7 + 4 * 3, 9000.0); // a doc edit of the base while automated
+    inst.set_param(8 + 7 + 4 * 3, 9000.0);
     assert!((last() - 300.0).abs() < 1e-3, "automation still wins over a doc edit");
     inst.set_param(AUTO_BASE + 3, f32::NAN);
     assert!((last() - 9000.0).abs() < 0.5, "released → the edited base");
 
-    // Through the engine: macro 1 holds chain pan hard left, the automation of that same
-    // pan holds it hard right; the automation wins for the whole song.
     let mut p = base(120.0, "song");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     let mut r = rack("instrument", vec![chain("a", Some("test.dc"))]);
@@ -196,21 +174,19 @@ fn deleting_the_automation_hands_the_inner_param_back_to_its_macro() {
     let mut r = rack("instrument", vec![chain("a", Some("test.dc"))]);
     map_macro(&mut r, 0, "m1", json!({ "chainId": "a", "kind": "chain", "param": "volume" }), 0.0, 1.0);
     add_rack_channel(&mut p, "c1", "i1", r);
-    p["channels"]["c1"]["generator"]["params"]["macro1"] = json!(0.793_700_5); // 2·n³ = 1
+    p["channels"]["c1"]["generator"]["params"]["macro1"] = json!(0.793_700_5);
     song_with_held_note(&mut p, "c1");
-    automate(&mut p, "a1", "channel/c1/rack/a/volume", &[(0.0, 0.5), (3840.0, 0.5)]); // 2·0.125 = 0.25
+    automate(&mut p, "a1", "channel/c1/rack/a/volume", &[(0.0, 0.5), (3840.0, 0.5)]);
     let mut live = Live::new(&p);
     live.send(Cmd::Play);
     let o = live.run(4800);
     assert!(near(o[2 * 4799], 0.25 * DC1, 1e-4), "automated: {}", o[2 * 4799]);
-    // An unrelated rebuild keeps the override (carried, re-sent to the instance).
     live.session.model.transport.master_volume = 1.0;
     live.session.version += 1;
     let b = live.session.build(false);
     live.send(Cmd::Batch(b));
     let o = live.run(4800);
     assert!(near(o[2 * 4799], 0.25 * DC1, 1e-4), "still automated after a rebuild: {}", o[2 * 4799]);
-    // Delete the automation clip: the macro value (volume 1) takes over again.
     live.session.model.clips.retain(|_, c| c.kind != "automation");
     live.session.model.automations.clear();
     live.session.version += 1;
@@ -221,9 +197,6 @@ fn deleting_the_automation_hands_the_inner_param_back_to_its_macro() {
     assert!(near(o[2 * 4799], DC1, 1e-4), "released → the macro's volume: {}", o[2 * 4799]);
 }
 
-// ── Instrument latency in PDC ────────────────────────────────────────────
-
-/// A rack channel whose only chain is test.dc → test.latency (64 frames).
 fn latent_rack() -> Value {
     let mut a = chain("a", Some("test.dc"));
     device(&mut a, "lat", "test.latency");
@@ -232,7 +205,6 @@ fn latent_rack() -> Value {
 
 #[test]
 fn a_latent_instrument_rack_stays_aligned_with_other_channels() {
-    // On another insert, on the same insert, and next to an insert whose own FX is latent too.
     for (c2_insert, c2_fx) in [("i2", false), ("i1", false), ("i2", true)] {
         let mut p = base(120.0, "pattern");
         add_insert(&mut p, "i1", json!({ "m": 1 }));
@@ -249,7 +221,6 @@ fn a_latent_instrument_rack_stays_aligned_with_other_channels() {
         let at = 24000 + LAT;
         assert_eq!(o.l[at - 1], 0.0, "{c2_insert}/{c2_fx}: nothing before the aligned onset: {}", o.l[at - 1]);
         assert!(near(o.l[at], 2.0 * DC1, 1e-5), "{c2_insert}/{c2_fx}: both onsets on the same sample: {}", o.l[at]);
-        // And they end together too.
         let end = 24000 + 12000 + LAT;
         assert!(near(o.l[end - 1], 2.0 * DC1, 1e-5) && near(o.l[end], 0.0, 1e-6), "{c2_insert}/{c2_fx}: ends {} {}", o.l[end - 1], o.l[end]);
     }
@@ -270,7 +241,6 @@ fn instrument_latency_is_reported_and_refreshed_when_a_device_toggles() {
     let shared = live.core.shared.clone();
     assert_eq!(shared.ch_latency[s1 as usize].load(std::sync::atomic::Ordering::Relaxed), 0);
     assert!(!live.session.refresh_latencies(&shared));
-    // Enable the latent device: a param-only edit (no rebuild), then the latency poll sees 64.
     live.session.model.channels.get_mut("c1").unwrap().generator.rack.as_mut().unwrap().chains.get_mut("a").unwrap().devices.get_mut("lat").unwrap().enabled = true;
     live.session.version += 1;
     let b = live.session.build(false);

@@ -1,7 +1,3 @@
-//! krypt.multisampler: SFZ parsing, region selection, velocity crossfades,
-//! round robin, choke groups, release triggers, loop modes, pitch accuracy,
-//! loading (offset/end, missing files, RAM cap) and real-time safety.
-
 mod common;
 use common::*;
 
@@ -13,12 +9,9 @@ use krypt_studio_dsp::instruments::multisampler::sfz::{self, LoopMode, OffMode, 
 use krypt_studio_dsp::instruments::multisampler::{MsSample, MultiSampleSet, Multisampler, PLUGIN_ID};
 use krypt_studio_dsp::{create_instrument, descriptor, Instrument, NoteExtras, ProcessContext};
 
-// The checking allocator exists in debug builds only (release: a no-op pass).
 #[cfg(debug_assertions)]
 #[global_allocator]
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
-
-// ── helpers ──────────────────────────────────────────────────────────────
 
 fn sine(hz: f64, sr: f32, secs: f32, amp: f32) -> Vec<f32> {
     let n = (secs * sr) as usize;
@@ -35,7 +28,6 @@ fn dc(level: f32, frames: usize) -> MsSample {
     MsSample::from_planar(&[&s], SR, None, false)
 }
 
-/// A set from SFZ text; every sample name maps to `make(name)`.
 fn set_from(text: &str, make: impl Fn(&str) -> Option<MsSample>) -> Arc<MultiSampleSet> {
     Arc::new(from_sfz_text("test.sfz", text, make).expect("set"))
 }
@@ -67,7 +59,6 @@ fn db(x: f32) -> f32 {
     20.0 * x.max(1e-12).log10()
 }
 
-/// Frequency from interpolated rising zero crossings.
 fn freq(x: &[f32], sr: f32) -> f64 {
     let mut first: Option<f64> = None;
     let mut last = 0.0f64;
@@ -86,8 +77,6 @@ fn freq(x: &[f32], sr: f32) -> f64 {
     let f = first.expect("no zero crossing");
     n as f64 / ((last - f) / sr as f64)
 }
-
-// ── parsing ──────────────────────────────────────────────────────────────
 
 const PARSE_TEXT: &str = r#"
 // A header comment
@@ -139,25 +128,21 @@ fn parser_inheritance_defines_names_comments_and_unknown_opcodes() {
     assert_eq!(r3.loop_mode, Some(LoopMode::LoopSustain), "loopmode alias");
     assert_eq!((r3.loop_start, r3.loop_end, r3.offset, r3.end), (Some(100), Some(200), 10, Some(1000)));
     assert_eq!(r3.pitch_keycenter, KEYCENTER_FROM_SAMPLE);
-    // unknown opcodes: counted (3 occurrences, 2 names), one warning; <curve> contents are not counted
     assert_eq!(p.unknown_count, 3);
     assert_eq!(p.unknown_names, ["bogus_opcode", "amp_velcurve_1"]);
     let w = p.unknown_warning().unwrap();
     assert!(w.contains("ignored 3 unsupported opcodes") && w.contains("bogus_opcode") && w.contains("amp_velcurve_1"), "{w}");
     assert!(p.warnings.iter().any(|w| w.contains("#include is not supported") && w.contains("other.sfz")), "{:?}", p.warnings);
     assert!(p.warnings.iter().any(|w| w.contains("<curve>")), "{:?}", p.warnings);
-    // the commented-out region never appears
     assert!(p.regions.iter().all(|r| !r.sample.contains("nope")));
 }
 
 #[test]
 fn parser_edge_cases() {
-    // headers and opcodes on one line, numbers as keys, `key` then an override
     let p = sfz::parse("<group>key=40<region>sample=a.wav pitch_keycenter=41 <region> sample=b.wav hikey=45");
     assert_eq!(p.regions.len(), 2);
     assert_eq!((p.regions[0].lokey, p.regions[0].hikey, p.regions[0].pitch_keycenter), (40, 40, 41.0));
     assert_eq!((p.regions[1].lokey, p.regions[1].hikey), (40, 45));
-    // a region without a sample is skipped with a warning; a bad value warns and keeps the default
     let p = sfz::parse("<region> key=60\n<region> sample=a.wav lokey=zz volume=loud");
     assert_eq!(p.regions.len(), 1);
     assert_eq!(p.regions[0].lokey, 0);
@@ -165,18 +150,13 @@ fn parser_edge_cases() {
     assert!(p.warnings.iter().any(|w| w.contains("without sample")));
     assert!(p.warnings.iter().any(|w| w.contains("lokey=zz")));
     assert!(p.warnings.iter().any(|w| w.contains("volume=loud")));
-    // a later #define wins; defines expand inside other defines
     let p = sfz::parse("#define $K 50\n#define $K 52\n#define $HI $K\n<region> sample=a.wav lokey=$K hikey=$HI");
     assert_eq!((p.regions[0].lokey, p.regions[0].hikey), (52, 52));
-    // a sample path running to the end of the line
     let p = sfz::parse("<region> lokey=1 sample=My Drums/Kick Hard 01.flac");
     assert_eq!(p.regions[0].sample, "My Drums/Kick Hard 01.flac");
-    // an empty file: nothing, no panic
     assert!(sfz::parse("").regions.is_empty());
     assert!(from_sfz_text("e.sfz", "// nothing", |_| None).unwrap_err().contains("no playable <region>"));
 }
-
-// ── region selection ─────────────────────────────────────────────────────
 
 const XFADE: &str = "
 <group> amp_veltrack=0 hikey=69
@@ -199,7 +179,6 @@ fn xfade_set() -> Arc<MultiSampleSet> {
 fn region_selection_by_key_and_velocity() {
     let set = xfade_set();
     assert_eq!(set.regions.len(), 3);
-    // sample indices follow first use: soft 0, loud 1, other 2
     let cases: [(u8, f32, &[u32]); 6] = [(60, 40.0, &[0]), (60, 75.0, &[0, 1]), (60, 120.0, &[1]), (75, 100.0, &[2]), (69, 127.0, &[1]), (100, 100.0, &[])];
     for (key, vel, want) in cases {
         let mut m = ms(&set);
@@ -212,7 +191,6 @@ fn region_selection_by_key_and_velocity() {
             assert!(l.iter().all(|v| *v == 0.0), "no region: silence");
         }
     }
-    // xfade gains: equal power across the crossfade zone
     let (soft, loud) = (&set.regions[0], &set.regions[1]);
     for v in [60.0f32, 65.0, 75.0, 82.0, 90.0] {
         let p = soft.xfade_gain(v).powi(2) + loud.xfade_gain(v).powi(2);
@@ -247,15 +225,11 @@ fn amp_veltrack_and_velocity_sensitivity() {
         let (l, _) = run(&mut m, 9600);
         rms(&l[1000..])
     };
-    // amp_veltrack 100 %: (vel)² → -12 dB at half velocity
     let d = db(level(0.5, 1.0)) - db(level(1.0, 1.0));
     assert!((d + 12.04).abs() < 0.2, "{d}");
-    // velocity sensitivity 0: no velocity → level
     let d = db(level(0.5, 0.0)) - db(level(1.0, 0.0));
     assert!(d.abs() < 0.05, "{d}");
 }
-
-// ── round robin ──────────────────────────────────────────────────────────
 
 const RR: &str = "
 <group> key=60 seq_length=3
@@ -272,7 +246,7 @@ fn started(m: &mut Multisampler, key: u8) -> u32 {
     run(m, 64);
     let s = *m.active_samples().last().expect("a voice");
     m.note_off(0, key);
-    run(m, 4800); // let the 5 ms release finish
+    run(m, 4800);
     s
 }
 
@@ -282,22 +256,18 @@ fn round_robin_cycles_and_can_be_switched_off() {
     let mut m = ms(&set);
     let seq: Vec<u32> = (0..7).map(|_| started(&mut m, 60)).collect();
     assert_eq!(seq, [0, 1, 2, 0, 1, 2, 0], "seq_length/seq_position cycle");
-    // random round robin: both halves are used
     let mut counts = [0usize; 2];
     for _ in 0..200 {
         let s = started(&mut m, 62);
         counts[(s - 3) as usize] += 1;
     }
     assert!(counts[0] > 60 && counts[1] > 60, "lorand/hirand {counts:?}");
-    // Round robin Off: always the first position / the first random slot
     let mut m = ms(&set);
     param(&mut m, "roundRobin", 0.0);
     let seq: Vec<u32> = (0..4).map(|_| started(&mut m, 60)).collect();
     assert_eq!(seq, [0, 0, 0, 0]);
     assert!((0..20).all(|_| started(&mut m, 62) == 3));
 }
-
-// ── choke groups ─────────────────────────────────────────────────────────
 
 const CHOKE: &str = "
 <region> sample=open.wav key=46 group=1 off_by=2 loop_mode=one_shot
@@ -310,7 +280,6 @@ const CHOKE: &str = "
 #[test]
 fn choke_groups_fast_and_normal() {
     let set = set_from(CHOKE, |_| Some(mono(500.0, SR, 3.0)));
-    // closed hat chokes the open hat within ~5 ms
     let mut m = ms(&set);
     on(&mut m, 46, 0.9);
     run(&mut m, 4800);
@@ -318,33 +287,28 @@ fn choke_groups_fast_and_normal() {
     on(&mut m, 42, 0.9);
     run(&mut m, 32);
     assert_eq!(m.active_samples(), [1], "open hat is fading");
-    run(&mut m, 480); // 10 ms
+    run(&mut m, 480);
     assert_eq!(m.active_voices(), 1, "open hat gone after the fast fade");
-    // off_mode=normal: the choked region releases over its ampeg_release
     let mut m = ms(&set);
     on(&mut m, 51, 0.9);
     run(&mut m, 4800);
     on(&mut m, 50, 0.9);
-    run(&mut m, 4800); // 100 ms into a 500 ms release
+    run(&mut m, 4800);
     assert_eq!(m.active_voices(), 2, "still releasing");
     run(&mut m, 48_000);
     assert_eq!(m.active_samples(), [3], "release finished");
-    // a region choking its own group: a new hit cuts the previous one
     let mut m = ms(&set);
     on(&mut m, 53, 0.9);
     run(&mut m, 2400);
     on(&mut m, 53, 0.9);
     run(&mut m, 960);
     assert_eq!(m.active_voices(), 1);
-    // regions without a group never choke anything
     let mut m = ms(&set);
     on(&mut m, 46, 0.9);
     on(&mut m, 51, 0.9);
     run(&mut m, 960);
     assert_eq!(m.active_voices(), 2);
 }
-
-// ── release triggers ─────────────────────────────────────────────────────
 
 const REL: &str = "
 <region> sample=sus.wav key=60 volume=-144 ampeg_release=0.01
@@ -371,20 +335,16 @@ fn release_triggers_fire_on_note_off_and_decay_with_hold_time() {
     let (long, _) = release_level(2.1, 1.0);
     let d = db(long) - db(short);
     assert!((d + 12.0).abs() < 0.3, "rt_decay 6 dB/s over 2 s: {d}");
-    // Release samples param: level, and 0 = off
     let (half, _) = release_level(0.1, 0.5);
     assert!((db(half) - db(short) + 6.02).abs() < 0.2);
     let (none, _) = release_level(0.1, 0.0);
     assert!(none < 1e-6, "{none}");
-    // no note-on, no release trigger
     let set = set_from(REL, |_| Some(mono(700.0, SR, 1.0)));
     let mut m = ms(&set);
     m.note_off(0, 60);
     let (l, _) = run(&mut m, 960);
     assert!(l.iter().all(|v| *v == 0.0));
 }
-
-// ── loop modes ───────────────────────────────────────────────────────────
 
 fn loop_set(mode: &str) -> Arc<MultiSampleSet> {
     let text = format!("<region> sample=a.wav loop_mode={mode} loop_start=200 loop_end=799 ampeg_release=0.002");
@@ -407,24 +367,20 @@ fn hold_then_release(mode: &str, hold: usize, after: usize) -> (bool, bool, Vec<
 
 #[test]
 fn loop_modes() {
-    // no_loop: stops at the sample end even while held
     let (held, _, l) = hold_then_release("no_loop", 3000, 100);
     assert!(!held, "no_loop ends with the sample");
     assert!(l[500].abs() > 0.1 && l[1500] == 0.0);
-    // one_shot: note-off is ignored; plays to the end
     let (_, after, l) = hold_then_release("one_shot", 100, 500);
     assert!(after, "one_shot keeps playing after note-off");
     assert!(l[550].abs() > 0.1);
     let (_, after, _) = hold_then_release("one_shot", 100, 1000);
     assert!(!after, "and ends with the sample");
-    // loop_continuous: loops while held (10x the sample length), releases on note-off
     let (held, after, l) = hold_then_release("loop_continuous", 10_000, 960);
     assert!(held && !after);
     assert!(l[9_000].abs() > 0.1, "still sounding after 9 sample lengths");
-    // loop_sustain: loops while held, then plays out past loop_end to the sample end
     let set = loop_set("loop_sustain");
     let mut m = ms(&set);
-    param(&mut m, "release", 4.0); // a long release: the sample end must stop it
+    param(&mut m, "release", 4.0);
     on(&mut m, 60, 1.0);
     run(&mut m, 5_000);
     assert_eq!(m.active_voices(), 1, "looping while held");
@@ -435,7 +391,6 @@ fn loop_modes() {
 
 #[test]
 fn trimmed_samples_fade_at_their_end() {
-    // end= cuts a loud sample short: the last 100 ms fade out instead of clicking
     let set = set_from("<region> sample=a.wav end=23999", |_| Some(dc(0.5, 96_000)));
     assert_eq!(set.samples[0].frames, 24_000);
     let mut m = ms(&set);
@@ -445,8 +400,6 @@ fn trimmed_samples_fade_at_their_end() {
     assert!(l[23_990].abs() < 0.01, "faded at the trim point: {}", l[23_990]);
     assert!(l[22_000] < l[20_000] && l[22_000] > 0.05);
 }
-
-// ── pitch ────────────────────────────────────────────────────────────────
 
 fn pitch_of(text: &str, sample_sr: f32, key: u8, setup: impl Fn(&mut Multisampler)) -> f64 {
     let set = set_from(text, |_| Some(mono(261.625_565_3, sample_sr, 3.0)));
@@ -459,25 +412,20 @@ fn pitch_of(text: &str, sample_sr: f32, key: u8, setup: impl Fn(&mut Multisample
 
 #[test]
 fn pitch_accuracy() {
-    // a C4 sine (44.1 kHz) played at A4 at 48 kHz is 440 Hz
     let f = pitch_of("<region> sample=c4.wav pitch_keycenter=c4", 44_100.0, 69, |_| {});
     assert!((f - 440.0).abs() < 0.5, "{f}");
-    // same rate as the engine
     let f = pitch_of("<region> sample=c4.wav pitch_keycenter=60", SR, 69, |_| {});
     assert!((f - 440.0).abs() < 0.5, "{f}");
-    // transpose, tune (cents), pitch_keytrack
     let f = pitch_of("<region> sample=c4.wav pitch_keycenter=60 transpose=-12", 44_100.0, 69, |_| {});
     assert!((f - 220.0).abs() < 0.3, "{f}");
     let f = pitch_of("<region> sample=c4.wav pitch_keycenter=60 tune=100", 44_100.0, 69, |_| {});
     assert!((f - 466.164).abs() < 0.5, "{f}");
     let f = pitch_of("<region> sample=c4.wav pitch_keycenter=60 pitch_keytrack=0", 44_100.0, 69, |_| {});
     assert!((f - 261.626).abs() < 0.3, "{f}");
-    // the instrument's Tune / Fine
     let f = pitch_of("<region> sample=c4.wav pitch_keycenter=60", 44_100.0, 69, |m| param(m, "tune", 12.0));
     assert!((f - 880.0).abs() < 1.0, "{f}");
     let f = pitch_of("<region> sample=c4.wav pitch_keycenter=60", 44_100.0, 69, |m| param(m, "fine", -100.0));
     assert!((f - 415.305).abs() < 0.5, "{f}");
-    // the engine's pitch offset (channel pitch / note fine) on top of the key
     let set = set_from("<region> sample=c4.wav pitch_keycenter=60", |_| Some(mono(261.625_565_3, 44_100.0, 3.0)));
     let mut m = ms(&set);
     m.note_on(0, 69, 69.5, 1.0, NoteExtras::default());
@@ -488,7 +436,6 @@ fn pitch_accuracy() {
 
 #[test]
 fn plain_sample_plays_like_the_sampler() {
-    // set_sample: one region across the keyboard, the file's root key (57) plays as is
     let mut m = create_instrument(PLUGIN_ID, SR, BLOCK).unwrap();
     m.set_sample(Some(sine_sample(SR, 220.0, 2.0, Some(57))));
     m.note_on(0, 57, 57.0, 1.0, NoteExtras::default());
@@ -496,8 +443,6 @@ fn plain_sample_plays_like_the_sampler() {
     let f = freq(&l[2000..], SR);
     assert!((f - 220.0).abs() < 0.3, "{f}");
 }
-
-// ── tone / width / gain ──────────────────────────────────────────────────
 
 #[test]
 fn tone_width_and_gain() {
@@ -521,8 +466,6 @@ fn tone_width_and_gain() {
     assert!((db(rms(&l3[4000..])) - db(rms(&l0[4000..])) + 12.0).abs() < 0.1);
 }
 
-// ── polyphony and voice stealing ─────────────────────────────────────────
-
 #[test]
 fn polyphony_limit_steals_released_then_oldest() {
     use krypt_studio_dsp::instruments::multisampler::{MAX_POLY, MAX_VOICES};
@@ -536,12 +479,9 @@ fn polyphony_limit_steals_released_then_oldest() {
     assert!(m.active_voices() <= MAX_VOICES);
     let (l, r) = run(&mut m, 512);
     assert!(l.iter().chain(&r).all(|v| v.is_finite()));
-    // stolen voices fade (5 ms) instead of stopping dead: after 10 ms only MAX_POLY remain
     run(&mut m, 480);
     assert_eq!(m.active_voices(), MAX_POLY);
 }
-
-// ── loading (files) ──────────────────────────────────────────────────────
 
 #[cfg(feature = "decode")]
 mod files {
@@ -595,14 +535,11 @@ mod files {
         assert!(report[0].starts_with("Loaded kit.sfz: 7 regions, 1 silent, 5 samples"), "{report:?}");
         assert!(report.iter().any(|m| m.contains("missing (samples/gone.wav)")), "{report:?}");
         assert!(report.iter().any(|m| m.contains("ignored 1 unsupported opcode (fancy_opcode)")), "{report:?}");
-        // RAM: 4 stereo seconds at 44.1 kHz (minus the trimmed one) + mono ≈ 0.6 MB; a 0.5 MB cap refuses
         let e = load_set(&sfz, &LoadOptions { ram_cap_bytes: 500_000, threads: 2 }).unwrap_err();
         assert!(e.contains("needs more than") && e.contains("RAM"), "{e}");
-        // every sample missing → an error naming one
         std::fs::write(&sfz, "<region> sample=nothing.wav").unwrap();
         let e = load_set(&sfz, &LoadOptions::default()).unwrap_err();
         assert!(e.contains("nothing.wav is missing"), "{e}");
-        // a missing .sfz
         assert!(load_set(&dir.join("nope.sfz"), &LoadOptions::default()).unwrap_err().contains("Cannot open"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -611,7 +548,6 @@ mod files {
     #[ignore = "perf report: cargo test --release -p krypt-studio-dsp --features decode --test multisampler -- --ignored --nocapture"]
     fn load_perf_200_regions() {
         let dir = temp("perf");
-        // 200 regions: 50 notes x 4 velocity layers, 6 s stereo 48 kHz FLAC-free WAVs trimmed to 4 s
         let s = sine(220.0, 48_000.0, 6.0, 0.3);
         let mut text = String::from("<control> default_path=samples/\n");
         for i in 0..200 {
@@ -624,7 +560,6 @@ mod files {
         let t = std::time::Instant::now();
         let set = Arc::new(load_set(&sfz, &LoadOptions::default()).unwrap());
         println!("{} | wall {:.0} ms | {:.1} MB", set.report[0].1, t.elapsed().as_secs_f64() * 1000.0, set.bytes() as f64 / 1048576.0);
-        // playback: 64 voices (pitched: sinc kernel per sample), 3 s at 48 kHz, all sounding
         let mut m = ms(&set);
         for k in 0..64u8 {
             m.note_on(0, 30 + k % 50, 30.3 + (k % 50) as f32, 0.2 + (k % 4) as f32 * 0.25, NoteExtras::default());
@@ -638,8 +573,6 @@ mod files {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-
-// ── real-time safety ─────────────────────────────────────────────────────
 
 const RT_SET: &str = "
 <global> ampeg_attack=0.002 ampeg_release=0.05
@@ -694,9 +627,6 @@ fn multisampler_does_not_allocate_on_the_audio_thread() {
     assert!(l.iter().chain(&r).all(|v| v.is_finite()));
 }
 
-// ── contract ─────────────────────────────────────────────────────────────
-
-/// research/12 §2 fixes the param ids and their order.
 #[test]
 fn params_match_the_contract() {
     let d = descriptor(PLUGIN_ID).unwrap();
@@ -705,7 +635,6 @@ fn params_match_the_contract() {
     assert_eq!(d.uses_sample, Some(true));
     assert_eq!(d.name, "Krypt Multisampler");
     let spec = |id: &str| d.params.iter().find(|p| p.id == id).unwrap().clone();
-    // '%' params are fractions in this codebase (UI shows v × 100 %): release 0..400 %, the rest 0..100 %.
     assert_eq!((spec("release").min, spec("release").max, spec("release").default), (0.0, 4.0, 1.0));
     for id in ["velSens", "releaseSamples", "width"] {
         assert_eq!((spec(id).min, spec(id).max, spec(id).default, spec(id).unit), (0.0, 1.0, 1.0, "%"), "{id}");

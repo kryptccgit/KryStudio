@@ -1,14 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Live facts for the generated guide blocks, so the guides never drift from
-// what the app and the AI actually use:
-//   {{playbook:<genreId>}} → playbookFacts(): built from shared/playbooks,
-//                            the same data get_playbook hands to agents;
-//   {{kinds}}              → kindRows(): the sample kinds with counts from
-//                            the installed library.
-// Pure (no React, no window); the views load it lazily (the playbooks are
-// big), test/guides.test.ts checks it.
-// ──────────────────────────────────────────────────────────────────────
-
 import { PLAYBOOKS, type Playbook } from '@shared/playbooks';
 import { SAMPLE_KINDS, type InstrumentRole, type SampleKind } from '@shared/sounds/types';
 import { SAMPLE_KIND_LABELS } from '../sounds/logic';
@@ -16,7 +5,6 @@ import { SAMPLE_KIND_LABELS } from '../sounds/logic';
 export interface PlaybookFacts {
   id: string;
   name: string;
-  /** The playbook summary's first sentence. */
   summary: string;
   tempo: string;
   swing: string;
@@ -25,13 +13,10 @@ export interface PlaybookFacts {
   keys: string;
   keyNotes?: string;
   progressions: string[];
-  /** Drum parts with the first sentence of how they're written. */
   drums: Array<{ name: string; writing: string }>;
-  /** Other parts in Channel Rack order. */
   parts: string[];
   sections: Array<{ label: string; bars: number; energy: number }>;
   totalBars: number;
-  /** "about 3:12 at 140 BPM". */
   length: string;
   groove?: string;
   mix: Array<{ label: string; value: string }>;
@@ -64,7 +49,6 @@ function minutes(bars: number, bpm: number): string {
 
 const db = (n: number): string => (n > 0 ? `+${n}` : `${n}`);
 
-/** The playbook for an exact genre id (what {{playbook:id}} accepts), or null. */
 export function playbookById(id: string): Playbook | null {
   return PLAYBOOKS.find((p) => p.id === id) ?? null;
 }
@@ -73,7 +57,6 @@ export function playbookIds(): string[] {
   return PLAYBOOKS.map((p) => p.id);
 }
 
-/** The fact card for {{playbook:id}}, or null for an unknown id. */
 export function playbookFacts(id: string): PlaybookFacts | null {
   const p = playbookById(id);
   if (!p) return null;
@@ -118,7 +101,6 @@ export interface KindRow {
   packs: number;
 }
 
-/** One row per sample kind, in SAMPLE_KINDS order, with how many factory and pack sounds the library has. */
 export function kindRows(factory: ReadonlyArray<{ kind: string }>, packs: ReadonlyArray<{ kind: string }> = []): KindRow[] {
   const count = (xs: ReadonlyArray<{ kind: string }>): Map<string, number> => {
     const m = new Map<string, number>();

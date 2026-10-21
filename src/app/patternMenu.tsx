@@ -1,7 +1,3 @@
-// One right-click menu for a pattern, wherever it shows up: the playlist's
-// pattern list and pattern clips. "Open" actions first (the thing most people
-// want), then edit, then the rarer tools.
-
 import { Copy, Grid3x3, Palette, Paintbrush, Pencil, Piano, ShieldCheck, Trash2 } from 'lucide-react';
 import { PALETTE } from '@shared/schema/project';
 import { dispatch, getProject } from '../doc/store';
@@ -10,12 +6,10 @@ import { openPanel } from '../editors/selection';
 import { checkOriginality } from '../library/actions';
 import { clonePattern, deletePattern, renamePattern } from './actions';
 
-/** Select the pattern, then show one of its editors. */
 export function openPattern(patternId: string, panel: 'pianoRoll' | 'channelRack'): void {
   void dispatch('patterns.select', { id: patternId }).then((r) => r.ok && openPanel(panel));
 }
 
-/** `open: false` leaves out the header and the Open items (a Pattern submenu under a clip menu that already has them). */
 export function patternMenuItems(patternId: string, opts: { doc?: Document | null; brush?: boolean; open?: boolean } = {}): MenuItem[] {
   const p = getProject();
   const pat = p.patterns[patternId];

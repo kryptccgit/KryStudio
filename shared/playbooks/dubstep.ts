@@ -1,4 +1,3 @@
-// Dubstep: half-time drums at 140, a growling mid-bass in call and response over a clean sub, cinematic breakdowns.
 import type { Playbook } from './types';
 
 export const DUBSTEP: Playbook = {

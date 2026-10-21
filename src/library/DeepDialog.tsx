@@ -1,8 +1,3 @@
-// Deep analysis confirm: what it does (stems → transcribed bass / melody
-// lines), how long it takes on this PC (estimateDeep: tracks, time,
-// device), and that it needs a stem model. Without one, the primary button
-// opens the Model Manager instead.
-
 import { useState, type ReactNode } from 'react';
 import { BrainCircuit, Cpu, Gpu, Layers, ShieldAlert, Timer } from 'lucide-react';
 import type { Collection } from '@shared/library/types';
@@ -15,10 +10,8 @@ interface Spec {
   collection: Collection;
   estimate: { tracks: number; seconds: number; device: 'cpu' | 'directml' } | null;
   estimateError: string | null;
-  /** Installed stem model name, or null when none is installed. */
   stemModel: string | null;
   onOpenModelManager: () => void;
-  /** Resolve true to close. */
   onConfirm: () => Promise<boolean>;
 }
 

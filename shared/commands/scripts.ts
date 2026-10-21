@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Krypt Script commands (shared/scripts). Pure, like every command: the
-// sandbox runs in main (electron/scripts), which then execs
-// notes.applyScript with what run() returned, as ONE undo step.
-//   scripts.save        add / update a script kept in the project
-//   scripts.remove      drop one
-//   notes.applyScript   write a run's notes into one channel of a pattern
-// ──────────────────────────────────────────────────────────────────────
-
 import { z } from 'zod';
 import { defineCommand, CommandError, must, plural } from './types';
 import { ID_PREFIX } from '../schema/ids';

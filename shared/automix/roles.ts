@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Auto Mix: what each mixer insert is (research/20 §3). Pure.
-//
-// Roles come from names (the insert's and its channels'), instruments,
-// stem origins and, as a last resort, the insert's measured spectrum.
-// Vocals: names ("Vocals", "Lead Vox", "· Vocals"), a stem sample whose
-// origin is the vocal stem, the request's own list, or an audio channel
-// whose analysis looks like a voice.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { Project } from '../schema/project';
 import type { PluginCatalog } from '../plugins/types';
 
@@ -21,13 +11,9 @@ export interface InsertInfo {
   name: string;
   role: MixRole;
   vocal: boolean;
-  /** How the role was found ("name", "instrument", "stem origin", "sound", "request"). */
   why: string;
-  /** Channels feeding it. */
   channels: string[];
-  /** Routes straight into the master. */
   topLevel: boolean;
-  /** A bus fed by drum inserts / named "Drum Bus". */
   drumBus: boolean;
 }
 
@@ -36,10 +22,8 @@ export interface SpectrumHint {
   centroidHz?: number | null;
 }
 
-/** The names Auto Mix gives the send returns it creates (a re-run finds them by name). */
 export const AUTO_SENDS = { reverb: 'Auto Reverb', delay: 'Auto Delay' } as const;
 
-/** A whole song / instrumental bed ("lemezia 2 · Full mix", "Instrumental", "Beat"): never a vocal, never a drum. */
 const BED_RE = /(full ?mix|instrumental|inst|beat|mixdown|karaoke|no vocals?|backing track)/i;
 
 const RE: Array<[MixRole, RegExp]> = [
@@ -65,7 +49,6 @@ const DRUMSYNTH_ROLE: Array<[RegExp, MixRole]> = [
   [/hat|cymbal|crash|ride/i, 'hats'],
 ];
 
-/** The role a measured spectrum suggests (bands relative to their mids). */
 export function roleFromSound(h: SpectrumHint | null | undefined): { role: MixRole; vocal: boolean } | null {
   const b = h?.bands;
   if (!b || !Number.isFinite(b.mid)) return null;
@@ -78,13 +61,10 @@ export function roleFromSound(h: SpectrumHint | null | undefined): { role: MixRo
 }
 
 export interface RoleOptions {
-  /** Inserts (ids or names) the request says are vocals. */
   vocalInserts?: string[];
-  /** Measured spectrum per insert (stem render), for the fallback. */
   sound?: Record<string, SpectrumHint | undefined>;
 }
 
-/** Every non-master insert's role. */
 export function detectRoles(p: Project, catalog: PluginCatalog, opts: RoleOptions = {}): Record<string, InsertInfo> {
   const out: Record<string, InsertInfo> = {};
   const masterId = p.mixer.masterId;
@@ -120,7 +100,6 @@ export function detectRoles(p: Project, catalog: PluginCatalog, opts: RoleOption
       why = 'bus';
     }
     if (!role) {
-      // Stem origin: a vocal stem sample on a channel of this insert.
       for (const c of channels) {
         const ch = p.channels[c];
         const s = ch.generator.sampleId ? p.samples[ch.generator.sampleId] : undefined;
@@ -175,11 +154,9 @@ export function detectRoles(p: Project, catalog: PluginCatalog, opts: RoleOption
     const drumBus = isBus && (/drum|beat|perc/i.test(ins.name) || (fedBy.length > 0 && fedBy.every((f) => ['kick', 'snare', 'hats', 'perc'].includes(out[f]?.role ?? roleFromText(p.mixer.inserts[f]?.name ?? '') ?? ''))));
     out[id] = { id, name: ins.name, role: role ?? 'other', vocal, why: why || 'unknown', channels, topLevel: ins.routes[masterId] !== undefined, drumBus };
   }
-  // A bus fed only by vocals is a vocal bus (its level counts as the vocal, but its chain is left alone).
   return out;
 }
 
-/** The ids of the vocal inserts. */
 export function vocalIds(roles: Record<string, InsertInfo>): string[] {
   return Object.values(roles)
     .filter((r) => r.vocal)

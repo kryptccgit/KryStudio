@@ -1,37 +1,3 @@
-//! Factory sounds: Krypt-original samples synthesized by our own DSP (no
-//! third-party sample licensing), written as 48 kHz WAVs plus a
-//! machine-readable `index.json` (FactoryIndex in shared/sounds/types.ts).
-//!
-//! * `legacy` — the original 11-sample kit at `drums/*.wav`. Frozen: older
-//!   projects reference these paths and must keep sounding the same.
-//! * the library — ~160 mix-ready drum one-shots, 808s, transition FX,
-//!   texture loops, bass one-shots and chord stabs in `drums/<kind>/`,
-//!   `808/`, `fx/<kind>/`, `textures/` and `oneshots/<kind>/`.
-//!
-//! Mastering (`master`): DC / subsonic high pass, trailing-silence trim
-//! (one-shots), click-free fades, true-peak normalisation (drums -1 dBFS,
-//! FX and textures lower), mono where the sound is mono, 24-bit one-shots up
-//! to 2 s and dithered 16-bit for everything longer or tempo-synced, plus a
-//! `smpl` chunk with the root key on tonal samples. Everything written must
-//! stay within `MAX_TOTAL_BYTES`.
-//!
-//! Tempo-synced files (risers, sweeps, swells, reverse cymbals, downlifters,
-//! fills, 1-bar tape stops, texture loops) are written at 128 BPM and are
-//! exactly `bars` bars long (90 000 samples per bar), so an audio clip with
-//! tempo sync spans exactly that many bars at any project tempo. Risers /
-//! uplifting sweeps / swells / reverse cymbals peak on their very last
-//! sample; whooshes cross the listener in their last ~10 % and tape stops
-//! halt on their last sample (all three are placed by their END); downlifters,
-//! impacts and sub drops start with their transient on sample 0.
-//!
-//! Wave 7b (research/14 §2.1) recipes live in `transitions` (risers,
-//! downlifters, swells, reverse cymbals, whooshes, tape stops), `hits`
-//! (impacts, sub drops, zaps), `vox` (formant-synth vocal shots in
-//! `oneshots/vox/`), `fills` and `ambient`, on the helpers in `kit`.
-//!
-//! Generation is deterministic (fixed seeds, fixed block sizes, results
-//! assembled in list order), so two runs write identical bytes.
-
 mod ambient;
 mod drums;
 mod fills;
@@ -63,16 +29,11 @@ pub use index::IndexEntry;
 pub use legacy::{generate_kit, render_kit, KIT_SAMPLE_RATE};
 pub use stats::{table, SampleStat};
 
-/// Tempo of every tempo-synced library file.
 pub const LIBRARY_BPM: f64 = 128.0;
-/// Samples per bar at `LIBRARY_BPM` and 48 kHz.
 pub const SAMPLES_PER_BAR: usize = synth::BAR;
-/// Size budget for everything `generate_factory` writes (bytes).
 pub const MAX_TOTAL_BYTES: u64 = 80_000_000;
-/// Top-level folders the library owns (stale `.wav` files in them are removed).
 pub const LIBRARY_FOLDERS: [&str; 5] = ["drums", "808", "fx", "textures", "oneshots"];
 
-/// Mirrors SAMPLE_KINDS in shared/sounds/types.ts (a test keeps them equal).
 pub const SAMPLE_KINDS: [&str; 33] = [
     "kick",
     "snare",
@@ -109,7 +70,6 @@ pub const SAMPLE_KINDS: [&str; 33] = [
     "retro",
 ];
 
-/// Mirrors GENRE_IDS in shared/sounds/genres.ts (a test keeps them equal).
 pub const GENRE_IDS: [&str; 18] = [
     "trap",
     "drill",
@@ -131,10 +91,8 @@ pub const GENRE_IDS: [&str; 18] = [
     "synthwave",
 ];
 
-/// One written file.
 #[derive(Clone, Debug)]
 pub struct FactoryFile {
-    /// Relative path with forward slashes ('drums/kick/punchy-club.wav').
     pub rel: String,
     pub path: PathBuf,
     pub bytes: u64,
@@ -142,22 +100,18 @@ pub struct FactoryFile {
     pub stat: SampleStat,
 }
 
-/// What `generate_factory` wrote.
 #[derive(Clone, Debug)]
 pub struct FactoryReport {
     pub dir: PathBuf,
     pub files: Vec<FactoryFile>,
     pub index_path: PathBuf,
     pub index: Vec<IndexEntry>,
-    /// WAVs + index.json.
     pub total_bytes: u64,
     pub seconds: f64,
-    /// Stale library WAVs from an older generation that were deleted.
     pub removed: Vec<PathBuf>,
 }
 
 impl FactoryReport {
-    /// (top folder, files, bytes) in folder order.
     pub fn folder_counts(&self) -> Vec<(String, usize, u64)> {
         let mut out: Vec<(String, usize, u64)> = Vec::new();
         for f in &self.files {
@@ -173,7 +127,6 @@ impl FactoryReport {
         out
     }
 
-    /// Measurement table (per kind; `detail` adds one line per file).
     pub fn table(&self, detail: bool) -> String {
         let stats: Vec<SampleStat> = self.files.iter().map(|f| f.stat.clone()).collect();
         stats::table(&stats, detail)
@@ -203,8 +156,6 @@ const LEGACY: [LegacyMeta; 11] = [
     LegacyMeta { file: "808.wav", name: "Classic 808", kind: "808", tags: &["classic", "deep", "long"], genres: &["trap", "drill"], root: Some(36) },
 ];
 
-/// Run `f(0..n)` on a small thread pool; results come back in index order
-/// (so output never depends on scheduling). A panicking job becomes an Err.
 fn parallel<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<Result<T, String>> {
     let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 12).min(n.max(1));
     let next = AtomicUsize::new(0);
@@ -244,7 +195,6 @@ fn rel_path(dir: &Path, rel: &str) -> PathBuf {
     rel.split('/').fold(dir.to_path_buf(), |p, s| p.join(s))
 }
 
-/// Render and write one library sample; returns the file record + index entry.
 fn build_one(dir: &Path, spec: &library::Spec) -> io::Result<(FactoryFile, IndexEntry)> {
     let raw = (spec.render)();
     let ch = master::finish(raw, spec);
@@ -269,7 +219,6 @@ fn build_one(dir: &Path, spec: &library::Spec) -> io::Result<(FactoryFile, Index
     Ok((FactoryFile { rel: spec.rel.clone(), path, bytes: bytes.len() as u64, legacy: false, stat }, entry))
 }
 
-/// Delete `.wav` / `.tmp` files in the library folders that this generation did not write.
 fn remove_stale(dir: &Path, keep: &std::collections::BTreeSet<PathBuf>) -> io::Result<Vec<PathBuf>> {
     fn walk(d: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
         for e in std::fs::read_dir(d)? {
@@ -301,9 +250,6 @@ fn remove_stale(dir: &Path, keep: &std::collections::BTreeSet<PathBuf>) -> io::R
     Ok(removed)
 }
 
-/// Write the whole factory set into `dir`: the 11 legacy files (byte-identical
-/// to `generate_kit`), the library, and `index.json` (FactoryIndex with
-/// `generator`, e.g. "krypt-studio-engine 0.1.0").
 pub fn generate_factory(dir: &Path, generator: &str) -> io::Result<FactoryReport> {
     let t0 = Instant::now();
     std::fs::create_dir_all(dir)?;
@@ -317,7 +263,6 @@ pub fn generate_factory(dir: &Path, generator: &str) -> io::Result<FactoryReport
         }
     }
 
-    // Legacy kit + library rendered in parallel (job 0 = the legacy kit).
     let results = parallel(specs.len() + 1, |i| -> io::Result<Vec<(FactoryFile, IndexEntry)>> {
         if i == 0 {
             let kit = render_kit();

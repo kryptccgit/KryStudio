@@ -1,6 +1,3 @@
-// Compact, read-only views of the project for get_project, the
-// krypt://project/overview resource and the built-in agent's turn context.
-
 import type { MainDeps } from '../types';
 import type { Channel, Project } from '@shared/schema/project';
 import { patternLength } from '@shared/schema/project';
@@ -11,16 +8,11 @@ import { sessionSummary } from './session';
 
 const HIT_ROLES = new Set(['kick', 'snare', 'clap', 'hat', 'openhat', 'ride', 'crash', 'perc', 'tom', 'fx', 'texture']);
 
-/** The role in a factory preset id ('factory:keys/velvet' → 'keys'); null for user presets. */
 function presetRole(id: string | undefined): string | null {
   const m = id ? /^factory:([a-z0-9]+)\//.exec(id) : null;
   return m ? m[1] : null;
 }
 
-/**
- * Drum-style channels (one-shot hits shown as step grids). A sampler is a drum unless it plays a melodic sound: a
- * melodic factory preset, or a channel named after a melodic role ("Piano", "Vox Chop", "808").
- */
 export function isDrumChannel(ch: Channel): boolean {
   const t = ch.generator.type;
   if (t === 'krypt.drumsynth' || t === 'krypt.audioclip') return true;
@@ -66,13 +58,10 @@ export interface OverviewData {
   playlist: { tracks: number; clips: number; songBars: number; lanes: Array<{ track: number; name: string; clips: string[] }> };
   markers: Array<{ id: string; name: string; at: string }>;
   mixer: Array<{ id: string; name: string; volumeDb: number | null; effects: string[]; routesTo: string[] }>;
-  /** The user's style focus (reference library), when set. */
   focus?: { collectionId: string; name: string; brief: string } | null;
-  /** The clip launcher (Session view), when the project has one. */
   session?: { scenes: Array<{ id: string; name: string; tempo: number | null; clips: number }>; clips: number; quantize: string };
 }
 
-/** The open project tabs in one line (titles are user data: sanitized). */
 function tabsSummary(deps: MainDeps): string | null {
   try {
     const line = deps.tabs?.summaryLine();

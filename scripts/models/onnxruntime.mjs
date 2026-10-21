@@ -1,28 +1,3 @@
-// Stage the ONNX Runtime DLLs the analyzer needs for stem separation next to
-// krypt-studio-analyzer.exe (default: resources/bin/). The analyzer opens
-// onnxruntime.dll at run time (ort `load-dynamic`), so a missing DLL only
-// disables `separate`, never the analyzer.
-//
-//   node scripts/models/onnxruntime.mjs [--out <dir>]
-//   (also called by scripts/engine-build.mjs)
-//
-// What gets staged, and from where (every download is pinned by SHA-256):
-//   onnxruntime.dll  NuGet Microsoft.ML.OnnxRuntime.DirectML 1.24.4 (MIT)
-//                    — the last ONNX Runtime release built with DirectML;
-//                    matches the `api-24` feature of the `ort` crate.
-//   DirectML.dll     NuGet Microsoft.AI.DirectML 1.15.4 (Microsoft software
-//                    licence: redistributable inside an app, not open source).
-//                    Skipped when KRYPT_NO_DIRECTML=1 (CPU-only build).
-//   vcruntime140.dll, vcruntime140_1.dll, msvcp140.dll, msvcp140_1.dll
-//                    the VC++ 2015-2022 runtime onnxruntime.dll links against
-//                    (our own exes use the static CRT), copied app-local from
-//                    the Visual Studio / Build Tools redist folder.
-//   *-LICENSE.txt / *-ThirdPartyNotices.txt  the packages' licence texts.
-//
-// macOS arm64 / Linux x64: libonnxruntime.dylib / .so (CPU) from the pinned GitHub
-// release tarball of the same version, plus its licence texts.
-//
-// Downloads are cached in engine/target-ort/ (gitignored).
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
@@ -59,8 +34,6 @@ const PACKAGES = [
   },
 ];
 
-// macOS / Linux: the CPU build of the same ONNX Runtime release from GitHub (MIT). No DirectML,
-// and no C++ runtime to stage (libc++ / libstdc++ ship with the OS).
 const TARBALLS = {
   'darwin-arm64': {
     id: 'onnxruntime-osx-arm64',
@@ -86,7 +59,6 @@ const TARBALLS = {
   },
 };
 
-/** The ONNX Runtime library the analyzer opens on this OS (engine/crates/analyzer/src/separate/runtime.rs DYLIB). */
 export const ORT_DYLIB = process.platform === 'win32' ? 'onnxruntime.dll' : process.platform === 'darwin' ? 'libonnxruntime.dylib' : 'libonnxruntime.so';
 const isLib = (name) => /\.(dll|dylib|so)$/.test(name);
 
@@ -141,7 +113,6 @@ async function fetchTarball(pkg) {
   return data;
 }
 
-/** Regular files of a ustar archive whose path (minus the top folder) is in `wanted`. */
 function untar(tar, wanted) {
   const out = {};
   const str = (o, n) => tar.subarray(o, o + n).toString('latin1').replace(/\0.*$/s, '');
@@ -173,7 +144,6 @@ async function stageTarball(pkg, write, warnings) {
   }
 }
 
-/** The newest x64 VC++ CRT redist folder of any Visual Studio / Build Tools install. */
 function findCrtDir() {
   const fromEnv = process.env.VCToolsRedistDir && path.join(process.env.VCToolsRedistDir, 'x64');
   const candidates = [];
@@ -204,10 +174,6 @@ function findCrtDir() {
   return dirs[0] ?? null;
 }
 
-/**
- * Stages the DLLs into `binDir`. Never throws: problems come back as
- * warnings (stem separation is optional; the rest of the build is not).
- */
 export async function stageOnnxRuntime({ binDir = path.join(root, 'resources', 'bin') } = {}) {
   const summary = [];
   const warnings = [];

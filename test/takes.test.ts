@@ -1,8 +1,3 @@
-// Take lanes + comping (Wave 12.2b): comp algebra, clip materialisation with
-// crossfades, every takes.* command through a strict DocHost (undo, integrity),
-// cleanup when tracks / channels / patterns go, the loop-take planner and the
-// recording finisher that turns a looped take into a take group.
-
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -46,12 +41,9 @@ function exec<T = unknown>(doc: DocHost, cmd: string, args: unknown): T {
 const seg = (start: number, end: number, takeId: string) => ({ start, end, takeId });
 const clipsOn = (p: Project, trackId: string): Clip[] => Object.values(p.playlist.clips).filter((c) => c.trackId === trackId).sort((a, b) => a.start - b.start);
 
-/** Audio takes for the model tests: 3 passes over the loop [2 bars, 4 bars) at 120 bpm (1920 ticks / s). */
 function audioTake(id: string, pass: number, origin: number, start: number, end: number, srcEnd: number): Take {
   return { id, name: `Take ${pass}`, pass, source: { kind: 'audio', channelId: `ch${pass}` }, origin, start, end, srcEnd };
 }
-
-// ── Comp algebra ──────────────────────────────────────────────────────
 
 test('paintComp splits the segments it cuts, merges touching segments of one take', () => {
   let c = [seg(0, 100, 'a')];
@@ -79,34 +71,26 @@ test('planCompClips: centred crossfades, one-sided where a take has no audio pas
   const t2 = audioTake('t2', 2, 0, 7680, 15360, 19200);
   const t3 = audioTake('t3', 3, -7680, 7680, 11520, 11520);
   const takes = { t1, t2, t3 };
-  // t1 → t2 at 9600: both have audio around the cut → centred 40-tick crossfade.
   let plan = planCompClips({ takes, crossfade: 40, comp: [seg(7680, 9600, 't1'), seg(9600, 15360, 't2')] });
   assert.deepEqual(plan, [
     { takeId: 't1', start: 7680, length: 9620 - 7680, offset: 0, fadeIn: 0, fadeOut: 40 },
     { takeId: 't2', start: 9580, length: 15360 - 9580, offset: 9580, fadeIn: 40, fadeOut: 0 },
   ]);
-  // t3 → t2 at 11520: t3 (the last pass) ends exactly there → t2 starts the whole crossfade early.
   plan = planCompClips({ takes, crossfade: 40, comp: [seg(7680, 11520, 't3'), seg(11520, 15360, 't2')] });
   assert.equal(plan[0].start + plan[0].length, 11520);
   assert.equal(plan[0].fadeOut, 40);
   assert.equal(plan[0].offset, 7680 + 7680, 'offset = clip start − origin');
   assert.deepEqual([plan[1].start, plan[1].fadeIn, plan[1].offset], [11480, 40, 11480]);
-  // Short segments cap the crossfade at half their length; 0 = hard cuts.
   plan = planCompClips({ takes, crossfade: 400, comp: [seg(7680, 9600, 't1'), seg(9600, 9660, 't2'), seg(9660, 15360, 't1')] });
   assert.ok(plan.every((c) => c.fadeIn + c.fadeOut <= c.length), JSON.stringify(plan));
-  // The long neighbours carry the crossfade; the 60-tick segment only lends 30 ticks to each side.
   assert.deepEqual([plan[1].start, plan[1].length, plan[1].fadeIn, plan[1].fadeOut], [9600 - 370, 60 + 370 + 370, 400, 400]);
   assert.deepEqual([plan[0].start + plan[0].length, plan[2].start], [9630, 9630]);
   plan = planCompClips({ takes, crossfade: 0, comp: [seg(7680, 9600, 't1'), seg(9600, 15360, 't2')] });
   assert.deepEqual(plan.map((c) => [c.start, c.length, c.fadeIn, c.fadeOut]), [[7680, 1920, 0, 0], [9600, 5760, 0, 0]]);
-  // A gap: no crossfade across silence.
   plan = planCompClips({ takes, crossfade: 40, comp: [seg(7680, 9000, 't1'), seg(9600, 15360, 't2')] });
   assert.deepEqual(plan.map((c) => [c.fadeIn, c.fadeOut]), [[0, 0], [0, 0]]);
 });
 
-// ── Commands through DocHost ──────────────────────────────────────────
-
-/** A 3-pass audio loop recording: loop [2 bars, 4 bars) = 4 s, stopped 2 s into pass 3; 10 s file. */
 function recordAudioGroup(doc: DocHost, extra: Record<string, unknown> = {}) {
   return exec<{ groupId: string; trackId: string; takeIds: string[]; clipIds: string[]; insertId: string; sampleId: string }>(doc, 'takes.createGroup', {
     name: 'Vocal',
@@ -137,7 +121,6 @@ test('createGroup (audio): one sample, one insert, a channel per take, the comp 
   const [t1, t2, t3] = g.takeOrder.map((id) => g.takes[id]);
   assert.deepEqual([t1.origin, t2.origin, t3.origin], [7680, 0, -7680], 'origin = pass start − sec at 120 bpm');
   assert.deepEqual([t1.srcEnd, t3.srcEnd], [7680 + 19200, -7680 + 19200]);
-  // Default comp: the last take where it exists (bar 3), take 2 for bar 4.
   assert.deepEqual(g.comp, [seg(7680, 11520, t3.id), seg(11520, 15360, t2.id)]);
   const clips = clipsOn(p, r.trackId);
   assert.equal(clips.length, 2);
@@ -147,7 +130,6 @@ test('createGroup (audio): one sample, one insert, a channel per take, the comp 
   ]);
   assert.equal(p.playlist.tracks[r.trackId].name, 'Vocal', 'a new track named after the group');
   assert.equal(doc.getHistory().length, before + 1);
-  // Undo removes everything it made.
   assert.ok(doc.undo(USER).ok);
   assert.equal(doc.project.takeGroups, undefined);
   assert.equal(doc.project.channelOrder.length, chBefore);
@@ -159,7 +141,6 @@ test('takes.select: swipe-comp a range splits at the boundaries; whole take; pas
   const r = recordAudioGroup(doc);
   const g0 = doc.project.takeGroups![r.groupId];
   const [t1, t2, t3] = g0.takeOrder.map((id) => g0.takes[id]);
-  // Bar 3 beats 2–3 from take 1.
   const res = exec<{ changed: boolean }>(doc, 'takes.select', { groupId: r.groupId, takeId: t1.id, start: 8640, end: 10560 });
   assert.equal(res.changed, true);
   let g = doc.project.takeGroups![r.groupId];
@@ -173,25 +154,20 @@ test('takes.select: swipe-comp a range splits at the boundaries; whole take; pas
   }
   assert.deepEqual(clips.map((c) => [c.start, c.fadeIn, c.fadeOut]), [[7680, 0, 40], [8620, 40, 40], [10540, 40, 40], [11480, 40, 0]]);
   ok(doc);
-  // The same pick again: nothing changes, no history entry.
   const h = doc.getHistory().length;
   assert.equal(exec<{ changed: boolean }>(doc, 'takes.select', { groupId: r.groupId, takeId: t1.id, start: 8640, end: 10560 }).changed, false);
   assert.equal(doc.getHistory().length, h);
-  // "Take from pass 1": the whole take.
   exec(doc, 'takes.select', { groupId: r.groupId, pass: 1 });
   g = doc.project.takeGroups![r.groupId];
   assert.deepEqual(g.comp, [seg(7680, 15360, t1.id)]);
   clips = clipsOn(doc.project, r.trackId);
   assert.deepEqual(clips.map((c) => [c.start, c.length, c.offset]), [[7680, 7680, 0]]);
-  // Clamped to where the take was recorded: take 3 only covers bar 3.
   exec(doc, 'takes.select', { groupId: r.groupId, pass: 3, start: 0, end: 99999 });
   assert.deepEqual(doc.project.takeGroups![r.groupId].comp, [seg(7680, 11520, t3.id), seg(11520, 15360, t1.id)]);
-  // Errors are human.
   const bad = doc.exec('takes.select', { groupId: r.groupId, pass: 9 }, { actor: USER });
   assert.ok(!bad.ok && /no take from pass 9/.test(bad.message!), bad.message);
   const out = doc.exec('takes.select', { groupId: r.groupId, pass: 3, start: 13000, end: 14000 }, { actor: USER });
   assert.ok(!out.ok && /wasn't recorded in that range/.test(out.message!), out.message);
-  // Undo the last comp edit → the previous comp and clips come back.
   assert.ok(doc.undo(USER).ok);
   assert.deepEqual(doc.project.takeGroups![r.groupId].comp, [seg(7680, 15360, t1.id)]);
   assert.equal(clipsOn(doc.project, r.trackId).length, 1);
@@ -240,7 +216,6 @@ test('takes.removeTake: the latest other take fills in; its channel goes; last t
   assert.equal(doc.project.takeGroups, undefined);
   assert.equal(clipsOn(doc.project, r.trackId).length, 0);
   ok(doc);
-  // Undo all three.
   for (let i = 0; i < 3; i++) assert.ok(doc.undo(USER).ok);
   assert.equal(doc.project.takeGroups![r.groupId].takeOrder.length, 3);
   ok(doc);
@@ -304,7 +279,6 @@ test('removing the track, a take channel or a take pattern cleans the take group
   exec(doc, 'playlist.removeTrack', { id: r.trackId });
   assert.equal(doc.project.takeGroups, undefined);
   ok(doc);
-  // Pattern takes.
   const ch = doc.project.channelOrder[5];
   const m = exec<{ groupId: string }>(doc, 'takes.createGroup', {
     passes: [
@@ -334,8 +308,6 @@ test('schema: takeGroups round-trip through zod; integrity catches broken comps 
   bad.takeGroups[Object.keys(bad.takeGroups)[0]].crossfade = -1;
   assert.ok(!zProject.safeParse(bad).success);
 });
-
-// ── Loop recording → take group ───────────────────────────────────────
 
 const passes = [
   { startTick: 2 * BAR, endTick: 4 * BAR, sec: 0 },
@@ -425,8 +397,6 @@ test('finisher: a looped audio take with one usable pass is a plain clip trimmed
   ok(h.doc);
 });
 
-// ── MCP: comp_takes ───────────────────────────────────────────────────
-
 test('comp_takes: lists, picks per bar range, crossfade, delete, flatten; No change when nothing changes', async () => {
   const doc = newDoc();
   const deps = { doc, broadcast: () => {}, log: () => {} } as unknown as MainDeps;
@@ -437,7 +407,6 @@ test('comp_takes: lists, picks per bar range, crossfade, delete, flatten; No cha
   const g = recordAudioGroup(doc);
   r = await call({});
   assert.ok(r.ok && /"Vocal" \[tg_/.test(r.message) && /3 audio takes \(take 1 \(bars 3–4\), take 2 \(bars 3–4\), take 3 \(bar 3\)\)/.test(r.message) && /Comp: bar 3: take 3 · bar 4: take 2/.test(r.message) && /crossfade 21 ms/.test(r.message), r.message);
-  // Bars 3 and 4 hold the loop; take 1 for bar 3, take 2 already plays bar 4.
   r = await call({ group: 'Vocal', picks: [{ take: 1, bars: '3' }], crossfade_ms: 10 });
   assert.ok(r.ok && /take 1 for bar 3/.test(r.message) && /crossfade 10 ms/.test(r.message), r.message);
   const gg = doc.project.takeGroups![g.groupId];
@@ -453,12 +422,9 @@ test('comp_takes: lists, picks per bar range, crossfade, delete, flatten; No cha
   assert.ok(r.ok && /deleted take 3/.test(r.message) && /flattened/.test(r.message) && /lanes are gone/.test(r.message), r.message);
   assert.equal(doc.project.takeGroups, undefined);
   ok(doc);
-  // One undo step for the whole call.
   assert.ok(doc.undo({ kind: 'agent', clientId: 't', name: 'Test Agent' }).ok);
   assert.equal(doc.project.takeGroups![g.groupId].takeOrder.length, 3);
 });
-
-// ── Playlist take lanes (pure layout) ─────────────────────────────────
 
 test('lane layout: clip rows keep their height, take lanes sit under them, hits map to (track, lane)', () => {
   const l = buildTrackLanes(['a', 'b', 'c'], () => 44, (id) => (id === 'b' ? 3 * 26 : 0));

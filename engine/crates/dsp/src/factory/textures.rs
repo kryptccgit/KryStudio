@@ -1,15 +1,8 @@
-//! Texture and noise loops: 4 bars at 128 BPM (1 for the plain white noise),
-//! seamless (the tail past the loop point is crossfaded onto the start).
-//! Vinyl crackle, tape hiss, rain, wind, room tone and a white noise loop.
-
 use super::library::{spec, Spec};
 use super::synth::*;
 
-/// Loop crossfade (0.5 s).
 pub(crate) const XF: usize = 24_000;
 
-/// Render `bars` bars of loopable stereo: `f(total_len, channel)` makes each
-/// side (total = loop + crossfade), then the seam is crossfaded.
 pub(crate) fn looped(bars: u32, f: impl Fn(usize, u32) -> Vec<f32>) -> Chans {
     let n = bars as usize * BAR;
     (0..2u32)
@@ -22,7 +15,6 @@ pub(crate) fn looped(bars: u32, f: impl Fn(usize, u32) -> Vec<f32>) -> Chans {
         .collect()
 }
 
-/// Mono variant of `looped`.
 pub(crate) fn looped1(bars: u32, f: impl Fn(usize, u32) -> Vec<f32>) -> Chans {
     let n = bars as usize * BAR;
     let mut x = f(n + XF, 0);
@@ -31,7 +23,6 @@ pub(crate) fn looped1(bars: u32, f: impl Fn(usize, u32) -> Vec<f32>) -> Chans {
     vec![x]
 }
 
-/// Sparse clicks (many small, few loud) and occasional low pops.
 pub(crate) fn crackle(tot: usize, seed: u32) -> Vec<f32> {
     let mut nz = Noise::new(seed);
     let mut clicks = vec![0.0f32; tot];
@@ -58,12 +49,10 @@ pub(crate) fn crackle(tot: usize, seed: u32) -> Vec<f32> {
     clicks
 }
 
-/// Vinyl crackle is the groove itself, so it is mono.
 fn vinyl() -> Chans {
     looped1(4, |tot, c| {
         let mut x = crackle(tot, 1201);
         add(&mut x, &crackle(tot, 1210 + c), 0.3, 0);
-        // surface noise
         let mut nz = Noise::new(1220 + c);
         let mut s: Vec<f32> = (0..tot).map(|_| nz.pink()).collect();
         hp(&mut s, 400.0);
@@ -122,7 +111,6 @@ fn rain() -> Chans {
 }
 
 fn wind() -> Chans {
-    // shared gust shape, slightly different per side
     looped(4, |tot, c| {
         let mut shared = Noise::new(1501);
         let w_gust = Wander::new(&mut shared, 0.04, 0.15);
@@ -150,7 +138,6 @@ fn wind() -> Chans {
     })
 }
 
-/// Room tone: low, quiet air (mono; it sits under everything).
 fn room_tone() -> Chans {
     looped1(4, |tot, c| {
         let mut nz = Noise::new(1601 + c);

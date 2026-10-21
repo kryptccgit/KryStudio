@@ -1,6 +1,3 @@
-//! Stem export (render.rs `run_stems`): one offline pass that taps every
-//! insert's post-fader output, plus the master mix.
-
 use super::*;
 use crate::render::{run_stems, stem_file_name, STEM_MEM_BUDGET};
 use std::path::PathBuf;
@@ -61,8 +58,6 @@ fn names(dir: &std::path::Path) -> Vec<String> {
     v
 }
 
-/// i1: sine A4 (centre), i2: sine E5 at half volume panned left, i3: no
-/// channel (silent), "Bus": i4 → bus → master.
 fn stems_project() -> Value {
     let mut p = base(120.0, "pattern");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
@@ -94,7 +89,6 @@ fn stems_write_each_insert_and_master_in_one_pass() {
     let model = model_of(&p);
     let dir = tmp("basic");
     let r = stems_run(&model, &job(&dir, "wav32f", true), STEM_MEM_BUDGET, Arc::new(AtomicBool::new(false)), None).expect("stems");
-    // i3 is silent → skipped. Numbers = mixer positions; Master after the last insert.
     assert_eq!(names(&dir), vec!["01 Lead_ _A__B_.wav", "02 i2.wav", "04 Drum Bus.wav", "05 i4.wav", "06 Master.wav"]);
     let sr = r.stem_results.as_ref().unwrap();
     let ids: Vec<&str> = sr.iter().map(|s| s.insert_id.as_str()).collect();
@@ -105,18 +99,15 @@ fn stems_write_each_insert_and_master_in_one_pass() {
     assert_eq!(r.files.len(), 5);
     assert_eq!(r.path, dir.display().to_string());
     assert!(r.analysis.is_some());
-    // The master stem is exactly the plain render.
     let plain = render_p(&p, PATTERN, 0.0);
     let (ml, mr) = read_f32(&sr[4].path);
     assert_eq!(ml, plain.l);
     assert_eq!(mr, plain.r);
-    // Post-fader: i2 carries volume 0.5 and the balance pan (left full, right 0.5).
     let (l1, _) = read_f32(&sr[0].path);
     let (l2, r2) = read_f32(&sr[1].path);
     let pk = |x: &[f32]| x.iter().fold(0f32, |m, v| m.max(v.abs()));
     assert!((pk(&r2) / pk(&l2) - 0.5).abs() < 0.01, "pan: L {} R {}", pk(&l2), pk(&r2));
     assert!(pk(&l1) > 0.1);
-    // Stems feeding master directly sum to the master (the bus contains i4).
     let (lb, rb) = read_f32(&sr[2].path);
     let (_, r1) = read_f32(&sr[0].path);
     for i in (0..ml.len()).step_by(97) {
@@ -125,7 +116,6 @@ fn stems_write_each_insert_and_master_in_one_pass() {
     }
     let (l4, _) = read_f32(&sr[3].path);
     assert_eq!(l4, lb, "the bus carries only i4");
-    // stemResults analysis is per stem.
     let a1 = sr[0].analysis.as_ref().unwrap();
     let a4 = sr[3].analysis.as_ref().unwrap();
     assert!(a1["peakDb"].as_f64().unwrap() > a4["peakDb"].as_f64().unwrap() - 40.0);
@@ -140,7 +130,6 @@ fn stem_inserts_filter_and_unknown_ids() {
     let mut req = job(&dir, "wav16", false);
     req.stem_inserts = Some(vec!["i3".into(), "i2".into()]);
     let r = stems_run(&model, &req, STEM_MEM_BUDGET, Arc::new(AtomicBool::new(false)), None).expect("stems");
-    // Listed silent i3 is written; Master always.
     assert_eq!(names(&dir), vec!["02 i2.wav", "03 i3.wav", "06 Master.wav"]);
     let sr = r.stem_results.unwrap();
     assert!(sr.iter().all(|s| s.analysis.is_none()));
@@ -174,7 +163,6 @@ fn stems_line_up_with_the_master_under_delay_compensation() {
         let (lm, _) = read_f32(&sr[2].path);
         assert_eq!(l1.len(), lm.len());
         assert_eq!(l2.len(), lm.len());
-        // Both notes start at frame 24000; the master is 2 × 64 frames late (i1 FX + master FX).
         let start = 24000 + 2 * LAT;
         assert_eq!(l1[start - 1], 0.0, "budget {budget}");
         assert_eq!(l2[start - 1], 0.0, "budget {budget}");
@@ -182,7 +170,6 @@ fn stems_line_up_with_the_master_under_delay_compensation() {
         for i in 0..lm.len() {
             assert!((l1[i] + l2[i] - lm[i]).abs() < 1e-6, "budget {budget}: frame {i}: {} + {} vs {}", l1[i], l2[i], lm[i]);
         }
-        // No spill files remain.
         assert!(names(&dir).iter().all(|n| !n.ends_with(".part")), "{:?}", names(&dir));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -210,7 +197,6 @@ fn stems_normalize_keeps_the_balance() {
 #[test]
 fn cancelled_stems_leave_no_files() {
     let model = model_of(&stems_project());
-    // During the render pass, and while writing the stem files.
     for at in [0.05, 0.75] {
         let dir = tmp(&format!("cancel-{at}"));
         let e = stems_run(&model, &job(&dir, "wav24", true), STEM_MEM_BUDGET, Arc::new(AtomicBool::new(false)), Some(at)).unwrap_err();
@@ -231,7 +217,6 @@ fn stems_through_run_render_and_errors() {
     let dir = tmp("run");
     let r = run_job(&model, &job(&dir, "wav24", false)).expect("stems via run_render");
     assert_eq!(r.stem_results.as_ref().unwrap().len(), 5);
-    // The path must be a folder.
     let file = dir.join("01 Lead_ _A__B_.wav");
     let e = run_job(&model, &job(&file, "wav24", false)).unwrap_err();
     assert!(e.contains("needs a folder"), "{e}");
@@ -292,7 +277,6 @@ fn stems_timing_on_the_beat_fixture() {
 #[test]
 fn stems_over_full_scale_warn_in_integer_formats() {
     let mut p = stems_project();
-    // Three held DC notes (3 × 0.195) × insert volume 4 ≈ 2.3 on i4 (and its bus).
     p["mixer"]["inserts"]["i4"]["volume"] = json!(4.0);
     add_note(&mut p, "pa", "c4", "c2", 1920.0, 480.0, 62);
     add_note(&mut p, "pa", "c4", "c3", 1920.0, 480.0, 64);

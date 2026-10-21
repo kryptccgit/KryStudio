@@ -1,5 +1,3 @@
-// MCP parity for the small things the app can do: build_session to_song (scenes → playlist), comp_takes rename /
-// clear, add_channel clone_of, delete_objects samples / scripts, load_sample relink.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -137,7 +135,6 @@ test('delete_objects samples (by name, "unused"; in-use refused) and scripts; lo
   assert.match(r.message, /"My Kick" is still used by "Kick S"/);
   assert.ok(doc.project.samples[used]);
 
-  // relink: the missing loop → the snare file; every user follows.
   r = await call('load_sample', { relink: 'loop.wav', sample: 'factory:drums/snare.wav' });
   assert.ok(r.ok, r.message);
   assert.equal(doc.project.samples[spare2].path, 'factory:drums/snare.wav');
@@ -158,7 +155,6 @@ test('delete_objects samples (by name, "unused"; in-use refused) and scripts; lo
   r = await call('delete_objects', { samples: ['unused'] });
   assert.equal(r.ok, false);
   assert.match(r.message, /^No change/);
-  // Deleting the channel and its sample in one call works (channels go first).
   r = await call('delete_objects', { channels: ['Kick S'], samples: ['My Kick.wav'] });
   assert.ok(r.ok, r.message);
   assert.equal(doc.project.samples[used], undefined);

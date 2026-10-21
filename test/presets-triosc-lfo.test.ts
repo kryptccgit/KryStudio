@@ -1,9 +1,3 @@
-// Krypt TriOsc LFO presets (Wave 12.2b, shared/sounds/factory/instruments/trioscLfo.ts).
-// They stay out of INSTRUMENT_PRESETS until shared/plugins/catalog.gen.json is
-// regenerated with TriOsc's lfo* params (test/presets-factory.test.ts checks every
-// listed preset against that file). Until then the lfo* params are checked against
-// SPEC_MIRROR, a copy of engine/crates/dsp/src/instruments/triosc.rs; once the
-// catalog has them, this file checks the mirror against it and asks for the merge.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import raw from '../shared/plugins/catalog.gen.json';
@@ -40,7 +34,6 @@ const SPEC_MIRROR: ParamSpec[] = ([1, 2] as const).flatMap((n) => {
   ] as ParamSpec[];
 });
 
-/** The TriOsc params presets are checked against: the catalog, plus the mirror until it is regenerated. */
 const triSpecs = (): ParamSpec[] => (REGENERATED ? TRI.params : [...TRI.params, ...SPEC_MIRROR]);
 
 function paramProblems(where: string, specs: ParamSpec[], params: Record<string, number>): string[] {
@@ -60,7 +53,6 @@ test('six or more TriOsc presets, each using at least one LFO', () => {
     assert.ok(p.params.lfo1Amount !== 0 || p.params.lfo2Amount !== 0, `${p.id}: no LFO in use`);
     assert.ok(p.tags.includes('lfo'), `${p.id}: tag it 'lfo' so find_presets finds the set`);
   }
-  // the brief: synced wobble, amp gate, vibrato with fade-in, S&H, auto-pan, filter sweep
   const uses = (dest: number, pred: (p: Record<string, number>, n: 1 | 2) => boolean = () => true) =>
     TRIOSC_LFO_PRESETS.some((p) => ([1, 2] as const).some((n) => p.params[`lfo${n}Amount`] !== 0 && p.params[`lfo${n}Dest`] === dest && pred(p.params, n)));
   assert.ok(uses(1, (p, n) => p[`lfo${n}Sync`] === 1 && p[`lfo${n}Division`] === TDIV['1/8']), 'wobble 1/8');
@@ -88,7 +80,6 @@ test('presets pass the schema, carry the full TriOsc param set and stay on-spec'
     });
   }
   assert.deepEqual(problems, []);
-  // the "off" set is the spec defaults
   for (const s of SPEC_MIRROR) assert.equal(TRI_LFO_OFF[s.id], s.default, s.id);
 });
 
@@ -126,7 +117,7 @@ test('adding them changes no role + genre default pick (playbooks keep their sou
 });
 
 test('once the catalog is regenerated: the mirror matches it and the presets are merged', () => {
-  if (!REGENERATED) return; // the lead merges after `npm run engine:build` (see trioscLfo.ts)
+  if (!REGENERATED) return;
   for (const m of SPEC_MIRROR) {
     const s = TRI.params.find((p) => p.id === m.id);
     assert.ok(s, `catalog lacks ${m.id}`);

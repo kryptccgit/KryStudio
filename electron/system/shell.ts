@@ -1,7 +1,3 @@
-// Shell integration: external links and "show in folder". Only web/mail
-// links may leave the app; file:, ms-*: and other protocol handlers are an
-// execution vector.
-
 import { shell } from 'electron';
 import { exists } from './files';
 import { isOfficialDestination, resolveClientContext } from './context';
@@ -18,7 +14,6 @@ export function isExternalUrl(url: string): boolean {
 
 export async function openExternal(url: string): Promise<{ ok: boolean; message?: string }> {
   if (!isExternalUrl(url)) return { ok: false, message: `Refusing to open "${url}" (only http/https/mailto links)` };
-  // [PROTECTION] §9.5 coupling: a degraded (rebranded) build has no official support links.
   if (!resolveClientContext().intact && isOfficialDestination(url)) return { ok: false, message: "That link isn't available in this build." };
   try {
     await shell.openExternal(url);

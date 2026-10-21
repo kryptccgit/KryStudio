@@ -1,8 +1,3 @@
-// Third-party plugin strip for the generic plugin panel: format/vendor, the
-// "Open plugin window" button (native editor owned by the main window),
-// crash state with Reload, and a searchable parameter list (big plugins
-// have hundreds of params; the knobs are the same ParamRefs MCP agents use).
-
 import { useMemo, useState } from 'react';
 import { AlertTriangle, AppWindow, PackageSearch, RotateCcw, Search } from 'lucide-react';
 import { pluginById } from '@shared/plugins/catalog';
@@ -16,7 +11,6 @@ import { formatLabel, isExternalPluginId, openPluginEditor, reloadPlugins, useCa
 const keyOf = (t: PanelTarget): string => (t.kind === 'channel' ? t.channelId : `${t.insertId}/${t.slotId}`);
 const apiTarget = (t: PanelTarget) => (t.kind === 'channel' ? { channelId: t.channelId } : { insertId: t.insertId, slotId: t.slotId });
 
-/** Shown above the params of a vst3:/clap: instrument or effect (null for stock plugins). */
 export function ExternalPluginBar({ type, target }: { type: string; target: PanelTarget }) {
   useCatalogVersion();
   const key = keyOf(target);
@@ -72,7 +66,6 @@ export function ExternalPluginBar({ type, target }: { type: string; target: Pane
 
 const PAGE = 96;
 
-/** Searchable knobs for a third-party plugin's parameters. */
 export function ExternalParams({ desc, refFor }: { desc: PluginDescriptor; refFor: (paramId: string) => string }) {
   const [q, setQ] = useState('');
   const [limit, setLimit] = useState(PAGE);

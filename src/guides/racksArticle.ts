@@ -1,6 +1,3 @@
-// The racks guide (Wave 12.2, research/16 §2.3; racks-app). Kept in its own file; articles.ts lists it after the
-// Mixer guide. Pure data. Every label here matches src/panels/plugin/RackEditor.tsx and src/racks/actions.ts.
-
 import type { GuideArticle } from './articles';
 
 export const RACKS_ARTICLE: GuideArticle = {

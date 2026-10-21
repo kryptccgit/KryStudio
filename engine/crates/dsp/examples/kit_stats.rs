@@ -1,5 +1,3 @@
-//! Print objective stats for each factory sample (length, levels, bands,
-//! centroid, envelope) — a sanity check to accompany listening.
 use krypt_studio_dsp::analysis::analyze;
 use krypt_studio_dsp::factory::render_kit;
 
@@ -8,7 +6,6 @@ fn main() {
         let l = &ch[0];
         let r = ch.get(1).unwrap_or(&ch[0]);
         let a = analyze(l, r, 48000.0);
-        // envelope: peak in 10 ms windows at a few times
         let env = |ms: usize| {
             let s = ms * 48;
             let e = (s + 480).min(l.len());

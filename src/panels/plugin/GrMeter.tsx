@@ -1,8 +1,3 @@
-// Gain-reduction meter for the dynamics effects' windows (Krypt Comp, Glue,
-// Limiter, Squash, Duck, Gate/Time, Clipper): a bar that grows from the
-// right as the effect turns the signal down, a 1.5 s peak hold and a dB
-// readout. Fed by TelemetryFrame.gr (docs/ENGINE_PROTOCOL.md §15).
-
 import { useEffect, useRef } from 'react';
 import { GR_PLUGINS, slotKey } from '@shared/engine/meters';
 import { onFrame, setupCanvas } from '../../render/frameLoop';
@@ -33,7 +28,6 @@ export function GrMeter({ insertId, slotId, pluginType }: { insertId: string; sl
       ctx.clearRect(0, 0, width, H);
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fillRect(0, 0, width, H);
-      // dB ticks every 3 dB (from the right)
       for (let t = 3; t < GR_RANGE_DB; t += 3) {
         const x = Math.round(width - grToMeter(t) * width) + 0.5;
         ctx.fillStyle = t % 6 === 0 ? C.gridStrong : C.grid;

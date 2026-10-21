@@ -1,11 +1,4 @@
-//! Kokoro-82M v1.0 token ids: one id per phoneme character, as in the
-//! model's `config.json` vocab (hexgrad/Kokoro-82M) and the ONNX export's
-//! `tokenizer.json` (onnx-community/Kokoro-82M-v1.0-ONNX). Characters outside
-//! the vocab are dropped, like the tokenizer's normaliser does. Id 0 (`$`)
-//! pads both ends of every sequence.
-
 pub const PAD: i64 = 0;
-/// Context is 512 tokens including the two pads.
 pub const MAX_TOKENS: usize = 510;
 
 const VOCAB: &[(char, i64)] = &[
@@ -129,8 +122,6 @@ pub fn id(c: char) -> Option<i64> {
     VOCAB.iter().find(|(v, _)| *v == c).map(|(_, i)| *i)
 }
 
-/// Token ids for a phoneme string (no pads), plus for every id the index of
-/// the character it came from (so word spans survive dropped characters).
 pub fn encode(phonemes: &str) -> (Vec<i64>, Vec<usize>) {
     let mut ids = Vec::with_capacity(phonemes.len());
     let mut src = Vec::with_capacity(phonemes.len());
@@ -154,8 +145,7 @@ mod tests {
         assert_eq!(id('ɾ'), Some(125));
         assert_eq!(id('ʤ'), Some(82));
         assert_eq!(id('ɡ'), Some(92));
-        assert_eq!(id('g'), None); // ASCII g is not in the vocab (ɡ U+0261 is)
-        // The README example of the ONNX export starts "hˌaʊ" → 50 157 43 135.
+        assert_eq!(id('g'), None);
         assert_eq!(encode("hˌaʊ").0, vec![50, 157, 43, 135]);
         let (ids, src) = encode("a#b");
         assert_eq!(ids, vec![43, 44]);

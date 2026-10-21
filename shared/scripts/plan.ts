@@ -1,10 +1,3 @@
-// Pure halves of running a script (no sandbox here):
-//   scriptScope()     which notes a run sees and replaces, and the bars;
-//   scriptContext()   the JSON the sandbox's run(ctx) receives;
-//   planScriptApply() what notes.applyScript writes from the returned notes.
-// Main computes the scope, runs the sandbox, then execs notes.applyScript,
-// which recomputes the same scope from the same document (one undo step).
-
 import { z } from 'zod';
 import { CommandError, must } from '../commands/types';
 import { guessKey, patternChords, type KeyGuess } from '../commands/generate';
@@ -15,7 +8,6 @@ import { PPQ, ticksPerBar, ticksPerBeat } from '../schema/time';
 import { cleanScriptOutput } from './output';
 import { SCRIPT_KINDS, SCRIPT_LIMITS, type ScriptKind, type ScriptNote, type ScriptParamValues } from './types';
 
-/** Channels whose notes are not pitches or not notes at all. */
 const AUDIO_CLIP = 'krypt.audioclip';
 
 export const SCRIPT_TARGET = z.object({
@@ -34,14 +26,11 @@ export interface ScriptScope {
   end: number;
   fromBar: number;
   bars: number;
-  /** The notes run() gets, sorted by tick then key. */
   input: Note[];
-  /** Existing note ids the result replaces. */
   remove: string[];
   key: KeyGuess;
 }
 
-/** The notes and bars a run works on. Throws CommandError. */
 export function scriptScope(d: Project, raw: ScriptTarget, kind: ScriptKind): ScriptScope {
   const t = SCRIPT_TARGET.parse(raw);
   const pat = must(d.patterns[t.patternId], `Pattern ${t.patternId} not found`);
@@ -95,16 +84,13 @@ const toScriptNote = (n: Note): ScriptNote => ({
   color: n.color ?? 0,
 });
 
-/** The plain-JSON half of run(ctx); the sandbox adds rand, the helpers and log. */
 export interface ScriptContextData {
   kind: ScriptKind;
   name: string;
   notes: ScriptNote[];
   params: ScriptParamValues;
-  /** Key root pitch class 0..11 (0 = C). */
   key: number;
   scale: string;
-  /** Semitones of the scale above the root, e.g. minor [0,2,3,5,7,8,10]. */
   scaleSteps: number[];
   keyName: string;
   bpm: number;
@@ -112,15 +98,12 @@ export interface ScriptContextData {
   ppq: number;
   barTicks: number;
   beatTicks: number;
-  /** A 16th note. */
   stepTicks: number;
   start: number;
   end: number;
   lengthTicks: number;
   bars: number;
-  /** Chords in the pattern (every pitched channel), absolute ticks. */
   chords: Array<{ tick: number; end: number; keys: number[]; root: number; name: string }>;
-  /** The channel's root key (drum channels play it). */
   rootKey: number;
   seed: number;
 }
@@ -155,14 +138,10 @@ export function scriptContext(d: Project, t: { patternId: string; channelId: str
   };
 }
 
-// ── notes.applyScript ─────────────────────────────────────────────────
-
 export const APPLY_SCRIPT_ARGS = SCRIPT_TARGET.extend({
   kind: z.enum(SCRIPT_KINDS as unknown as [ScriptKind, ...ScriptKind[]]),
-  /** The script's name (history label, summary). */
   name: z.string().min(1).max(SCRIPT_LIMITS.nameChars),
   seed: z.number().int().min(0).max(0xffffffff).default(0),
-  /** What run() returned (validated + clamped again here). */
   notes: z.array(z.unknown()).max(SCRIPT_LIMITS.notes),
 });
 export type ApplyScriptArgs = z.input<typeof APPLY_SCRIPT_ARGS>;
@@ -177,7 +156,6 @@ export interface ScriptApplyPlan {
   extendTo: number | null;
 }
 
-/** What notes.applyScript would write. Throws CommandError ("No change: …" when the result is already there). */
 export function planScriptApply(d: Project, raw: ApplyScriptArgs, flags: { allowSame?: boolean } = {}): ScriptApplyPlan {
   const a = APPLY_SCRIPT_ARGS.parse(raw);
   const scope = scriptScope(d, a, a.kind);

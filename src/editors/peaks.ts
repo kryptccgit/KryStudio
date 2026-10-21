@@ -1,7 +1,3 @@
-// Waveform peaks cache, one entry per sample path (decode once, in-flight
-// dedupe). Failures are remembered briefly so a missing file doesn't spam
-// the engine every repaint, then retried. No per-file normalization.
-
 export interface PeakData {
   min: Float32Array;
   max: Float32Array;
@@ -18,7 +14,6 @@ type Entry = { state: 'loading' } | { state: 'ok'; data: PeakData } | { state: '
 const cache = new Map<string, Entry>();
 const listeners = new Set<() => void>();
 
-/** Called when any peaks request settles (painters mark themselves dirty). */
 export function onPeaksReady(fn: () => void): () => void {
   listeners.add(fn);
   return () => {
@@ -26,7 +21,6 @@ export function onPeaksReady(fn: () => void): () => void {
   };
 }
 
-/** Cached peaks for a path, or null (and start loading). */
 export function getPeaks(path: string): PeakData | null {
   const e = cache.get(path);
   if (e?.state === 'ok') return e.data;
@@ -59,10 +53,6 @@ async function load(path: string): Promise<void> {
   for (const fn of listeners) fn();
 }
 
-/**
- * Min/max of the peaks covering source seconds [s0, s1). Returns null when
- * the range is outside the sample.
- */
 export function peakRange(p: PeakData, s0: number, s1: number): [number, number] | null {
   const dur = p.frames / p.sampleRate;
   if (s1 <= 0 || s0 >= dur || dur <= 0) return null;

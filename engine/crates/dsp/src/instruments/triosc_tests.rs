@@ -1,7 +1,3 @@
-//! krypt.triosc LFO tests (Wave 12.2b): rate / sync accuracy measured on the
-//! output, retrigger vs song-locked phase, fade in, every destination, random
-//! shapes, amount smoothing, and bit-identity with the pre-LFO synth.
-
 use super::*;
 use crate::instruments::triosc_legacy;
 use crate::Instrument;
@@ -19,7 +15,6 @@ fn set_all(inst: &mut dyn Instrument, d: &PluginDescriptor, params: &[(&str, f32
     }
 }
 
-/// A clean test voice: one sine at `osc1Level`, open filter, flat sustain, no drift.
 fn clean(extra: &[(&str, f32)]) -> TriOsc {
     let mut t = TriOsc::new(SR, BLOCK);
     let base: &[(&str, f32)] = &[
@@ -44,11 +39,10 @@ fn clean(extra: &[(&str, f32)]) -> TriOsc {
 
 #[derive(Clone, Copy)]
 enum Ev {
-    On(u8, f32, f32), // key, velocity, pan
+    On(u8, f32, f32),
     Off(u8),
 }
 
-/// Transport state for renders: the song position advances while playing.
 struct Song {
     bpm: f64,
     beat: f64,
@@ -61,8 +55,6 @@ impl Song {
     }
 }
 
-/// Render `frames` frames in BLOCK-sized blocks, firing `(frame, event)` at
-/// their exact frames.
 fn render(inst: &mut dyn Instrument, frames: usize, song: &mut Song, events: &[(usize, Ev)]) -> (Vec<f32>, Vec<f32>) {
     let mut l = vec![0.0f32; frames];
     let mut r = vec![0.0f32; frames];
@@ -89,13 +81,10 @@ fn secs(s: f64) -> usize {
     (s * SR as f64).round() as usize
 }
 
-/// Peak envelope in 1 ms windows (48 samples).
 fn envelope(x: &[f32]) -> Vec<f32> {
     x.chunks(48).map(|c| c.iter().fold(0.0f32, |m, v| m.max(v.abs()))).collect()
 }
 
-/// Mean period (seconds) of an envelope's upward crossings of its mid level,
-/// ignoring the first `skip_ms`.
 fn env_period(env: &[f32], skip_ms: usize) -> (f64, usize) {
     let e = &env[skip_ms..env.len() - 1];
     let (lo, hi) = e.iter().fold((f32::MAX, 0.0f32), |(a, b), v| (a.min(*v), b.max(*v)));
@@ -111,7 +100,6 @@ fn env_period(env: &[f32], skip_ms: usize) -> (f64, usize) {
     ((xs[xs.len() - 1] - xs[0]) / (xs.len() - 1) as f64 * 0.001, xs.len())
 }
 
-/// Fundamental of a near-pure tone by interpolated zero crossings, Hz.
 fn freq(x: &[f32]) -> f64 {
     let mut xs = vec![];
     for i in 1..x.len() {
@@ -131,17 +119,12 @@ fn win(x: &[f32], from: f64, to: f64) -> &[f32] {
     &x[secs(from)..secs(to)]
 }
 
-// ── Back-compat ──────────────────────────────────────────────────────────
-
-/// The default patch and real factory patches (pads, basses, a mono glide
-/// lead, noise + drift) render bit-identically to the pre-LFO TriOsc.
 #[test]
 fn existing_patches_are_bit_identical_to_the_pre_lfo_synth() {
     type Patch = (&'static [(&'static str, f32)], bool, f32);
     let patches: [Patch; 5] = [
         (&[], false, 0.0),
         (
-            // factory:pad/analog-warm-ish (pads.ts)
             &[
                 ("gain", -9.5),
                 ("osc2Fine", 7.0),
@@ -164,13 +147,11 @@ fn existing_patches_are_bit_identical_to_the_pre_lfo_synth() {
             0.0,
         ),
         (
-            // acid-style mono bass with glide (bass.ts)
             &[("gain", -8.0), ("osc2Level", 0.0), ("osc3Level", 0.0), ("drift", 0.05), ("cutoff", 380.0), ("reso", 0.78), ("filterEnvAmount", 0.65), ("filterEnvDecay", 180.0), ("filterEnvSustain", 0.0), ("ampRelease", 50.0)],
             true,
             70.0,
         ),
         (
-            // analog saw lead (leads.ts), mono + glide
             &[
                 ("gain", 1.5),
                 ("osc2Fine", 9.0),
@@ -188,7 +169,6 @@ fn existing_patches_are_bit_identical_to_the_pre_lfo_synth() {
             45.0,
         ),
         (
-            // noise layer, band pass, high-pass filter type mix
             &[("osc2Shape", 5.0), ("osc2Level", 0.5), ("osc3Shape", 4.0), ("filterType", 2.0), ("reso", 0.6), ("drift", 1.0), ("unisonDetune", 0.8)],
             false,
             0.0,
@@ -223,13 +203,10 @@ fn existing_patches_are_bit_identical_to_the_pre_lfo_synth() {
     }
 }
 
-// ── Rate / sync accuracy ─────────────────────────────────────────────────
-
 fn tremolo_period(extra: &[(&str, f32)], bpm: f64, seconds: f64) -> f64 {
     let mut p = vec![("lfo1Dest", 2.0), ("lfo1Amount", 1.0), ("lfo1Shape", 0.0)];
     p.extend_from_slice(extra);
     let mut t = clean(&p);
-    // key 84 ≈ 1047 Hz: every 1 ms window holds a full cycle
     let (l, _) = render(&mut t, secs(seconds), &mut Song::at(bpm, 0.0), &[(0, Ev::On(84, 1.0, 0.0))]);
     env_period(&envelope(&l), 30).0
 }
@@ -245,14 +222,12 @@ fn free_rate_in_hz_is_accurate() {
 
 #[test]
 fn synced_rates_follow_the_tempo() {
-    // (bpm, division index, beats)
     for (bpm, div) in [(120.0, 7usize), (140.0, 9), (100.0, 5), (174.0, 4), (90.0, 13), (150.0, 15)] {
         let beats = LFO_DIV_BEATS[div];
         let want = beats * 60.0 / bpm;
         let p = tremolo_period(&[("lfo1Sync", 1.0), ("lfo1Division", div as f32)], bpm, 0.1 + want * 5.0);
         assert!((p / want - 1.0).abs() < 0.01, "{} at {bpm} bpm: period {p} s, want {want}", LFO_DIVISIONS[div]);
     }
-    // the division table: straight, triplet (2/3) and dotted (3/2) values
     assert_eq!(LFO_DIVISIONS.len(), LFO_DIV_BEATS.len());
     assert_eq!(LFO_DIV_BEATS[1], 0.125);
     assert_eq!(LFO_DIV_BEATS[18], 32.0);
@@ -265,7 +240,6 @@ fn synced_rates_follow_the_tempo() {
     }
 }
 
-/// First frame at/after `from` where the envelope falls below half its peak.
 fn first_dip(l: &[f32], from: usize) -> usize {
     let env = envelope(l);
     let pk = env.iter().fold(0.0f32, |m, v| m.max(*v));
@@ -275,14 +249,12 @@ fn first_dip(l: &[f32], from: usize) -> usize {
 
 #[test]
 fn free_lfo_is_locked_to_the_song_and_retrigger_restarts_per_note() {
-    // square tremolo, 1/4 at 120 bpm (0.5 s): gain drops at phase 0.5
     let base = [("lfo1Dest", 2.0), ("lfo1Amount", 1.0), ("lfo1Shape", 4.0), ("lfo1Sync", 1.0), ("lfo1Division", 10.0)];
     let start = secs(0.1);
     let mut free = clean(&base);
     let (l, _) = render(&mut free, secs(1.0), &mut Song::at(120.0, 0.0), &[(start, Ev::On(84, 1.0, 0.0))]);
     let d = first_dip(&l, start);
     assert!((d as f64 / SR as f64 - 0.25).abs() < 0.003, "song-locked dip at {} s, want 0.25", d as f64 / SR as f64);
-    // playback started at beat 0.25, note 0.05 s later: the dip still lands on beat 0.5 (frame 0.125 s)
     let mut free = clean(&base);
     let (l, _) = render(&mut free, secs(1.0), &mut Song::at(120.0, 0.25), &[(secs(0.05), Ev::On(84, 1.0, 0.0))]);
     let d = first_dip(&l, secs(0.05));
@@ -298,7 +270,6 @@ fn free_lfo_is_locked_to_the_song_and_retrigger_restarts_per_note() {
 
 #[test]
 fn song_locked_lfos_render_deterministically() {
-    // Hz rate and S&H, free mode: noodling while stopped must not change a render from the song start
     for extra in [vec![("lfo1Shape", 0.0), ("lfo1Rate", 3.3)], vec![("lfo1Shape", 5.0), ("lfo1Sync", 1.0), ("lfo1Division", 4.0)], vec![("lfo1Shape", 6.0), ("lfo1Rate", 7.0)]] {
         let mut p = vec![("lfo1Dest", 0.0), ("lfo1Amount", 0.3), ("lfo2Dest", 3.0), ("lfo2Amount", 0.8), ("lfo2Rate", 1.7)];
         p.extend(extra);
@@ -308,7 +279,7 @@ fn song_locked_lfos_render_deterministically() {
         let mut b = clean(&p);
         let mut stopped = Song { bpm: 120.0, beat: 0.0, playing: false };
         render(&mut b, secs(0.77), &mut stopped, &[(5, Ev::On(50, 1.0, 0.0)), (secs(0.5), Ev::Off(50))]);
-        render(&mut b, secs(1.0), &mut stopped, &[]); // let the tail die
+        render(&mut b, secs(1.0), &mut stopped, &[]);
         assert!(!b.is_active());
         let rb = render(&mut b, secs(1.5), &mut Song::at(120.0, 0.0), &notes);
         assert_eq!(ra, rb, "free LFO render depends on what happened before playback ({p:?})");
@@ -324,17 +295,14 @@ fn fade_in_ramps_the_depth() {
         let (lo, hi) = env[a..b].iter().fold((f32::MAX, 0.0f32), |(x, y), v| (x.min(*v), y.max(*v)));
         1.0 - lo / hi
     };
-    let early = depth(5, 130); // first cycle: fade ≤ 13 %
-    let mid = depth(440, 565); // ~half way
-    let late = depth(1100, 1475); // fully faded in
+    let early = depth(5, 130);
+    let mid = depth(440, 565);
+    let late = depth(1100, 1475);
     assert!(early < 0.15, "early tremolo depth {early}");
     assert!(mid > 0.35 && mid < 0.65, "half-way depth {mid}");
     assert!(late > 0.95, "late depth {late}");
 }
 
-// ── Destinations ─────────────────────────────────────────────────────────
-
-/// Square LFO, 2 Hz, retriggered: high half 0..0.25 s, low half 0.25..0.5 s.
 fn square(dest: f32, amount: f32, extra: &[(&str, f32)]) -> TriOsc {
     let mut p = vec![("lfo1Dest", dest), ("lfo1Amount", amount), ("lfo1Shape", 4.0), ("lfo1Rate", 2.0), ("lfo1Retrig", 1.0)];
     p.extend_from_slice(extra);
@@ -343,13 +311,12 @@ fn square(dest: f32, amount: f32, extra: &[(&str, f32)]) -> TriOsc {
 
 #[test]
 fn pitch_lfo_moves_the_fundamental() {
-    let mut t = square(0.0, 1.0 / 12.0, &[]); // ±1 semitone
+    let mut t = square(0.0, 1.0 / 12.0, &[]);
     let (l, _) = render(&mut t, secs(0.5), &mut Song::at(120.0, 0.0), &[(0, Ev::On(69, 1.0, 0.0))]);
     let hi = freq(win(&l, 0.03, 0.22));
     let lo = freq(win(&l, 0.28, 0.47));
     assert!((hi / 440.0 - 2f64.powf(1.0 / 12.0)).abs() < 0.003, "up: {hi} Hz");
     assert!((lo / 440.0 - 2f64.powf(-1.0 / 12.0)).abs() < 0.003, "down: {lo} Hz");
-    // full amount = an octave
     let mut t = square(0.0, 1.0, &[]);
     let (l, _) = render(&mut t, secs(0.5), &mut Song::at(120.0, 0.0), &[(0, Ev::On(57, 1.0, 0.0))]);
     assert!((freq(win(&l, 0.03, 0.22)) / 440.0 - 1.0).abs() < 0.003);
@@ -433,17 +400,13 @@ fn two_lfos_stack_on_different_destinations() {
     assert!((freq(win(&l, 0.28, 0.47)) / 110.0 - 1.0).abs() < 0.003);
 }
 
-// ── Random shapes, smoothing ─────────────────────────────────────────────
-
 #[test]
 fn random_shapes_are_deterministic_held_and_smooth() {
     for n in -3i64..200 {
         let c = n as f64;
-        // S&H: constant within a cycle, in range, changes between cycles (mostly)
         let a = lfo_value(5, c + 0.01, 7);
         assert_eq!(a, lfo_value(5, c + 0.99, 7));
         assert!((-1.0..1.0).contains(&a));
-        // smooth random: continuous across the cycle boundary, passes through the S&H values
         let s0 = lfo_value(6, c + 1.0 - 1e-6, 7);
         let s1 = lfo_value(6, c + 1.0, 7);
         assert!((s0 - s1).abs() < 1e-4, "smooth random jumps at {n}");
@@ -457,7 +420,6 @@ fn random_shapes_are_deterministic_held_and_smooth() {
 
 #[test]
 fn sample_and_hold_pitch_steps_on_the_grid() {
-    // S&H → pitch, 1/16 at 120 bpm (0.125 s steps), song-locked
     let mut t = clean(&[("lfo1Dest", 0.0), ("lfo1Amount", 0.25), ("lfo1Shape", 5.0), ("lfo1Sync", 1.0), ("lfo1Division", 4.0)]);
     let (l, _) = render(&mut t, secs(1.0), &mut Song::at(120.0, 0.0), &[(0, Ev::On(69, 1.0, 0.0))]);
     let mut steps = vec![];
@@ -475,7 +437,6 @@ fn sample_and_hold_pitch_steps_on_the_grid() {
 
 #[test]
 fn amount_changes_are_smoothed() {
-    // square tremolo in its low half; the amount jumps 0 → 1 mid-note: the gain glides, no click
     let mut t = square(2.0, 0.0, &[("lfo1Rate", 0.5)]);
     let mut song = Song::at(120.0, 0.0);
     let (a, _) = render(&mut t, secs(1.2), &mut song, &[(0, Ev::On(84, 1.0, 0.0))]);
@@ -498,12 +459,9 @@ fn every_lfo_param_is_off_by_default() {
         }
     }
     assert_eq!(d.params.iter().filter(|p| p.id.starts_with("lfo")).count(), 16);
-    // appended after the pre-LFO params, so stored indices keep their meaning
     assert_eq!(d.param_index("lfo1Shape"), Some(triosc_legacy::descriptor().params.len()));
 }
 
-/// CPU of one 128-frame block with 8 sounding voices, LFOs off vs both on.
-/// `cargo test --release -p krypt-studio-dsp triosc_cpu -- --ignored --nocapture`
 #[test]
 #[ignore]
 fn triosc_cpu_8_voices_128_frames() {

@@ -1,5 +1,3 @@
-// Electron-free parts of the project layer: .kstudio container, load-time
-// validation, sample relinking and crash-journal replay.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,7 +18,7 @@ const noLog = (): void => {};
 test('container round-trips project + meta, and plain JSON opens too', () => {
   const p = createDefaultProject('Round');
   const bytes = encodeContainer(p, '9.9.9');
-  assert.equal(bytes[0], 0x50); // "PK"
+  assert.equal(bytes[0], 0x50);
   const d = decodeContainer(bytes);
   assert.equal(d.meta?.appVersion, '9.9.9');
   assert.equal(d.meta?.schemaVersion, SCHEMA_VERSION);
@@ -76,12 +74,10 @@ test('crash journal: snapshot + journal replay restores unsaved edits', async ()
   const pat = host.project.transport.activePatternId!;
   const kick = host.project.channelOrder[0];
   host.exec('notes.add', { patternId: pat, channelId: kick, notes: [{ tick: 0, key: 60 }] }, { actor: USER });
-  // A second snapshot generation mid-session, then more edits.
   await store.snapshot(host.project, { docVersion: host.version, savedVersion, projectPath: null });
   host.exec('transport.set', { bpm: 97 }, { actor: USER });
   host.exec('notes.add', { patternId: pat, channelId: kick, notes: [{ tick: 960, key: 62 }] }, { actor: USER });
   await store.flush();
-  // "Crash": no endClean(). A new session finds the lock.
   const next = new RecoveryStore(dir, 'test', noLog);
   assert.equal(next.crashedLastTime(), true);
   const rec = await next.recover();
@@ -91,7 +87,6 @@ test('crash journal: snapshot + journal replay restores unsaved edits', async ()
   assert.equal(Object.keys(rec.project.patterns[pat].notes[kick]).length, 2);
   assert.deepEqual(JSON.parse(JSON.stringify(rec.project)), JSON.parse(JSON.stringify(host.project)));
 
-  // A save marker makes the same state "clean".
   store.appendSaved(host.version, path.join(dir, 'song.kstudio'));
   await store.flush();
   const rec2 = await new RecoveryStore(dir, 'test', noLog).recover();
@@ -129,7 +124,7 @@ test('crash journal: a reset during an in-flight snapshot keeps the new project 
     if (c.kind !== 'reset') store.appendChange(c.version, c.patches);
   });
   host.exec('transport.set', { bpm: 111 }, { actor: USER });
-  const first = store.snapshot(host.project, { docVersion: host.version, savedVersion: -1, projectPath: null }); // not awaited
+  const first = store.snapshot(host.project, { docVersion: host.version, savedVersion: -1, projectPath: null });
   host.reset(createDefaultProject('B'));
   const second = store.snapshot(host.project, { docVersion: host.version, savedVersion: host.version, projectPath: null });
   host.exec('transport.set', { bpm: 123 }, { actor: USER });

@@ -1,7 +1,3 @@
-// Removes Vite's build outputs (dist/ and dist-electron/) before a release
-// build. vite-plugin-electron never empties dist-electron/, so every dev
-// rebuild leaves hashed chunks + source maps behind; without this they would
-// all be packed into app.asar. Used by `npm run dist` only.
 import { rmSync } from 'node:fs';
 import path from 'node:path';
 

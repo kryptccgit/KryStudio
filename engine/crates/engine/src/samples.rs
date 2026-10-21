@@ -1,9 +1,3 @@
-//! Sample decoding (symphonia: wav, aiff, flac, mp3, ogg/vorbis; Windows Media
-//! Foundation: m4a, aac, mp4, alac, wma, ...), a path +
-//! mtime keyed cache of decoded `Arc<SampleData>` (original sample rate —
-//! the sampler resamples) and of SFZ multisample sets (krypt.multisampler),
-//! waveform peaks, and `factory:` / `pack:` path resolution.
-
 pub use krypt_studio_dsp::decode::{decode_file, open_format, read_wav_root_key};
 pub use krypt_studio_dsp::instruments::multisampler::load::is_sfz;
 use krypt_studio_dsp::instruments::multisampler::load::{load_set, LoadOptions};
@@ -17,13 +11,8 @@ use std::time::SystemTime;
 
 use symphonia::core::formats::TrackType;
 
-/// Sound-pack sample paths: `pack:<pack id>/<path inside the pack>` (shared/packs/types.ts).
 pub const PACK_SCHEME: &str = "pack:";
 
-/// Split a `pack:` path into (pack id, inner path). Mirrors `parsePackPath`
-/// (shared/packs/types.ts): the id is `[a-z0-9][a-z0-9-]*`; the inner path is
-/// non-empty with no empty, `.` or `..` segments. Stricter than the TS side
-/// on Windows: backslashes and `:` (drive letters, streams) are refused too.
 pub fn parse_pack_path(p: &str) -> Option<(&str, &str)> {
     let rest = p.strip_prefix(PACK_SCHEME)?;
     let slash = rest.find('/')?;
@@ -39,12 +28,6 @@ pub fn parse_pack_path(p: &str) -> Option<(&str, &str)> {
     Some((id, inner))
 }
 
-/// Resolve a sample path:
-/// - `factory:<rel>` against the factory dir;
-/// - `pack:<id>/<rel>` against the packs dir (`--packs-dir`): an error sentence
-///   when the path is malformed, the packs dir is unknown, or the pack isn't installed;
-/// - relative paths against `base_dir` (the project file's folder, CLI renders only);
-/// - anything else as is.
 pub fn resolve_path(p: &str, factory_dir: &Path, packs_dir: Option<&Path>, base_dir: Option<&Path>) -> Result<PathBuf, String> {
     if let Some(rel) = p.strip_prefix("factory:") {
         let mut out = factory_dir.to_path_buf();
@@ -82,8 +65,6 @@ fn missing_pack_message(id: &str) -> String {
     format!("Sound pack {id} isn't installed: download it in Home > Sounds > Sound packs")
 }
 
-/// If `path` lies in an absent pack folder under `packs_dir` (main resolved a
-/// `pack:` path itself), the sentence that says so.
 pub fn missing_pack_hint(path: &Path, packs_dir: Option<&Path>) -> Option<String> {
     let dir = packs_dir?;
     let rel = path.strip_prefix(dir).ok()?;
@@ -101,9 +82,6 @@ pub struct SampleInfo {
     pub duration_sec: f64,
 }
 
-/// Probe a file (cheap when symphonia reads the container and it states its
-/// length). Formats only Media Foundation reads (m4a, wma, ...) and files
-/// without a stated length are fully decoded instead.
 pub fn probe_info(path: &Path, display: &str) -> Result<SampleInfo, String> {
     if let Ok(format) = open_format(path) {
         let track = format.default_track(TrackType::Audio).ok_or_else(|| format!("No audio track in {}", path.display()))?;
@@ -191,14 +169,11 @@ fn mtime(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
-/// Decoded-sample cache shared by the control, loader, worker and render threads.
 #[derive(Default)]
 pub struct SampleCache {
     map: Mutex<HashMap<PathBuf, (Option<SystemTime>, Entry)>>,
     peaks: Mutex<HashMap<(PathBuf, usize), (Option<SystemTime>, Arc<Peaks>)>>,
-    /// SFZ instruments (krypt.multisampler), keyed by the .sfz path + its mtime.
     multi: Mutex<HashMap<PathBuf, (Option<SystemTime>, MultiEntry)>>,
-    /// Time-stretched / pitch-shifted copies for audio clips (variants.rs).
     pub variants: crate::variants::VariantCache,
 }
 
@@ -217,7 +192,6 @@ impl SampleCache {
         }
     }
 
-    /// Decode (or fetch) a file. Blocking.
     pub fn load(&self, path: &Path) -> Result<Arc<SampleData>, String> {
         match self.lookup(path) {
             Lookup::Hit(d) => return Ok(d),
@@ -238,7 +212,6 @@ impl SampleCache {
         res
     }
 
-    /// Loader thread: decode a sample, or load an SFZ instrument (by extension).
     pub fn preload(&self, path: &Path) {
         if is_sfz(path) {
             let _ = self.load_multi(path);
@@ -257,9 +230,6 @@ impl SampleCache {
         }
     }
 
-    /// Load (or fetch) an SFZ instrument: parse it and decode every region's
-    /// sample range (dsp multisampler::load). Blocking; channels using the
-    /// same .sfz share one set.
     pub fn load_multi(&self, path: &Path) -> Result<Arc<MultiSampleSet>, String> {
         match self.lookup_multi(path) {
             MultiLookup::Hit(d) => return Ok(d),
@@ -280,8 +250,6 @@ impl SampleCache {
         res
     }
 
-    /// Cached data if present, else a transient decode that is NOT cached
-    /// (browser previews / peaks / analysis must not pin RAM forever).
     pub fn get_or_decode(&self, path: &Path) -> Result<Arc<SampleData>, String> {
         match self.lookup(path) {
             Lookup::Hit(d) => Ok(d),
@@ -289,8 +257,6 @@ impl SampleCache {
         }
     }
 
-    /// Drop decoded samples that no project channel references and nothing else holds
-    /// (and re-apply the stretch cache's memory cap).
     pub fn prune(&self, keep: &std::collections::HashSet<PathBuf>) {
         {
             let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
@@ -303,7 +269,6 @@ impl SampleCache {
         self.variants.trim();
     }
 
-    /// Modification time of a file (part of a variant's identity).
     pub fn mtime_of(path: &Path) -> Option<SystemTime> {
         mtime(path)
     }
@@ -363,7 +328,6 @@ mod tests {
         assert_eq!(pk.data.len(), 20);
         assert!(pk.data.chunks(2).all(|c| c[0] <= c[1]));
         assert!(cache.load(&dir.join("missing.wav")).is_err());
-        // peaks() decodes transiently; load() caches; prune() drops unreferenced data.
         assert!(matches!(cache.lookup(&p), Lookup::Miss));
         let held = cache.load(&p).unwrap();
         cache.prune(&Default::default());
@@ -374,7 +338,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Media Foundation formats (m4a here) probe by decoding, and give peaks.
     #[cfg(windows)]
     #[test]
     fn probe_and_peaks_for_media_foundation_formats() {
@@ -393,7 +356,6 @@ mod tests {
         let pk = SampleCache::new().peaks(&p, 8).unwrap();
         assert_eq!(pk.data.len(), 16);
         assert!(pk.data.chunks(2).any(|c| c[1] > 0.3));
-        // A broken m4a: a clean error naming the file.
         let bad = dir.join("bad.m4a");
         std::fs::write(&bad, b"not an mp4 at all").unwrap();
         assert!(probe_info(&bad, "bad.m4a").unwrap_err().contains("bad.m4a"));
@@ -411,7 +373,6 @@ mod tests {
 
     #[test]
     fn pack_paths() {
-        // the parsePackPath mirror
         assert_eq!(parse_pack_path("pack:grand-piano/krypt/grand.sfz"), Some(("grand-piano", "krypt/grand.sfz")));
         assert_eq!(parse_pack_path("pack:k9/a.sfz"), Some(("k9", "a.sfz")));
         for bad in [
@@ -425,18 +386,13 @@ mod tests {
         let packs = root.join("packs");
         std::fs::create_dir_all(packs.join("kit").join("krypt")).unwrap();
         let f = Path::new("C:/factory");
-        // resolved inside the pack dir
         assert_eq!(resolve_path("pack:kit/krypt/kit.sfz", f, Some(&packs), None).unwrap(), packs.join("kit").join("krypt").join("kit.sfz"));
-        // no --packs-dir
         let e = resolve_path("pack:kit/krypt/kit.sfz", f, None, None).unwrap_err();
         assert!(e.contains("Sound pack kit isn't installed or the packs folder is unknown"), "{e}");
-        // pack not installed
         let e = resolve_path("pack:other/a.sfz", f, Some(&packs), None).unwrap_err();
         assert!(e.contains("Sound pack other isn't installed"), "{e}");
-        // traversal refused
         let e = resolve_path("pack:kit/../kit/x.sfz", f, Some(&packs), None).unwrap_err();
         assert!(e.contains("not a valid sound pack path"), "{e}");
-        // main resolved the path itself: the hint names the pack
         assert_eq!(
             missing_pack_hint(&packs.join("other").join("a.sfz"), Some(&packs)).as_deref(),
             Some("Sound pack other isn't installed: download it in Home > Sounds > Sound packs")

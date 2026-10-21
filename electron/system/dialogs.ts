@@ -1,14 +1,6 @@
-// Native dialogs: file pickers resolve to plain paths (or null on cancel),
-// questions to the answer. None of them throws.
-
 import fs from 'node:fs';
 import { app, BrowserWindow, dialog, type FileFilter } from 'electron';
 
-/**
- * End-to-end tests only (never in a packaged build): KRYPT_E2E_DIALOGS names a JSON file holding a queue of
- * answers for the file pickers (each a path list, a path, or null = cancelled). The test appends answers while
- * the app runs; each picker takes the first one. An empty / missing queue falls through to the real dialog.
- */
 function e2eAnswer(): { hit: boolean; value: string[] | null } {
   const file = process.env.KRYPT_E2E_DIALOGS;
   if (!file || app.isPackaged) return { hit: false, value: null };
@@ -81,12 +73,6 @@ export async function pickDirectory(opts: { title?: string; defaultPath?: string
   }
 }
 
-/**
- * A permission question ("Claude Code wants to use song.mp3"): resolves with the index of the button pressed,
- * or null when it couldn't be shown. Parented to the main window, which comes forward WITHOUT taking focus from
- * the app the user is in (it is shown inactive if minimized or hidden) and flashes in the taskbar until the
- * question is answered. `signal` closes the box as if cancelled (cancelId).
- */
 export async function askPermission(opts: {
   title: string;
   message: string;
@@ -113,7 +99,6 @@ export async function askPermission(opts: {
   }
 }
 
-/** Save / Don't save / Cancel prompt for unsaved changes. */
 export async function confirmUnsaved(name: string, win?: BrowserWindow | null): Promise<'save' | 'discard' | 'cancel'> {
   try {
     const o = {

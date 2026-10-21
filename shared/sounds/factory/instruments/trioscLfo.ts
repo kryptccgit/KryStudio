@@ -1,30 +1,18 @@
-// Factory Krypt TriOsc presets that show off its two LFOs (Wave 12.2b).
-//
-// Part of INSTRUMENT_PRESETS (./index.ts); test/presets-factory.test.ts validates them against the catalog.
-//
-// Params are plain units exactly as engine/crates/dsp/src/instruments/triosc.rs
-// specs them (choice params are option indexes, see the maps below).
-
 import type { InstrumentPreset } from '../../types';
 import { DIV, HALL, PLATE, ROOM, SH, TAPE, TRI, chorus, delay, drive, eq, imager, preset, reverb, tri, type Params } from './kit';
 
-/** TriOsc LFO shapes. */
 export const TLFO = { sine: 0, tri: 1, sawUp: 2, sawDown: 3, square: 4, sampleHold: 5, smoothRandom: 6 } as const;
-/** TriOsc LFO destinations. Depth at amount 1: pitch ±12 st, cutoff ±4 oct, full tremolo, full pan, ±30 ct detune, osc 1↔2 crossfade. */
 export const TDEST = { pitch: 0, cutoff: 1, amp: 2, pan: 3, detune: 4, oscMix: 5 } as const;
-/** TriOsc LFO sync divisions (T = triplet, D = dotted). */
 export const TDIV = {
   '1/32T': 0, '1/32': 1, '1/32D': 2, '1/16T': 3, '1/16': 4, '1/16D': 5, '1/8T': 6, '1/8': 7, '1/8D': 8, '1/4T': 9, '1/4': 10, '1/4D': 11,
   '1/2T': 12, '1/2': 13, '1/2D': 14, '1bar': 15, '2bars': 16, '4bars': 17, '8bars': 18,
 } as const;
 
-/** Every TriOsc LFO param at its default (both LFOs off). */
 export const TRI_LFO_OFF: Params = {
   lfo1Shape: 0, lfo1Dest: 0, lfo1Amount: 0, lfo1Sync: 0, lfo1Rate: 5, lfo1Division: 10, lfo1Retrig: 0, lfo1Fade: 0,
   lfo2Shape: 0, lfo2Dest: 1, lfo2Amount: 0, lfo2Sync: 0, lfo2Rate: 5, lfo2Division: 10, lfo2Retrig: 0, lfo2Fade: 0,
 };
 
-/** A full TriOsc param set including both LFOs (off unless given). */
 function triLfo(p: Params & { gain: number }): Params {
   return tri({ ...TRI_LFO_OFF, ...p });
 }

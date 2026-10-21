@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Krypt Analyzer window: spectrum (log, smoothed, peak hold), oscilloscope
-// and loudness (LUFS momentary / short-term / integrated, true peak,
-// correlation) of the slot's signal. The engine streams it while this
-// window is open (a watched slot, docs/ENGINE_PROTOCOL.md §15). The
-// plugin's `view` param picks the big display.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { slotKey } from '@shared/engine/meters';
@@ -23,7 +15,6 @@ const VIEWS = ['Spectrum', 'Scope', 'Loudness'] as const;
 const HEIGHT = 180;
 const SPEC_FLOOR = -96;
 const SPEC_TOP = 6;
-/** Momentary loudness history (≈ 8 s at ~30 snapshots/s). */
 const HISTORY = 240;
 const LUFS_FLOOR = -60;
 
@@ -57,7 +48,6 @@ export function AnalyzerDisplay({ insertId, slotId }: { insertId: string; slotId
       }
       if (d?.scope) lastScope = d.scope;
       smoother.decay(dt, now);
-      // numbers (React state only when the text changes)
       const live = now - lastSeen < 500;
       const next = { m: formatLevel(d?.lufsM), s: formatLevel(d?.lufsS), i: formatLevel(d?.lufsI), tp: formatLevel(d?.truePeak), corr: d?.correlation ?? null, live };
       const text = JSON.stringify(next);

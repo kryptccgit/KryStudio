@@ -1,6 +1,3 @@
-// The take lanes + comping guide (Wave 12.2b). Kept in its own file;
-// articles.ts lists it after the Recording guide. Pure data.
-
 import type { GuideArticle } from './articles';
 
 export const TAKES_ARTICLE: GuideArticle = {

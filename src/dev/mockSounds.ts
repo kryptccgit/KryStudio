@@ -1,10 +1,3 @@
-// Browser-only mock of window.krypt.sounds: factory presets from shared
-// data, user presets in memory (Save preset… / Save chain… build them from
-// the in-page document like main does), a few fake factory samples (a
-// tonal 808, a 4-bar riser…) and fake "found on this PC" folders that know
-// which ones are already in the Browser. Devtools: __kryptMockSounds.
-// emitState() / .clearUser().
-
 import type { KryptApi, SavePresetMeta, SimilarItem, SimilarResult, SoundsState } from '@shared/types';
 import type { Project } from '@shared/schema/project';
 import { FACTORY_PRESETS, factoryPreset } from '@shared/sounds/factory';
@@ -12,7 +5,6 @@ import { summarizePreset, type ChainPreset, type ChainRole, type FactorySample, 
 import { zChainPreset, zInstrumentPreset } from '@shared/sounds/schema';
 import { roleFromName } from '@shared/sounds/select';
 
-/** A Windows path from parts (no backslash escaping to get wrong). */
 const win = (...parts: string[]): string => parts.join('\\');
 
 const USER_DIR = win('C:', 'Users', 'you', 'AppData', 'Roaming', 'Krypt Studio', 'presets');
@@ -163,8 +155,6 @@ export function createMockSounds(): KryptApi['sounds'] {
     },
     revealUserDir: async () => ({ ok: false, message: `Browser mock: the real app opens ${USER_DIR}` }),
     factorySamples: async () => FAKE_SAMPLES,
-    // "More like this": no fingerprints in the browser, so neighbours are faked from the same kind / role, with a
-    // first answer that still has pack sounds "being measured" (the Browser asks again).
     similar: async (source, q = {}) => {
       await new Promise((r) => setTimeout(r, 250));
       const isPreset = source.kind === 'preset';

@@ -1,10 +1,3 @@
-// The packaged renderer is served from a privileged `app://bundle/` scheme
-// instead of file:// so it has a real, secure origin. dockview popouts
-// (popout.html) need a SAME-ORIGIN http(s)-like URL; file:// pages get
-// opaque origins (research/06 §2.3).
-//
-// registerAppScheme() must run before app 'ready'; serveAppScheme() after.
-
 import { net, protocol } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -27,12 +20,6 @@ export function registerAppScheme(): void {
   ]);
 }
 
-/**
- * Serve files under `root` (the Vite `dist/` folder). Never escapes it.
- * `/guide-videos/<id>.<mp4|vtt|jpg>` is answered from `videosRoot` instead (./guide-videos.ts: read-only, flat
- * names only, range requests for seeking). `/guide-images/<name>.<webp|png|jpg>` is answered from `imagesRoot`
- * (./guide-images.ts: read-only, flat names only).
- */
 export function serveAppScheme(root: string, videosRoot?: string, imagesRoot?: string): void {
   const base = path.resolve(root);
   const videoPrefix = `${GUIDE_VIDEO_ROUTE}/`;

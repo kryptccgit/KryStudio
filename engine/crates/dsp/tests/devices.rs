@@ -1,9 +1,3 @@
-//! Wave 12.2 devices: Krypt Heat, Tape Echo, Grain, Glue (and the vocoder
-//! upgrade's new modes). The generic suites (effects.rs, rt_alloc.rs) also
-//! cover silence, tails, resets, extreme params, sample rates and real-time
-//! allocation for them. `cpu_per_block` (ignored) prints the CPU numbers:
-//! `cargo test --release -p krypt-studio-dsp --test devices -- --ignored --nocapture`.
-
 mod common;
 use common::*;
 
@@ -34,7 +28,6 @@ fn argmax(x: &[f32]) -> usize {
     x.iter().enumerate().fold((0, 0.0f32), |a, (i, &v)| if v.abs() > a.1 { (i, v.abs()) } else { a }).0
 }
 
-/// Hann-windowed single-bin DFT magnitude (amplitude units).
 fn goertzel(x: &[f32], f: f32) -> f32 {
     let n = x.len();
     let w = std::f64::consts::TAU * f as f64 / SR as f64;
@@ -47,8 +40,6 @@ fn goertzel(x: &[f32], f: f32) -> f32 {
     }
     (2.0 * (re * re + im * im).sqrt() / wsum) as f32
 }
-
-// ── shared behaviour ─────────────────────────────────────────────────────
 
 #[test]
 fn finite_on_noise_impulse_and_sine_for_every_setting_family() {
@@ -137,7 +128,6 @@ fn reset_clears_frozen_and_spectral_state() {
     ] {
         let mut e = fx(id, params);
         if id == "krypt.grain" && params.iter().any(|p| p.0 == "freeze") {
-            // record first, then freeze
             e.set_param(param(id, "freeze"), 0.0);
             let (mut l, mut r) = (noise(24000, 1, 0.8), noise(24000, 2, 0.8));
             run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
@@ -170,7 +160,7 @@ fn reported_latency_matches_the_impulse() {
                 e.set_param(param(id, b), 0.0);
             }
             for b in ["lowShape", "midShape", "highShape"] {
-                e.set_param(param(id, b), 3.0); // hard clip: linear below 0 dBFS
+                e.set_param(param(id, b), 3.0);
             }
         }
         let lat = e.latency();
@@ -183,8 +173,6 @@ fn reported_latency_matches_the_impulse() {
         }
     }
 }
-
-// ── Heat ─────────────────────────────────────────────────────────────────
 
 #[test]
 fn heat_crossover_sums_flat_when_clean() {
@@ -207,7 +195,6 @@ fn heat_crossover_sums_flat_when_clean() {
 
 #[test]
 fn heat_bands_drive_only_their_own_range() {
-    // only the high band is driven hard: a 100 Hz tone stays clean, a 6 kHz tone distorts
     let thd = |f: f32| {
         let mut e = fx("krypt.heat", &[("lowDrive", 0.0), ("midDrive", 0.0), ("highDrive", 30.0), ("highShape", 3.0)]);
         for b in ["lowShape", "midShape"] {
@@ -226,7 +213,6 @@ fn heat_bands_drive_only_their_own_range() {
     let s = sine(x, 48000, 0.5);
     let (mut l, mut r) = (s.clone(), s);
     run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
-    // 3x 6 kHz = 18 kHz: the clipped high band makes strong odd harmonics
     assert!(goertzel(&l[24000..], 18000.0) / goertzel(&l[24000..], x) > 0.05);
 }
 
@@ -240,11 +226,8 @@ fn heat_rectify_and_tube_leave_no_dc() {
     assert!(mean.abs() < 1e-3, "DC {mean}");
 }
 
-// ── Tape Echo ────────────────────────────────────────────────────────────
-
 #[test]
 fn tape_echo_lands_on_the_synced_time() {
-    // (bpm, division index, expected echo in samples): 1/4 @ 120, 1/8T @ 100, 1/8D @ 90, 1/16 @ 150
     for (bpm, div, want) in [(120.0, 9.0, 24000usize), (100.0, 5.0, 9600), (90.0, 7.0, 24000), (150.0, 3.0, 4800)] {
         let mut e = fx(
             "krypt.tapeecho",
@@ -255,7 +238,6 @@ fn tape_echo_lands_on_the_synced_time() {
         let at = argmax(&l);
         assert!((at as i64 - (1000 + want) as i64).abs() <= 2, "{bpm} bpm div {div}: echo at {}, want {want}", at - 1000);
     }
-    // free time in ms
     let mut e = fx("krypt.tapeecho", &[("sync", 0.0), ("timeMs", 250.0), ("wow", 0.0), ("flutter", 0.0), ("feedback", 0.0), ("mix", 1.0)]);
     let (mut l, mut r) = (impulse(30000, 500, 0.5), impulse(30000, 500, 0.5));
     run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
@@ -264,12 +246,10 @@ fn tape_echo_lands_on_the_synced_time() {
 
 #[test]
 fn tape_echo_feedback_saturates_and_wow_bends_pitch() {
-    // runaway feedback stays bounded by the tape saturator
     let mut e = fx("krypt.tapeecho", &[("feedback", 1.1), ("saturation", 1.0), ("mix", 1.0), ("division", 3.0)]);
     let (mut l, mut r) = (noise(48000 * 4, 5, 0.9), noise(48000 * 4, 6, 0.9));
     run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
     assert!(peak(&l) < 1.5, "{}", peak(&l));
-    // wow: a steady 1 kHz tone comes back with a wandering pitch
     let spread = |wow: f32| {
         let mut e = fx("krypt.tapeecho", &[("wow", wow), ("flutter", 0.0), ("feedback", 0.0), ("mix", 1.0), ("age", 0.0)]);
         let x = sine(1000.0, 48000 * 3, 0.5);
@@ -300,15 +280,12 @@ fn tape_echo_freeze_loops_without_loss_and_ping_pong_alternates() {
     run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
     let (a, b) = (rms(&l[24000..48000]), rms(&l[48000 * 3..48000 * 4]));
     assert!(a > 0.2 && (a - b).abs() < 0.01 * a, "frozen loop decays: {a} → {b}");
-    // ping-pong: first echo left, second right
     let mut e = fx("krypt.tapeecho", &[("division", 9.0), ("wow", 0.0), ("flutter", 0.0), ("mix", 1.0), ("pingPong", 1.0), ("feedback", 0.8)]);
     let (mut l, mut r) = (impulse(60000, 100, 0.5), impulse(60000, 100, 0.5));
     run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
     assert!(peak(&l[24000..24300]) > 0.1 && peak(&r[24000..24300]) < 1e-3, "first echo not left");
     assert!(peak(&r[48000..48300]) > 0.05 && peak(&l[48000..48300]) < 1e-3, "second echo not right");
 }
-
-// ── Grain ────────────────────────────────────────────────────────────────
 
 #[test]
 fn grain_is_deterministic_and_reset_restarts_it() {
@@ -335,8 +312,6 @@ fn grain_pitch_moves_the_tone() {
         let (mut l, mut r) = (x.clone(), x);
         run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
         let tail = &l[48000..];
-        // grains restart their phase density times a second, so the energy sits in sidebands
-        // (multiples of the grain rate) around the new pitch: compare ±12 % bands
         let band = |f: f32| (-12..=12).map(|k| goertzel(tail, f * (1.0 + 0.01 * k as f32)).powi(2)).sum::<f32>();
         let (moved, orig) = (band(f_out), band(440.0));
         assert!(moved > 4.0 * orig, "{st} st: {moved} at {f_out} Hz vs {orig} at 440 Hz");
@@ -370,7 +345,6 @@ fn grain_spectral_blur_zero_is_transparent_and_blur_smears() {
         err = err.max((l[i] - x[i - lat]).abs());
     }
     assert!(err < 1e-4, "blur 0 is not transparent: {err}");
-    // blur: a burst keeps ringing after it stops
     let mut e = fx("krypt.grain", &[("mode", 1.0), ("blur", 0.6), ("mix", 1.0)]);
     let mut l = noise(24000, 3, 0.5);
     l.extend(std::iter::repeat_n(0.0, 24000));
@@ -378,8 +352,6 @@ fn grain_spectral_blur_zero_is_transparent_and_blur_smears() {
     run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
     assert!(rms(&l[24000 + lat + 4800..24000 + lat + 9600]) > 0.02, "no smear tail");
 }
-
-// ── Glue ─────────────────────────────────────────────────────────────────
 
 #[test]
 fn glue_follows_the_external_sidechain_and_its_hpf() {
@@ -393,11 +365,8 @@ fn glue_follows_the_external_sidechain_and_its_hpf() {
     };
     assert!(run(0.0, 0.0, 60.0) > -0.5, "own quiet input should pass");
     assert!(run(1.0, 0.0, 60.0) < -6.0, "loud sidechain should duck");
-    // 300 Hz HPF on a 40 Hz kick-like sidechain: much less reduction
     assert!(run(1.0, 6.0, 40.0) > run(1.0, 0.0, 40.0) + 6.0);
 }
-
-// ── CPU ──────────────────────────────────────────────────────────────────
 
 #[test]
 #[ignore]

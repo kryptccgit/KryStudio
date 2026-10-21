@@ -1,4 +1,3 @@
-// House: four-on-the-floor, offbeat hats, piano/organ stabs, an offbeat bass, built in 8-bar phrases.
 import type { Playbook } from './types';
 
 export const HOUSE: Playbook = {

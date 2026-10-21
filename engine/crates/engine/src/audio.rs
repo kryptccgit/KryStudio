@@ -1,8 +1,3 @@
-//! Audio output: cpal (WASAPI shared mode on Windows). A dedicated device
-//! thread owns the stream, rebuilds it on device loss (retry every 2 s) and
-//! falls back to a "null driver" that keeps the core running in real time
-//! without a device, so transport and telemetry keep working.
-
 use crate::core::Core;
 use crate::protocol::{DeviceInfo, DeviceStatus, Out};
 use crate::rt::{self, TryCell};
@@ -30,7 +25,6 @@ pub struct DeviceManager {
 }
 
 impl DeviceManager {
-    /// Start the device thread and open the default device (or the null driver).
     pub fn start(core: CoreCell, out: Arc<Out>, use_device: bool) -> DeviceManager {
         let (tx, rx) = crossbeam_channel::unbounded();
         let status = Arc::new(Mutex::new(DeviceStatus::closed(48000, Some("Starting".into()))));
@@ -208,7 +202,6 @@ impl DevState {
                         self.set_status(&s);
                         self.emit(&s);
                         self.out.log("warn", format!("Audio device lost: {message}"));
-                        // A changed default device can usually be reopened right away.
                         self.try_recover();
                     } else if !fatal {
                         self.out.log("debug", format!("Audio stream: {message}"));
@@ -256,13 +249,10 @@ impl DevState {
         }
     }
 
-    /// Open a device (None = system default). On failure fall back to the
-    /// default, then to the null driver. Always returns the resulting status.
     fn open(&mut self, id: Option<String>, buffer: Option<u32>, rate: Option<u32>, emit: bool) -> DeviceStatus {
         self.want_id = id.clone();
         self.want_buffer = buffer;
         self.want_rate = rate;
-        // Release the current stream / null driver first (exclusive drivers, same device).
         self.stream = None;
         self.null = None;
         if !self.use_device {
@@ -343,7 +333,7 @@ impl DevState {
             (Some(b), cpal::SupportedBufferSize::Unknown) => cpal::BufferSize::Fixed(b),
             (None, _) => cpal::BufferSize::Default,
         };
-        self.null = None; // stop the null driver before re-preparing
+        self.null = None;
         self.prepare_core(sr);
         let stream = match self.build_stream(&device, cpal::StreamConfig { channels, sample_rate: sr, buffer_size }) {
             Ok(s) => s,
@@ -354,7 +344,6 @@ impl DevState {
             Err(e) => return Err(e),
         };
         stream.play().map_err(|e| format!("cannot start stream: {e}"))?;
-        // Wait briefly for the first callbacks to learn the real period/latency.
         let shared = self.core.borrow_blocking().shared.clone();
         let start_cb = shared.callbacks.load(Relaxed);
         let t = Instant::now();
@@ -415,7 +404,6 @@ impl DevState {
             shared.out_latency_us.store(lat.as_micros().min(u32::MAX as u128) as u32, Relaxed);
             shared.buffer_frames.store(frames as u32, Relaxed);
             let period = frames as f64 / sr;
-            // Stream start-up callbacks are irregular: don't count them as xruns.
             if warmup > 0 {
                 warmup -= 1;
             } else if let Some(prev) = last_cb {

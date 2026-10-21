@@ -1,6 +1,3 @@
-// The Session view's pure model (src/panels/session/model.ts): slot hit-testing with sticky headers / scene
-// column / stop row, keyboard selection moves, slot indexes, labels and colors, bar ↔ tick lengths, the
-// follow-action editor's value mapping, live-state fingerprints and drag payload parsing.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import type { LaunchClip } from '@shared/schema/launcher';
@@ -60,8 +57,6 @@ const PROJ = {
   channels: { ch1: { name: 'Vocal chop', color: '#EC4899' } },
 } as unknown as Parameters<typeof clipLabel>[1];
 
-// ── Hit-testing ───────────────────────────────────────────────────────
-
 test('visibleTracks: tracks in use plus spare empties; showAll keeps every track', () => {
   const order = ['t1', 't2', 't3', 't4', 't5', 't6'];
   const lc = (id: string, trackId: string) => ({ [id]: { id, trackId } as LaunchClip });
@@ -87,7 +82,6 @@ test('slotAt: cells by column width and row height; outside the slot area is nul
 });
 
 test('pointToCell: unscrolled grid, sticky header / scene column / stop row cover no slot', () => {
-  // A wide view: the grid (3 tracks × 4 scenes) fits; the scene column sits right after the last track.
   const view = { left: 100, top: 50, right: 1100, bottom: 650 };
   const grid = { left: 100, top: 50 };
   const y0 = 50 + L.headerH;
@@ -101,12 +95,10 @@ test('pointToCell: unscrolled grid, sticky header / scene column / stop row cove
 });
 
 test('pointToCell: scrolled grid, pinned header / scene column / stop row still block, slots under the scroll map right', () => {
-  // A small view over a big grid (20 tracks × 40 scenes), scrolled 500 px right and 300 px down.
   const view = { left: 0, top: 0, right: 600, bottom: 400 };
   const grid = { left: -500, top: -300 };
   const cols = 20;
   const rows = 40;
-  // Point at view (10, 200): grid x = 510 → col 4; grid y = 500 - headerH → row ⌊(500 - 40)/34⌋.
   assert.deepEqual(pointToCell(10, 200, grid, view, cols, rows), { col: Math.floor(510 / L.colW), row: Math.floor((500 - L.headerH) / L.rowH) });
   assert.equal(pointToCell(10, L.headerH - 1, grid, view, cols, rows), null, 'pinned header at the top of the view');
   assert.ok(pointToCell(10, L.headerH + 1, grid, view, cols, rows), 'just under the pinned header');
@@ -119,8 +111,6 @@ test('gridSize covers headers, slots, stop row and the scene column', () => {
   assert.deepEqual(gridSize(3, 2), { w: 3 * L.colW + L.sceneW, h: L.headerH + 2 * L.rowH + L.footerH });
   assert.deepEqual(gridSize(0, 0), { w: L.sceneW, h: L.headerH + L.footerH });
 });
-
-// ── Keyboard selection ────────────────────────────────────────────────
 
 test('moveCell: arrows move and clamp; no selection starts top-left; empty grid has none', () => {
   assert.deepEqual(moveCell(null, 'ArrowDown', 3, 3), { col: 0, row: 0 });
@@ -135,8 +125,6 @@ test('moveCell: arrows move and clamp; no selection starts top-left; empty grid 
   assert.equal(clampCell({ col: 1, row: 1 }, 0, 4), null);
   assert.equal(clampCell(null, 3, 3), null);
 });
-
-// ── Slots, labels, colors ─────────────────────────────────────────────
 
 test('slot index, columns with clips and the first empty scene of a track', () => {
   const clips = { a: clip('a', 't1', 's1'), b: clip('b', 't1', 's2'), c: clip('c', 't2', 's3') };
@@ -183,8 +171,6 @@ test('lengths: bars ↔ ticks in the time signature, readable bar counts', () =>
   assert.equal(needsRelease('toggle'), false);
 });
 
-// ── Follow-action editor mapping ──────────────────────────────────────
-
 test('follow editor: percent ↔ chance, after-bars in quarter bars, clean rules', () => {
   assert.equal(chanceToPercent(0.755), 76);
   assert.equal(chanceToPercent(2), 100);
@@ -222,8 +208,6 @@ test('follow summary and badge', () => {
   assert.equal(followActive(undefined), false);
 });
 
-// ── Live state ────────────────────────────────────────────────────────
-
 const live = (x: Partial<LauncherTelemetry> = {}): LauncherTelemetry => ({ playing: {}, queued: {}, progress: {}, overridden: [], recording: false, ...x });
 
 test('live signature ignores progress and key order; changes on launches, overrides and recording', () => {
@@ -249,8 +233,6 @@ test('slot status (queued wins over playing for a relaunch) and clamped progress
   assert.equal(clipProgress('c1', undefined), null);
 });
 
-// ── Drag and drop ─────────────────────────────────────────────────────
-
 test('drag kinds by MIME (a launch clip also carrying its pattern is still a slot move); drop effects', () => {
   assert.equal(dragKind([LAUNCH_CLIP_MIME, PATTERN_MIME]), 'slot');
   assert.equal(dragKind([PATTERN_MIME]), 'pattern');
@@ -263,7 +245,6 @@ test('drag kinds by MIME (a launch clip also carrying its pattern is still a slo
   assert.equal(dropEffectFor('slot', true), 'copy');
   assert.equal(dropEffectFor('pattern', false), 'copy');
   assert.equal(dropEffectFor('channel', true), 'move', 'Channel Rack rows only allow move');
-  // The MIME strings must match the other panels' drag sources.
   assert.equal(PATTERN_MIME, 'application/x-krypt-pattern');
   assert.equal(SAMPLE_MIME, 'application/x-krypt-sample');
   assert.equal(CHANNEL_MIME, 'application/x-krypt-channel');
@@ -280,8 +261,6 @@ test('sample payloads: plain paths, JSON {path, name}, junk', () => {
   assert.equal(nameFromPath('C:\\a\\Vocal Take 3.wav'), 'Vocal Take 3');
   assert.equal(nameFromPath('factory:fx/riser.ogg'), 'riser');
 });
-
-// ── Grid controller ───────────────────────────────────────────────────
 
 test('grid controller helpers', () => {
   assert.equal(clampNote(200), 127);

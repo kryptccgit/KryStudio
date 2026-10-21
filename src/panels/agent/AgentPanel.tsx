@@ -1,8 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Agents: MCP status + connected clients, "Connect an agent" snippets,
-// the live activity feed, the built-in chat, and the kill switch.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, useState } from 'react';
 import { Activity, Bot, Check, CircleHelp, ClipboardCopy, Download, History, Loader2, Plug, Power, RotateCcw, Send, Square, Unplug, Wrench } from 'lucide-react';
 import type { ClientConfigSnippet } from '@shared/types';
@@ -102,7 +97,6 @@ function ChatTab() {
   const hasKey = !!settings?.agent.hasApiKey;
   const provider = currentProvider(settings?.agent);
 
-  // A song dropped from Explorer: its path goes into the message ("make something like it" → study_reference).
   const [dropping, setDropping] = useState(false);
   const dropFiles = (files: FileList): void => {
     const paths = [...files].map((f) => ({ name: f.name, path: window.krypt.app.pathForFile(f) }));

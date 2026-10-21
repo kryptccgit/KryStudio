@@ -15,7 +15,6 @@ fn sine(freq: f64, secs: f64, amp: f64) -> Vec<f32> {
     (0..n).map(|i| (amp * (2.0 * PI * freq * i as f64 / SR).sin()) as f32).collect()
 }
 
-/// Tonal bursts (1 kHz, 1 ms attack, 40 ms decay) every `period` seconds, first at `first`.
 fn bursts(secs: f64, first: f64, period: f64) -> (Vec<f32>, Vec<f64>) {
     let n = (secs * SR) as usize;
     let mut x = vec![0f32; n];
@@ -34,7 +33,6 @@ fn bursts(secs: f64, first: f64, period: f64) -> (Vec<f32>, Vec<f64>) {
     (x, onsets)
 }
 
-/// Energy-weighted centre time (s) of x within [a, b) seconds.
 fn centroid(x: &[f32], a: f64, b: f64) -> f64 {
     let (ia, ib) = ((a * SR) as usize, ((b * SR) as usize).min(x.len()));
     let (mut num, mut den) = (0.0, 0.0);
@@ -46,7 +44,6 @@ fn centroid(x: &[f32], a: f64, b: f64) -> f64 {
     num / den.max(1e-30) / SR
 }
 
-/// First time (s) in [a, b) where |x| reaches half the window's peak.
 fn half_peak_onset(x: &[f32], a: f64, b: f64) -> f64 {
     let (ia, ib) = ((a * SR) as usize, ((b * SR) as usize).min(x.len()));
     let pk = x[ia..ib].iter().fold(0f32, |m, v| m.max(v.abs()));
@@ -58,7 +55,6 @@ fn rms(x: &[f32]) -> f64 {
     (x.iter().map(|v| (*v as f64).powi(2)).sum::<f64>() / x.len().max(1) as f64).sqrt()
 }
 
-/// Magnitude spectrum (Hann) of x[a..a+n].
 fn spectrum(x: &[f32], a: usize, n: usize) -> Vec<f64> {
     let mut buf: Vec<Complex<f64>> = (0..n)
         .map(|i| {
@@ -94,7 +90,6 @@ fn output_length_is_exactly_ratio_times_input() {
             assert_eq!(y[0].len(), output_frames(n, r), "n={n} ratio={r}");
         }
     }
-    // pitch-only keeps the length; stereo stays stereo
     let x = vec![sine(300.0, 1.0, 0.5), sine(450.0, 1.0, 0.5)];
     let y = run(&x, 1.0, 5.0, true);
     assert_eq!(y.len(), 2);
@@ -115,7 +110,6 @@ fn stretch_2x_doubles_duration_and_onset_times() {
         let oo = half_peak_onset(&y[0], 2.0 * t - 0.1, 2.0 * t + 0.4);
         assert!((oo - 2.0 * oi).abs() < 0.012, "burst at {t}: onset {oo:.4} vs 2x {:.4}", 2.0 * oi);
     }
-    // compressing keeps the grid too
     let y = run(std::slice::from_ref(&x), 0.5, 0.0, true);
     for &t in &onsets[..onsets.len() - 1] {
         let ci = centroid(&x, t - 0.05, t + 0.2);
@@ -132,11 +126,9 @@ fn pitch_up_an_octave_doubles_the_dominant_frequency() {
     let (fi, fo) = (peak_hz(&x), peak_hz(&y[0]));
     assert!((fi - 440.0).abs() < 2.0, "{fi}");
     assert!((fo - 880.0).abs() < 4.0, "pitched peak {fo} Hz");
-    // fractional and downward shifts
     let y = run(std::slice::from_ref(&x), 1.0, -7.5, false);
     let want = 440.0 * 2f64.powf(-7.5 / 12.0);
     assert!((peak_hz(&y[0]) - want).abs() < 4.0, "{} vs {want}", peak_hz(&y[0]));
-    // stretch + pitch together
     let y = run(std::slice::from_ref(&x), 1.5, 12.0, true);
     assert_eq!(y[0].len(), output_frames(x.len(), 1.5));
     assert!((peak_hz(&y[0]) - 880.0).abs() < 4.0);
@@ -154,7 +146,6 @@ fn level_is_preserved() {
     }
 }
 
-/// A sung-vowel stand-in: 120 Hz pulse train through a resonance at 800 Hz.
 fn vowel(secs: f64) -> Vec<f32> {
     let n = (secs * SR) as usize;
     let (f, q) = (800.0 / SR, 8.0);
@@ -188,9 +179,7 @@ fn keep_formants_holds_the_spectral_envelope() {
     let (s_on, s_off) = (spectrum(&on[0], a, n), spectrum(&off[0], a, n));
     let low = |s: &[f64]| band_energy(s, n, 600.0, 1000.0);
     let high = |s: &[f64]| band_energy(s, n, 1400.0, 1900.0);
-    // formants shifted with the pitch: the resonance moved up an octave
     assert!(high(&s_off) > 2.0 * low(&s_off), "off: high {} low {}", high(&s_off), low(&s_off));
-    // compensated: the resonance stays near 800 Hz
     assert!(low(&s_on) > high(&s_on), "on: low {} high {}", low(&s_on), high(&s_on));
 }
 
@@ -198,7 +187,6 @@ fn keep_formants_holds_the_spectral_envelope() {
 fn starts_without_a_click_or_preroll() {
     for &r in &[1.0, 1.3, 0.7, 0.5, 2.5] {
         let semis = if r == 1.0 { 4.0 } else { 0.0 };
-        // Material that fades in (most real starts): the output start is as smooth as the steady state.
         let mut x = sine(200.0, 1.0, 0.8);
         for (i, v) in x.iter_mut().take(240).enumerate() {
             *v *= i as f32 / 240.0;
@@ -208,10 +196,7 @@ fn starts_without_a_click_or_preroll() {
         let steady = slope(&y[0][y[0].len() / 2..y[0].len() / 2 + 4800]);
         let start = slope(&y[0][..960]);
         assert!(start <= 1.5 * steady, "ratio {r}: start slope {start} vs steady {steady}");
-        // Sound is there from the very start: no output-latency pre-roll of silence.
         assert!(rms(&y[0][240..2400]) > 0.25, "ratio {r}: silent start");
-        // Abrupt material (full-scale cosine: a step from silence): the output
-        // begins at 0 and the start stays within +1.6 dB of the steady state.
         let x: Vec<f32> = (0..48000).map(|i| (0.8 * (2.0 * PI * 200.0 * i as f64 / SR).cos()) as f32).collect();
         let y = run(std::slice::from_ref(&x), r, semis, true);
         assert_eq!(y[0][0], 0.0, "ratio {r}: first sample");
@@ -224,7 +209,6 @@ fn starts_without_a_click_or_preroll() {
 
 #[test]
 fn silent_gaps_do_not_glitch_the_next_onset() {
-    // 3 s of digital silence between bursts: several chunks' worth.
     let mut x = vec![0f32; (8.0 * SR) as usize];
     let (b, _) = bursts(0.5, 0.05, 1.0);
     x[..b.len()].copy_from_slice(&b);
@@ -241,7 +225,6 @@ fn silent_gaps_do_not_glitch_the_next_onset() {
 #[test]
 fn deterministic_and_cancellable() {
     let x = vec![sine(250.0, 1.0, 0.5), sine(375.0, 1.0, 0.5)];
-    // > 2x stretch randomises phases: still identical run to run
     let a = run(&x, 3.0, 2.0, true);
     let b = run(&x, 3.0, 2.0, true);
     assert_eq!(a, b);
@@ -263,7 +246,6 @@ fn bad_arguments_are_errors_not_panics() {
     assert_eq!(stretch_planar(&[&[][..]], SR, &s(2.0, 0.0), &c).unwrap(), vec![Vec::<f32>::new()]);
 }
 
-/// `cargo test -p krypt-studio-stretch --release -- --ignored --nocapture perf`
 #[test]
 #[ignore]
 fn perf_three_minute_stereo_stem() {
@@ -287,9 +269,6 @@ fn perf_three_minute_stereo_stem() {
     }
 }
 
-// ── Piecewise maps (stretch_mapped) ───────────────────────────────────────
-
-/// Exponential sine glide f0 → f1 over `secs` (phase-continuous).
 fn glide(f0: f64, f1: f64, secs: f64, amp: f64) -> Vec<f32> {
     let n = (secs * SR) as usize;
     let mut ph = 0.0f64;
@@ -302,8 +281,6 @@ fn glide(f0: f64, f1: f64, secs: f64, amp: f64) -> Vec<f32> {
         .collect()
 }
 
-/// Mean share of each STFT frame's energy within ±3 bins of its peak
-/// (1.0 = a single clean partial). 2048-point Hann, hop 512, frames in [a, b) s.
 fn purity(x: &[f32], a: f64, b: f64) -> f64 {
     let n = 2048;
     let fft = FftPlanner::new().plan_fft_forward(n);
@@ -331,7 +308,6 @@ fn mapped(input: &[Vec<f32>], knots: &[(f64, f64)], n_out: usize, semis: f64, pr
     stretch_mapped(&refs, SR, knots, n_out, semis, true, profile, &AtomicBool::new(false)).expect("mapped")
 }
 
-/// Harmonic "voice" (6 partials, 1/k) at 250 Hz with ±1 st vibrato at 5.5 Hz.
 fn vibrato_voice(secs: f64, amp: f64) -> Vec<f32> {
     let n = (secs * SR) as usize;
     let mut ph = 0.0f64;
@@ -345,7 +321,6 @@ fn vibrato_voice(secs: f64, amp: f64) -> Vec<f32> {
         .collect()
 }
 
-/// (std / mean of the 10 ms RMS envelope, mean envelope) over [a, b) s.
 fn wobble(x: &[f32], a: f64, b: f64) -> (f64, f64) {
     let w = (0.01 * SR) as usize;
     let env: Vec<f64> = x[(a * SR) as usize..((b * SR) as usize).min(x.len())].chunks_exact(w).map(rms).collect();
@@ -370,7 +345,6 @@ fn tones_vs_complex(x: &[f32], ratio: f64, semis: f64) -> ((f64, f64), (f64, f64
 
 #[test]
 fn tones_profile_keeps_a_vibrato_voice_steady() {
-    // A sung-like note: 250 Hz, 6 harmonics, ±1 st vibrato at 5.5 Hz.
     let x = vibrato_voice(3.0, 0.5);
     for &(ratio, semis) in &[(1.5, 3.0), (0.7, -5.0), (2.0, -12.0)] {
         let ((wt, lt), (wc, lc)) = tones_vs_complex(&x, ratio, semis);
@@ -381,7 +355,6 @@ fn tones_profile_keeps_a_vibrato_voice_steady() {
 
 #[test]
 fn tones_profile_keeps_a_sine_glide_clean() {
-    // Four octaves in 1.5 s: Complex smears the moving partial.
     let x = glide(110.0, 1760.0, 1.5, 0.5);
     for &(ratio, semis) in &[(1.5, 0.0), (1.5, 3.0), (0.7, -5.0)] {
         let ((wt, lt), (wc, lc)) = tones_vs_complex(&x, ratio, semis);
@@ -406,27 +379,22 @@ fn uniform_map_matches_stretch_planar_bit_for_bit() {
 
 #[test]
 fn piecewise_map_places_onsets_on_the_knots() {
-    // Bursts every 0.25 s; first second at 2× (slow), the rest at 0.5×, plus a
-    // 0.1 s lead-in of silence (the map starts before input frame 0).
     let (x, onsets) = bursts(2.0, 0.05, 0.25);
     let knots = [(0.0, 0.1 * SR), (1.0 * SR, 2.1 * SR), (2.0 * SR, 2.6 * SR)];
     let n_out = (2.6 * SR) as usize;
     let y = mapped(&[x.clone(), x.clone()], &knots, n_out, 0.0, Profile::Complex);
     assert_eq!(y[0].len(), n_out);
     let first = y[0].iter().position(|v| v.abs() > 1e-4).unwrap_or(0) as f64 / SR;
-    // (pre-echo of the 120 ms window at 2× reaches ~140 ms ahead of the 0.2 s onset, at -80 dB)
     assert!(first > 0.05, "lead-in is silent until {first}");
     for &t in &onsets {
         let want = map_in_to_out(&knots, t * SR) / SR;
         let got = half_peak_onset(&y[0], want - 0.03, want + 0.03);
         assert!((got - want).abs() < 0.004, "onset {t}: at {got:.4}, want {want:.4}");
     }
-    // Deterministic, and both channels match (same input).
     let z = mapped(&[x.clone(), x.clone()], &knots, n_out, 0.0, Profile::Complex);
     assert!(y == z, "deterministic");
     let d = y[0].iter().zip(&y[1]).fold(0f32, |m, (a, b)| m.max((a - b).abs()));
     assert!(d < 1e-3, "same input, same channel output: max diff {d}");
-    // A map that starts inside the input skips the head; bad maps are errors.
     let late = mapped(&[x.clone()], &[(0.5 * SR, 0.0), (1.5 * SR, SR)], SR as usize, 0.0, Profile::Tones);
     let got = half_peak_onset(&late[0], 0.0, 0.2);
     assert!((got - (onsets[2] - 0.5)).abs() < 0.004, "skipped head: first onset at {got}");
@@ -436,9 +404,6 @@ fn piecewise_map_places_onsets_on_the_knots() {
     assert!(stretch_mapped(&[&x[..]], SR, &[(0.0, 0.0), (1.0, 1.0)], 0, 0.0, true, Profile::Complex, &c).unwrap()[0].is_empty());
 }
 
-// ── Pitch curves (stretch_mapped_curve, Krypt Voice "sing") ─────────────
-
-/// Instantaneous frequency of a sine from upward zero crossings: (time s, Hz).
 fn zero_cross_freq(x: &[f32]) -> Vec<(f64, f64)> {
     let mut ups = Vec::new();
     for i in 1..x.len() {
@@ -469,7 +434,6 @@ fn curve_step_lands_on_time() {
         let want = at as f64 / SR;
         eprintln!("{label}: step heard at {t:.4} s, set at {want:.4} s");
         assert!((t - want).abs() < 0.015, "{label}: step heard at {t:.4} s, want {want:.4}");
-        // Both sides settle on their pitch.
         let before: Vec<f64> = f.iter().filter(|p| p.0 > want - 0.25 && p.0 < want - 0.05).map(|p| p.1).collect();
         let after: Vec<f64> = f.iter().filter(|p| p.0 > want + 0.05 && p.0 < want + 0.25).map(|p| p.1).collect();
         let avg = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
@@ -486,16 +450,13 @@ fn constant_curve_matches_constant_shift() {
     let n_out = (1.3 * n as f64) as usize;
     let a = mapped(std::slice::from_ref(&x), &knots, n_out, 3.0, Profile::Tones).remove(0);
     let b = curved(&x, &knots, n_out, &|_| 3.0);
-    // Not bit-identical (one process() call per hop instead of per 0.5 s), but within -40 dB of the signal.
     let d = a.iter().zip(&b).fold(0f32, |m, (u, v)| m.max((u - v).abs()));
     assert!(d < 0.01 * 0.3 * 6.0, "max diff {d}");
-    // Deterministic.
     assert_eq!(b, curved(&x, &knots, n_out, &|_| 3.0));
 }
 
 #[test]
 fn curve_follows_a_vibrato() {
-    // A steady sine given ±50 cents at 5.5 Hz by the curve.
     let x = sine(300.0, 1.0, 0.3);
     let n = x.len();
     let y = curved(&x, &[(0.0, 0.0), (n as f64, n as f64)], n, &|o| 0.5 * (2.0 * PI * 5.5 * o as f64 / SR).sin());

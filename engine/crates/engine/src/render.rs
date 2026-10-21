@@ -1,13 +1,3 @@
-//! Offline (faster-than-real-time) render: builds a private Core from a model
-//! snapshot with fresh plugin instances and runs the SAME graph code with
-//! an offline driver, then writes a WAV (hound) or an MP3 (Windows' own
-//! encoder, `krypt_studio_dsp::mp3`) and optionally analyzes it.
-//!
-//! Stems (`RenderRequest.stems`, research/15 §3.1): the same single pass also
-//! taps every insert's post-fader output (Core::process_stereo_tapped), each
-//! delayed by its plugin-delay-compensation offset so it lines up with the
-//! master, and writes one file per insert plus the master mix into a folder.
-
 use crate::compile::{SampleMode, Session};
 use crate::core::{Core, Shared};
 use crate::model::Model;
@@ -25,7 +15,6 @@ pub struct RenderEnv<'a> {
     pub host: PluginHost,
     pub cache: Arc<SampleCache>,
     pub factory_dir: PathBuf,
-    /// Installed sound packs (`--packs-dir`): where `pack:` sample paths resolve.
     pub packs_dir: Option<PathBuf>,
     pub base_dir: Option<PathBuf>,
     pub cancel: Arc<AtomicBool>,
@@ -34,45 +23,32 @@ pub struct RenderEnv<'a> {
     pub log: &'a mut dyn FnMut(&str, String),
 }
 
-/// Rendered audio (kept for analysis) + metadata.
 pub struct Rendered {
     pub left: Vec<f32>,
     pub right: Vec<f32>,
     pub sample_rate: f32,
-    /// meters (§15): gain reduction per dynamics slot over the render.
     pub gain_reduction: Vec<crate::meters::GrStat>,
 }
 
 const BLOCK: usize = 512;
-/// Safety cap: 2 hours.
 const MAX_SECONDS: f64 = 7200.0;
 
-/// Render the model to memory.
 pub fn render_audio(model: &Model, req: &RenderRequest, env: &mut RenderEnv) -> Result<Rendered, String> {
     render_inner(model, req, env, None).map(|(a, _)| a)
 }
 
-/// What a stems render asks of the render pass.
 struct StemPlan<'a> {
-    /// `stemInserts`, or None = every insert.
     wanted: Option<&'a [String]>,
-    /// Where spill files go (the stems folder).
     dir: PathBuf,
-    /// Keep taps in memory up to this many bytes in all, else spill to disk.
     mem_budget: usize,
-    /// Progress of the audio pass is reported as 0..progress_share.
     progress_share: f64,
 }
 
-/// Render the model to memory; with a `StemPlan`, also capture each insert's
-/// post-fader output in the same pass.
 fn render_inner(model: &Model, req: &RenderRequest, env: &mut RenderEnv, stems: Option<&StemPlan>) -> Result<(Rendered, Vec<StemTap>), String> {
     let sr = req.sample_rate.filter(|s| s.is_finite() && *s >= 8000.0 && *s <= 384000.0).unwrap_or(env.default_sr) as f32;
     let mut session = Session::new(env.host, sr, env.cache.clone(), env.factory_dir.clone(), SampleMode::Sync);
     session.base_dir = env.base_dir.clone();
     session.packs_dir = env.packs_dir.clone();
-    // Audio-clip variants are rendered inline by build() (the render waits for
-    // them: correctness over speed); a cancelled render stops them too.
     session.cancel = env.cancel.clone();
     session.model = model.clone();
     session.version = 1;
@@ -85,7 +61,6 @@ fn render_inner(model: &Model, req: &RenderRequest, env: &mut RenderEnv, stems: 
     let bar = bar_ticks(ts.time_sig.num, ts.time_sig.den);
     let bpm_doc = program.transport.bpm;
 
-    // Scope → (song mode?, start tick, pattern slot, ticks to play)
     let (song, start, pslot, ticks) = match &req.scope {
         RenderScope::Song => (true, 0.0, NONE, program.song_end.max(bar)),
         RenderScope::Range { start_tick, end_tick } => {
@@ -103,7 +78,6 @@ fn render_inner(model: &Model, req: &RenderRequest, env: &mut RenderEnv, stems: 
         }
     };
     let tail = req.tail_sec.filter(|t| t.is_finite() && *t >= 0.0).unwrap_or(2.0).min(60.0);
-    // Estimated length (tempo automation may change it) for progress reporting.
     let est_frames = (ticks_to_seconds(ticks, bpm_doc) * sr as f64).max(1.0) + tail * sr as f64;
     let max_frames = (MAX_SECONDS * sr as f64) as usize;
 
@@ -186,7 +160,6 @@ pub fn write_wav(path: &Path, format: &str, left: &[f32], right: &[f32], sr: u32
         other => return Err(format!("Unknown WAV format '{other}' (use wav16, wav24 or wav32f)")),
     };
     let spec = hound::WavSpec { channels: 2, sample_rate: sr, bits_per_sample: bits, sample_format: fmt };
-    // Write next to the target, then rename (atomic replace).
     let tmp = path.with_extension("wav.part");
     let res = (|| -> Result<(), hound::Error> {
         let mut w = hound::WavWriter::create(&tmp, spec)?;
@@ -242,12 +215,8 @@ fn finite_or(x: f32, d: f64) -> f64 {
     }
 }
 
-/// Peak level `normalize: true` renders are scaled to (dBFS).
 pub const NORMALIZE_TARGET_DB: f64 = -0.1;
 
-/// Wave 2 (export dialog "Normalize"): scale both channels so the sample peak
-/// equals `target_db`. Near-silent audio (peak below -120 dBFS) is left alone.
-/// Returns the linear gain applied (1.0 when nothing changed).
 pub fn normalize_peak(left: &mut [f32], right: &mut [f32], target_db: f64) -> f64 {
     let peak = left.iter().chain(right.iter()).filter(|x| x.is_finite()).fold(0.0f32, |m, x| m.max(x.abs())) as f64;
     if peak < 1e-6 {
@@ -260,7 +229,6 @@ pub fn normalize_peak(left: &mut [f32], right: &mut [f32], target_db: f64) -> f6
     gain
 }
 
-/// Cheap checks that don't need the model (answered before a render thread starts).
 pub fn validate_request(req: &RenderRequest) -> Result<(), String> {
     if req.path.trim().is_empty() {
         return Err(if req.stems == Some(true) { "Stem export needs a folder".into() } else { "Render path is empty".into() });
@@ -268,8 +236,6 @@ pub fn validate_request(req: &RenderRequest) -> Result<(), String> {
     match req.format.as_str() {
         "wav16" | "wav24" | "wav32f" => {}
         "mp3" => {
-            // Before any audio is rendered: a bad bitrate or a Windows
-            // without the MP3 encoder fails now, not after the render.
             mp3::parse_kbps(req.mp3_kbps)?;
             mp3::check_encoder()?;
         }
@@ -283,9 +249,6 @@ pub fn validate_request(req: &RenderRequest) -> Result<(), String> {
     Ok(())
 }
 
-/// Encode the rendered float audio to an MP3 at `path` (resampled to 44.1 /
-/// 48 kHz when needed, TPDF-dithered to 16 bits, no ID3 tag; see
-/// `krypt_studio_dsp::mp3`). Cancelling the render stops the encode.
 pub fn write_mp3(path: &Path, kbps: Option<f64>, left: &[f32], right: &[f32], sr: u32, cancel: &AtomicBool) -> Result<Mp3RenderInfo, String> {
     let kbps = mp3::parse_kbps(kbps)?;
     let info = mp3::write_mp3(path, left, right, sr, kbps, Some(cancel))?;
@@ -299,8 +262,6 @@ pub fn write_mp3(path: &Path, kbps: Option<f64>, left: &[f32], right: &[f32], sr
     })
 }
 
-/// Full render job: audio → WAV / MP3 → result (+ analysis). Peak, loudness
-/// and analysis always describe the float audio (before any encoding).
 pub fn run_render(model: &Model, req: &RenderRequest, env: &mut RenderEnv) -> Result<RenderResult, String> {
     validate_request(req)?;
     if req.stems == Some(true) {
@@ -338,21 +299,12 @@ pub fn run_render(model: &Model, req: &RenderRequest, env: &mut RenderEnv) -> Re
     })
 }
 
-// ── Stems ────────────────────────────────────────────────────────────────
-
-/// Taps are kept in memory up to this many bytes in all (≈ 3 min × 20 stereo
-/// stems at 48 kHz); beyond it they stream to raw `.part` files in the stems
-/// folder and are read back one at a time.
 pub const STEM_MEM_BUDGET: usize = 1 << 30;
-/// A stem whose peak stays below this (−96 dBFS) over the range is silent and
-/// skipped unless `stemInserts` names it.
 pub const STEM_SILENT_PEAK: f32 = 1.585e-5;
 
-/// One insert's captured post-fader output.
 pub(crate) struct StemTap {
     insert_id: String,
     name: String,
-    /// File number: the insert's position in the mixer (master excluded, 1-based).
     number: usize,
     slot: u32,
     listed: bool,
@@ -389,7 +341,6 @@ impl TapStore {
         }
     }
 
-    /// The first `frames` frames (zero-padded when short).
     fn take(self, frames: usize) -> Result<(Vec<f32>, Vec<f32>), String> {
         let (mut l, mut r) = match self {
             TapStore::Mem { l, r } => (l, r),
@@ -414,8 +365,6 @@ impl TapStore {
     }
 }
 
-/// Deletes the listed files when dropped, unless disarmed (cancel / failure:
-/// a stems export leaves nothing half-written).
 struct Cleanup {
     paths: Vec<PathBuf>,
     armed: bool,
@@ -431,8 +380,6 @@ impl Drop for Cleanup {
     }
 }
 
-/// "NN Name" for a stem file: Windows-forbidden characters become `_`,
-/// whitespace collapses, trailing dots / spaces go, at most 60 characters.
 pub fn stem_file_name(number: usize, name: &str, fallback: &str) -> String {
     let cleaned: String = name.chars().map(|c| if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') { '_' } else { c }).collect();
     let mut s = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -444,7 +391,6 @@ pub fn stem_file_name(number: usize, name: &str, fallback: &str) -> String {
     format!("{number:02} {s}")
 }
 
-/// Spill files of this process in `dir` (`.krypt-stem-<pid>-<slot>.f32.part`).
 fn spill_prefix() -> String {
     format!(".krypt-stem-{}-", std::process::id())
 }
@@ -458,7 +404,6 @@ fn remove_spills(dir: &Path) {
     }
 }
 
-/// Non-master inserts in mixer order.
 fn stem_insert_ids(model: &Model) -> Vec<String> {
     model.ordered_insert_ids().into_iter().filter(|id| *id != model.master_id && model.inserts.get(id).is_some_and(|i| !i.is_master)).collect()
 }
@@ -500,7 +445,6 @@ fn plan_taps(model: &Model, slots: &[(u32, String)], align: &[(u32, usize)], pla
             let cap = est_frames + delay + 4096;
             TapStore::Mem { l: Vec::with_capacity(cap), r: Vec::with_capacity(cap) }
         };
-        // Plugin delay compensation: the tap leads the master by `delay` frames.
         if delay > 0 {
             let z = vec![0f32; delay];
             store.push(&z, &z)?;
@@ -510,7 +454,6 @@ fn plan_taps(model: &Model, slots: &[(u32, String)], align: &[(u32, usize)], pla
     Ok(taps)
 }
 
-/// Write one stem (WAV or MP3). Returns the MP3 info for MP3s.
 fn write_stem(path: &Path, req: &RenderRequest, l: &[f32], r: &[f32], sr: u32, cancel: &AtomicBool) -> Result<Option<Mp3RenderInfo>, String> {
     if req.format == "mp3" {
         write_mp3(path, req.mp3_kbps, l, r, sr, cancel).map(Some)
@@ -519,11 +462,6 @@ fn write_stem(path: &Path, req: &RenderRequest, l: &[f32], r: &[f32], sr: u32, c
     }
 }
 
-/// `stems: true`: one pass, one file per insert ("NN <insert name>.<ext>", NN =
-/// the insert's mixer position) and the master mix ("NN Master", numbered after
-/// the last insert) in the folder `req.path`. Silent inserts are skipped unless
-/// `stemInserts` names them. `normalize` scales every stem by the master's
-/// gain (the balance stays). Cancel or failure deletes every file written.
 pub(crate) fn run_stems(model: &Model, req: &RenderRequest, env: &mut RenderEnv, mem_budget: usize) -> Result<RenderResult, String> {
     let dir = PathBuf::from(&req.path);
     if dir.is_file() {
@@ -554,7 +492,6 @@ pub(crate) fn run_stems(model: &Model, req: &RenderRequest, env: &mut RenderEnv,
         let total = keep.len() + 1;
         let mut results: Vec<StemResult> = Vec::with_capacity(total);
         let master_number = stem_insert_ids(model).len() + 1;
-        // Stems louder than full scale (before the master's limiter) clip in WAV 16/24 and MP3.
         let mut clipped: Vec<String> = Vec::new();
         let cancelled = |env: &RenderEnv| -> Result<(), String> {
             if env.cancel.load(Ordering::Relaxed) {
@@ -590,7 +527,6 @@ pub(crate) fn run_stems(model: &Model, req: &RenderRequest, env: &mut RenderEnv,
         if !clipped.is_empty() {
             (env.log)("warn", format!("These stems go over 0 dBFS and were clipped in {}: {}. Export as WAV 32-bit float to keep them intact.", req.format, clipped.join(", ")));
         }
-        // The master mix, last.
         let master_file = dir.join(format!("{}.{ext}", stem_file_name(master_number, "Master", "Master")));
         written.paths.push(master_file.clone());
         let mp3 = write_stem(&master_file, req, &audio.left, &audio.right, sr, &env.cancel)?;
@@ -613,7 +549,6 @@ pub(crate) fn run_stems(model: &Model, req: &RenderRequest, env: &mut RenderEnv,
             gain_reduction: Some(std::mem::take(&mut audio.gain_reduction)).filter(|v| !v.is_empty()),
         })
     })();
-    // Spill files left by stems that were skipped or not reached.
     remove_spills(&dir);
     if result.is_ok() {
         written.armed = false;

@@ -1,20 +1,10 @@
-// Seeded randomness for the MIDI generators. Same seed = same notes; a
-// generator never calls Math.random(). mulberry32, like noteTools'
-// seededRandom, with a salt so each generator (and each sub-stream) gets
-// its own sequence from one user-facing seed.
-
 export interface Rng {
-  /** [0, 1). */
   next(): number;
-  /** Integer in [lo, hi] (inclusive). */
   int(lo: number, hi: number): number;
   chance(p: number): boolean;
   pick<T>(items: readonly T[]): T;
-  /** Index chosen by non-negative weights (all zero = uniform). */
   weighted(weights: readonly number[]): number;
-  /** Uniform in [-amount, amount]. */
   jitter(amount: number): number;
-  /** An independent stream derived from this one's seed and a salt. */
   fork(salt: number): Rng;
 }
 
@@ -56,7 +46,6 @@ export function makeRng(seed: number, salt = 0): Rng {
   return rng;
 }
 
-/** The n-th variation seed after `seed` (the dialog's 4 side-by-side takes). */
 export function variationSeed(seed: number, n: number): number {
   return n === 0 ? seed >>> 0 : mix(seed, 0x5eed + n) & 0x7fffffff;
 }

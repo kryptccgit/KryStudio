@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Piano roll ▸ Tools ▸ Scripts…: Krypt Script note devices (shared/scripts).
-// Pick a script (factory, your library, this project), turn its knobs, see
-// the result drawn on the roll (preview), pick one of 4 Variations (seeds)
-// and Apply = ONE undo step. The code view edits the JavaScript, checks it
-// (line-numbered errors) and saves it into the project or your library.
-// Scripts never run here: every run is an IPC call to main, which runs it in
-// the QuickJS sandbox (electron/scripts/sandbox.ts).
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { Braces, CircleAlert, Dice5, FlaskConical, FolderOpen, Library, Plus, Save, type LucideIcon } from 'lucide-react';
@@ -26,8 +16,6 @@ import { toast } from '../../app/notify';
 import { cls } from '../../utils/format';
 import type { PianoRollController } from './controller';
 import { usePianoRollView } from './store';
-
-// ── Remembered settings (session) ─────────────────────────────────────
 
 interface ScriptPrefs {
   scriptId: string;
@@ -58,8 +46,6 @@ const SCALE_LABELS: Record<string, string> = {
 };
 
 const SOURCE_LABEL: Record<ScriptInfo['source'], string> = { factory: 'Factory', user: 'My library', project: 'This project' };
-
-// ── Small pieces ──────────────────────────────────────────────────────
 
 function SmallButton({ icon: Icon, label, onClick, title, active, disabled }: { icon: LucideIcon; label: string; onClick: () => void; title?: string; active?: boolean; disabled?: boolean }) {
   return (
@@ -132,7 +118,6 @@ function ParamControls({ header, values, onChange }: { header: ScriptHeader; val
   );
 }
 
-/** A tiny piano-roll drawing of one take. */
 function Thumb({ plan }: { plan: ScriptPlan }) {
   const W = 120;
   const H = 46;
@@ -193,7 +178,6 @@ function Variations({ results, seeds, current, onPick }: { results: Array<{ ok: 
   );
 }
 
-/** The code view: a monospace textarea, Check, Save to project / library, and the issues with their lines. */
 function CodeView({
   code,
   setCode,
@@ -270,8 +254,6 @@ function CodeView({
   );
 }
 
-// ── The dialog ────────────────────────────────────────────────────────
-
 function ScriptsBody({ ctl, close, initialRange }: { ctl: PianoRollController; close: () => void; initialRange: { fromBar: number; bars: number } }) {
   const p = usePrefs();
   const set = (patch: Partial<ScriptPrefs>): void => usePrefs.setState(patch);
@@ -326,7 +308,6 @@ function ScriptsBody({ ctl, close, initialRange }: { ctl: PianoRollController; c
   const seeds = [0, 1, 2, 3].map((i) => variationSeed(p.seed, i));
   const reqKey = JSON.stringify(req(p.seed));
 
-  // previews: the 4 takes (the first one drawn on the roll), debounced while typing / turning knobs
   const runSeq = useRef(0);
   useEffect(() => {
     const r = req(p.seed);
@@ -352,11 +333,9 @@ function ScriptsBody({ ctl, close, initialRange }: { ctl: PianoRollController; c
       );
     }, edited ? 350 : 60);
     return () => window.clearTimeout(timer);
-    // compared by value (reqKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctl, reqKey]);
 
-  // a run error with a line shows in the code view too
   const err = results[0] && !results[0].ok ? results[0].message ?? 'The script failed' : null;
   useEffect(() => {
     if (!edited || !parsed.ok) return;
@@ -546,7 +525,6 @@ function ScriptsBody({ ctl, close, initialRange }: { ctl: PianoRollController; c
   );
 }
 
-/** Default bar range: the selection's bars, else the whole pattern. */
 function defaultRange(ctl: PianoRollController): { fromBar: number; bars: number } {
   const p = getProject();
   const t = ctl.getTarget();
@@ -562,7 +540,6 @@ function defaultRange(ctl: PianoRollController): { fromBar: number; bars: number
   return { fromBar: 1, bars: pat ? Math.max(1, Math.ceil(patternLength(pat, ts) / bar)) : 1 };
 }
 
-/** Tools ▸ Scripts… (and the toolbar braces button). */
 export function openScriptsDialog(ctl: PianoRollController): void {
   if (!ctl.getTarget()) {
     flashHint('Select a pattern and a channel first', 'warn');

@@ -1,11 +1,3 @@
-// Release tools: song info and cover art (embedded as tags in every export),
-// and export_audio, which renders the song (or its stems) into a NEW tagged
-// WAV / MP3 in the user's Music\Krypt Studio folder (or next to the saved
-// project, per Settings). Agents never choose the output path and never
-// overwrite a file. File-menu actions (FILE_TOOLS): export_midi (a NEW .mid
-// in the same folder), import_midi and save_project (saves to the project's
-// own file, or a NEW one when it was never saved; never a Save dialog).
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
@@ -20,8 +12,6 @@ import { agentImagePath, agentMidiPath, findPattern, parseBarRange, plural, roun
 import { songLengthTicks } from './overview';
 
 const zLabel = z.string().max(80).optional().describe("Short description of this change for the user's AI-history panel.");
-
-// ── set_song_info ───────────────────────────────────────────────────────
 
 export const setSongInfo = defineTool({
   name: 'set_song_info',
@@ -62,8 +52,6 @@ export const setSongInfo = defineTool({
   },
 });
 
-// ── set_cover ───────────────────────────────────────────────────────────
-
 export const setCover = defineTool({
   name: 'set_cover',
   title: 'Set the cover art',
@@ -98,8 +86,6 @@ export const setCover = defineTool({
     return { ok: true, message: `${out.message}. Every export embeds it; undo_last removes it.`, changed: [], data: out.ref };
   },
 });
-
-// ── export_audio ────────────────────────────────────────────────────────
 
 export const exportAudio = defineTool({
   name: 'export_audio',
@@ -190,8 +176,6 @@ export const exportAudio = defineTool({
   },
 });
 
-// ── export_midi ────────────────────────────────────────────────────────
-
 export const exportMidi = defineTool({
   name: 'export_midi',
   title: 'Export a pattern as MIDI',
@@ -216,8 +200,6 @@ export const exportMidi = defineTool({
     return { ok: true, message: `Exported pattern "${safeName(pat.name)}" to ${r.data.path}: ${plural(smf.tracks.length, 'track')}, ${plural(notes, 'note')} at ${p.transport.bpm} BPM.${r.data.folderNote ? ` (${r.data.folderNote})` : ''}`, changed: [], data: { path: r.data.path, tracks: smf.tracks.length, notes } };
   },
 });
-
-// ── import_midi ────────────────────────────────────────────────────────
 
 const NOTES_PER_EXEC = 10_000;
 
@@ -260,8 +242,6 @@ export const importMidi = defineTool({
   },
 });
 
-// ── save_project ───────────────────────────────────────────────────────
-
 export const saveProject = defineTool({
   name: 'save_project',
   title: 'Save the project',
@@ -289,5 +269,4 @@ export const saveProject = defineTool({
 });
 
 export const RELEASE_TOOLS = [setSongInfo, setCover, exportAudio];
-/** File-menu actions: export / import MIDI, save. Registered in tools/index.ts. */
 export const FILE_TOOLS = [exportMidi, importMidi, saveProject];

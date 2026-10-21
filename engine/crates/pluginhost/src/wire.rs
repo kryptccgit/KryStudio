@@ -1,6 +1,3 @@
-//! stdout = the control channel back to the engine (one JSON object per
-//! line). stderr is free-form diagnostics.
-
 use serde_json::{json, Value};
 use std::io::Write;
 use std::sync::Mutex;

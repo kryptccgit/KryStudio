@@ -1,6 +1,3 @@
-//! Instrument behaviour: sound, decay to silence, choke, pitch, velocity,
-//! mono glide / slides, sample start, extreme params.
-
 mod common;
 use common::*;
 
@@ -57,7 +54,6 @@ fn choke_is_a_fast_clickless_fade() {
         let after3ms = (0.003 * SR) as usize;
         assert!(peak(&l[after3ms..]) == 0.0, "{id} still sounding 3 ms after choke");
         assert!(!inst.is_active(), "{id} active after choke");
-        // the fade is gradual: no sample jumps more than the signal could plus fade slope
         let max_step = l.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
         assert!(max_step < before.max(0.05) * 0.8, "{id} choke click {max_step} vs level {before}");
     }
@@ -128,14 +124,12 @@ fn velocity_curve_is_vel_pow_1_6() {
         let pb = peak(&render_inst(b.as_mut(), 4800).0);
         let ratio = pb / pa;
         let expect = 0.5f32.powf(1.6);
-        // filter velocity scaling in triosc makes it approximate
         assert!((ratio - expect).abs() < 0.08, "{id}: {ratio} vs {expect}");
     }
 }
 
 #[test]
 fn sampler_pitch_follows_keys_and_root() {
-    // 440 Hz sine recorded at 44.1 kHz, played at 48 kHz
     let s = sine_sample(44100.0, 440.0, 1.0, None);
     let mut inst = create_instrument("krypt.sampler", SR, BLOCK).unwrap();
     inst.set_sample(Some(s.clone()));
@@ -153,14 +147,12 @@ fn sampler_pitch_follows_keys_and_root() {
     let (l, _) = render_inst(inst.as_mut(), 40000);
     let f = zc_freq(&l[500..38000], SR);
     assert!((f - 220.0).abs() < 1.0, "octave down: {f}");
-    // smpl-chunk root key 69: key 69 plays the original pitch
     let mut inst = create_instrument("krypt.sampler", SR, BLOCK).unwrap();
     inst.set_sample(Some(sine_sample(44100.0, 440.0, 1.0, Some(69))));
     note(inst.as_mut(), 0, 69, 1.0);
     let (l, _) = render_inst(inst.as_mut(), 24000);
     let f = zc_freq(&l[1000..20000], SR);
     assert!((f - 440.0).abs() < 1.0, "root_key 69: {f}");
-    // key tracking off: any key plays the original pitch
     let mut inst = create_instrument("krypt.sampler", SR, BLOCK).unwrap();
     inst.set_sample(Some(s));
     inst.set_param(param("krypt.sampler", "keyTrack"), 0.0);
@@ -173,7 +165,6 @@ fn sampler_pitch_follows_keys_and_root() {
 #[test]
 fn sampler_one_shot_reverse_loop_and_start() {
     let s = test_sample(SR, 0.25, None);
-    // one-shot ignores note-off: still playing after a very short note
     let mut inst = create_instrument("krypt.sampler", SR, BLOCK).unwrap();
     inst.set_sample(Some(s.clone()));
     note(inst.as_mut(), 0, 60, 1.0);
@@ -181,7 +172,6 @@ fn sampler_one_shot_reverse_loop_and_start() {
     inst.note_off(0, 60);
     let (l, _) = render_inst(inst.as_mut(), 4800);
     assert!(peak(&l[4000..]) > 0.05, "one-shot cut by note-off");
-    // one-shot off: note-off releases (30 ms default)
     let mut inst = create_instrument("krypt.sampler", SR, BLOCK).unwrap();
     inst.set_sample(Some(s.clone()));
     inst.set_param(param("krypt.sampler", "oneShot"), 0.0);
@@ -190,21 +180,18 @@ fn sampler_one_shot_reverse_loop_and_start() {
     inst.note_off(0, 60);
     let (l, _) = render_inst(inst.as_mut(), 4800);
     assert!(peak(&l[3000..]) < 1e-3, "release didn't end the note");
-    // loop keeps playing past the sample end until note-off
     let mut inst = create_instrument("krypt.sampler", SR, BLOCK).unwrap();
     inst.set_sample(Some(s.clone()));
     inst.set_param(param("krypt.sampler", "loop"), 1.0);
     note(inst.as_mut(), 0, 60, 1.0);
     let (l, _) = render_inst(inst.as_mut(), 48000);
     assert!(peak(&l[40000..]) > 0.01, "loop stopped");
-    // reverse starts at the (quiet) end and ends loud
     let mut inst = create_instrument("krypt.sampler", SR, BLOCK).unwrap();
     inst.set_sample(Some(s.clone()));
     inst.set_param(param("krypt.sampler", "reverse"), 1.0);
     note(inst.as_mut(), 0, 60, 1.0);
     let (l, _) = render_inst(inst.as_mut(), 12000);
     assert!(peak(&l[..1000]) < peak(&l[10000..11800]), "reverse not reversed");
-    // sample_start (seconds) skips into the sample, exactly
     let mut inst = create_instrument("krypt.sampler", SR, BLOCK).unwrap();
     inst.set_sample(Some(s.clone()));
     inst.note_on(0, 60, 60.0, 1.0, NoteExtras { sample_start: 0.1, ..Default::default() });
@@ -220,14 +207,12 @@ fn audioclip_plays_original_speed_from_offset() {
     let s = test_sample(SR, 0.5, None);
     let mut inst = create_instrument("krypt.audioclip", SR, BLOCK).unwrap();
     inst.set_sample(Some(s.clone()));
-    // the key must not change pitch
     inst.note_on(0, 80, 80.0, 1.0, NoteExtras { sample_start: 0.05, ..Default::default() });
     let (l, r) = render_inst(inst.as_mut(), 4000);
     for i in 100..3000 {
         assert!((l[i] - s.channels[0][2400 + i]).abs() < 1e-4, "L mismatch at {i}");
         assert!((r[i] - s.channels[1][2400 + i]).abs() < 1e-4, "R mismatch at {i}");
     }
-    // 44.1 kHz source is resampled, pitch preserved
     let mut inst = create_instrument("krypt.audioclip", SR, BLOCK).unwrap();
     inst.set_sample(Some(sine_sample(44100.0, 440.0, 1.0, None)));
     note(inst.as_mut(), 0, 30, 1.0);
@@ -247,15 +232,12 @@ fn kick808_root_is_c2_and_mono_glide_slides() {
     let (l, _) = render_inst(k.as_mut(), 24000);
     let f = zc_freq(&l[2000..24000], SR);
     assert!((f - 65.41).abs() < 1.0, "MIDI 36 should sound C2: {f}");
-    // overlapping note (36 still held) → glide to G2 (43) without retrigger
     note(k.as_mut(), 0, 43, 1.0);
     let (l, _) = render_inst(k.as_mut(), 24000);
     let f = zc_freq(&l[6000..24000], SR);
     assert!((f - 98.0).abs() < 1.5, "glided to G2: {f}");
-    // one voice only: the envelope continued (no new attack at the glide)
     let env_before = peak(&l[..2000]);
     assert!(env_before < 1.0);
-    // slide note in poly mode also glides the sounding note
     let mut k = create_instrument("krypt.kick808", SR, BLOCK).unwrap();
     k.set_param(param("krypt.kick808", "punch"), 0.0);
     k.set_param(param("krypt.kick808", "decay"), 4000.0);
@@ -275,13 +257,13 @@ fn triosc_mono_legato_returns_to_held_note() {
         t.set_param(param("krypt.triosc", p), v);
     }
     t.set_voice_mode(true, 20.0);
-    note(t.as_mut(), 0, 57, 1.0); // A3 220 Hz
+    note(t.as_mut(), 0, 57, 1.0);
     let (l, _) = render_inst(t.as_mut(), 9600);
     assert!((zc_freq(&l[2000..], SR) - 220.0).abs() < 1.0);
-    note(t.as_mut(), 0, 69, 1.0); // A4 while A3 held
+    note(t.as_mut(), 0, 69, 1.0);
     let (l, _) = render_inst(t.as_mut(), 9600);
     assert!((zc_freq(&l[2400..], SR) - 440.0).abs() < 2.0);
-    t.note_off(0, 69); // back to A3 (still held)
+    t.note_off(0, 69);
     let (l, _) = render_inst(t.as_mut(), 9600);
     assert!((zc_freq(&l[2400..], SR) - 220.0).abs() < 1.0);
     assert!(t.is_active());
@@ -295,7 +277,6 @@ fn polyphony_limit_steals_without_runaway() {
     }
     let (l, _) = render_inst(t.as_mut(), 9600);
     assert!(l.iter().all(|v| v.is_finite()));
-    // 32 voices at -6 dB, 0.5 osc headroom: bounded
     assert!(peak(&l) < 40.0);
 }
 
@@ -309,11 +290,9 @@ fn note_pan_moves_the_image() {
 
 #[test]
 fn mono_retrigger_crossfades_without_overshoot() {
-    // single hit peak
     let mut k = create_instrument("krypt.kick808", SR, BLOCK).unwrap();
     note(k.as_mut(), 0, 60, 1.0);
     let single = peak(&render_inst(k.as_mut(), 9600).0);
-    // retrigger while the previous hit is still loud, in mono (cut) mode
     let mut k = create_instrument("krypt.kick808", SR, BLOCK).unwrap();
     k.set_voice_mode(true, 0.0);
     let mut worst = 0.0f32;

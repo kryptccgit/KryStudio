@@ -1,15 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// WindowManager — the ONLY code that talks to dockview (research/06 §2.2).
-// Panels and menus call `wm.*`; swapping the docking library touches this
-// folder only.
-//
-//   wm.toggle('pianoRoll')                       // F-key semantics
-//   wm.open('mixer')                             // show + focus
-//   wm.openPlugin({ kind: 'channel', channelId })
-//   wm.float(id) / wm.dock(id) / wm.detach(id)   // floating / docked / OS window
-//   wm.resetLayout()
-// ──────────────────────────────────────────────────────────────────────
-
 import { create } from 'zustand';
 import type { DockviewApi, IDockviewPanel, SerializedDockview } from 'dockview-react';
 import { PANELS, kindOfPanelId, pluginPanelId, type PanelKind, type PluginTarget, type SingletonKind } from './panels';
@@ -27,7 +15,6 @@ interface WorkspaceState {
   active: string | null;
 }
 
-/** Reactive mirror of what's open (View menu checkmarks, toolbar lights). */
 export const useWorkspace = create<WorkspaceState>(() => ({ open: [], active: null }));
 
 type Bounds = { x: number; y: number; width: number; height: number };
@@ -43,11 +30,6 @@ function loadFloatBounds(): Record<string, Bounds> {
 const popoutListeners = new Set<(win: Window) => void>();
 const revealers = new Set<() => boolean>();
 
-/**
- * Called before a panel is shown (open / toggle / plugin editor). A full-window
- * view layered over the workspace (the Home hub) uses it to step aside; return
- * true when it did, so F-key toggles open the panel instead of closing it.
- */
 export function onWorkspaceReveal(fn: () => boolean): () => void {
   revealers.add(fn);
   return () => {
@@ -61,29 +43,22 @@ function reveal(): boolean {
     try {
       if (fn()) revealed = true;
     } catch {
-      /* never block a panel from opening */
     }
   }
   return revealed;
 }
 
-/**
- * Step any full-window layer (Home) aside without opening a panel: the Guides' "Show me" for title-bar and
- * transport elements. True when something stepped aside.
- */
 export function revealWorkspace(): boolean {
   return reveal();
 }
 
 const popouts = new Set<Window>();
 
-/** Open popout (detached) panel windows: "Show me" looks for its element in these too. */
 export function popoutWindows(): Window[] {
   for (const w of popouts) if (w.closed) popouts.delete(w);
   return [...popouts];
 }
 
-/** Called for every popout window that opens (keymaps, hint tracking). */
 export function onPopoutWindow(fn: (win: Window) => void): () => void {
   popoutListeners.add(fn);
   return () => {
@@ -100,14 +75,12 @@ export function pluginTitle(t: PluginTarget): string {
   return ins ? `${name} · ${ins.name}` : name;
 }
 
-/** Does a plugin window's channel / effect still exist in the open project? */
 export function pluginTargetAlive(t: PluginTarget): boolean {
   const p = getProject();
   if (!p) return false;
   return t.kind === 'channel' ? !!p.channels[t.channelId] : !!p.mixer.inserts[t.insertId]?.slots[t.slotId];
 }
 
-/** What a closed panel is called in hints ("Channel Rack", "Lead Synth"). */
 export function closedPanelTitle(rec: Pick<ClosedPanel, 'kind' | 'target'>): string {
   if (rec.kind === 'plugin') return rec.target ? pluginTitle(rec.target) : 'Plugin';
   return PANELS[rec.kind].title;
@@ -128,21 +101,19 @@ class WindowManager {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private floatBounds: Record<string, Bounds> = loadFloatBounds();
   private cascade = 0;
-  /** Panels the user closed, newest last (Ctrl+Z / Ctrl+Shift+T reopen them where they were). */
   readonly closed = new ClosedPanels();
 
   get ready(): boolean {
     return !!this.api;
   }
 
-  /** Called once by <Workspace/> when dockview is ready. */
   attach(api: DockviewApi): void {
     this.api = api;
     const sync = (): void => {
       useWorkspace.setState({ open: api.panels.map((p) => p.id), active: api.activePanel?.id ?? null });
     };
     api.onDidAddPanel((p) => {
-      this.closed.drop(p.id); // opened again some other way (F-key, menu): nothing to reopen
+      this.closed.drop(p.id);
       sync();
     });
     api.onDidRemovePanel(sync);
@@ -157,7 +128,6 @@ class WindowManager {
         installHintTracking(pg.window.document);
         for (const fn of popoutListeners) fn(pg.window);
       } catch {
-        /* window may already be closing */
       }
     });
     api.onDidOpenPopoutWindowFail((f) => {
@@ -171,8 +141,6 @@ class WindowManager {
     this.api = null;
   }
 
-  // ── Persistence ─────────────────────────────────────────────────────
-
   private scheduleSave(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => this.save(), 400);
@@ -182,7 +150,6 @@ class WindowManager {
     if (!this.api) return;
     try {
       const json = this.api.toJSON();
-      // Popout OS windows can't be reopened without a user gesture: restore them as floating windows.
       if (json.popoutGroups?.length) {
         json.floatingGroups = [
           ...(json.floatingGroups ?? []),
@@ -196,7 +163,6 @@ class WindowManager {
       }
       localStorage.setItem(LAYOUT_KEY, JSON.stringify(json));
     } catch {
-      /* storage full / serialization edge — the layout just won't persist */
     }
   }
 
@@ -219,13 +185,11 @@ class WindowManager {
       try {
         this.api.clear();
       } catch {
-        /* ignore */
       }
       return false;
     }
   }
 
-  /** Close plugin windows whose channel / effect no longer exists. */
   pruneStale(): void {
     if (!this.api) return;
     const p = getProject();
@@ -261,13 +225,10 @@ class WindowManager {
     try {
       localStorage.removeItem(LAYOUT_KEY);
     } catch {
-      /* ignore */
     }
     this.buildDefault();
     toast.success('Workspace layout reset');
   }
-
-  // ── Queries ─────────────────────────────────────────────────────────
 
   get(id: string): IDockviewPanel | undefined {
     return this.api?.getPanel(id);
@@ -277,13 +238,10 @@ class WindowManager {
     return !!this.get(id);
   }
 
-  /** Visible = open and the active tab of its group. */
   isVisible(id: string): boolean {
     const p = this.get(id);
     return !!p && p.api.isVisible;
   }
-
-  // ── Opening / closing ───────────────────────────────────────────────
 
   private add(kind: SingletonKind, params?: Record<string, unknown>): IDockviewPanel | undefined {
     const api = this.api;
@@ -307,7 +265,6 @@ class WindowManager {
           return api.addPanel({ ...base, position: ref ? { referencePanel: ref, direction: 'left' } : { direction: 'left' }, initialWidth: place.width });
         }
         case 'right': {
-          // Right-docked tools (Agents, History) share one tab group instead of stacking columns.
           const sibling = api.panels.find((p) => p.id !== kind && PANELS[p.id as SingletonKind]?.place.mode === 'right' && p.api.location.type === 'grid');
           return sibling
             ? api.addPanel({ ...base, position: { referencePanel: sibling, direction: 'within' } })
@@ -343,7 +300,6 @@ class WindowManager {
     return { x: left, y: top, width: w, height: h };
   }
 
-  /** Remember a floating window's bounds before it closes (reopen in place). */
   private rememberBounds(panel: IDockviewPanel, key: string): void {
     if (!this.api || panel.api.location.type !== 'floating') return;
     try {
@@ -356,7 +312,6 @@ class WindowManager {
       this.floatBounds[key] = { x: Math.round(r.left - o.left), y: Math.round(r.top - o.top), width: Math.round(r.width), height: Math.round(r.height) };
       localStorage.setItem(FLOAT_KEY, JSON.stringify(this.floatBounds));
     } catch {
-      /* best effort */
     }
   }
 
@@ -377,7 +332,6 @@ class WindowManager {
     this.add(kind, params);
   }
 
-  /** A user close (tab ×, header ×, middle-click, F-key toggle): remembered so Ctrl+Z / Ctrl+Shift+T can reopen it. */
   close(id: string): void {
     const p = this.get(id);
     if (!p) return;
@@ -387,7 +341,6 @@ class WindowManager {
     if (rec && !this.get(id)) this.closed.push(rec);
   }
 
-  /** Where a panel sits right now, for reopening it in the same place. */
   private describeClosing(p: IDockviewPanel): ClosedPanel | null {
     const api = this.api;
     const kind = kindOfPanelId(p.id);
@@ -403,7 +356,6 @@ class WindowManager {
         const group = p.group;
         const mates = group.panels.filter((x) => x.id !== p.id);
         if (mates.length) {
-          // Shared a tab group: come back as a tab next to the same neighbour, at the same index.
           const i = group.panels.findIndex((x) => x.id === p.id);
           const ref = group.panels[i + 1] ?? group.panels[i - 1] ?? mates[0];
           placement = { mode: 'docked', neighbour: ref.id, direction: 'within', size: i };
@@ -433,23 +385,14 @@ class WindowManager {
     return { x: Math.round(r.left - o.left), y: Math.round(r.top - o.top), width: Math.round(r.width), height: Math.round(r.height) };
   }
 
-  /**
-   * Newest user-closed panel that can come back now. A plugin window whose channel is gone is skipped but kept:
-   * undoing the delete brings the channel back, and then its window can come back too.
-   */
   lastClosed(): ClosedPanel | null {
     return this.closed.newestWhere((r) => r.kind !== 'plugin' || (!!r.target && pluginTargetAlive(r.target)));
   }
 
-  /** After a tab switch: forget plugin windows whose channel / effect isn't in the new project. */
   pruneClosedPlugins(): void {
     this.closed.prune((r) => r.kind === 'plugin' && (!r.target || !pluginTargetAlive(r.target)));
   }
 
-  /**
-   * Reopen the newest user-closed panel where it was: back in its tab group, docked beside its old neighbour,
-   * or floating at its old bounds; the default spot when that place is gone. Returns what came back, or null.
-   */
   reopenLastClosed(): ClosedPanel | null {
     const rec = this.lastClosed();
     const api = this.api;
@@ -495,7 +438,6 @@ class WindowManager {
     return rec;
   }
 
-  /** Keep remembered floating bounds on screen (the window may have shrunk since). */
   private clampBox(b: Bounds): Bounds {
     const W = this.api?.width ?? 1200;
     const H = this.api?.height ?? 700;
@@ -506,16 +448,15 @@ class WindowManager {
     return { x, y, width, height };
   }
 
-  /** FL F-key semantics: hidden/closed → show + focus; visible → close. */
   toggle(kind: SingletonKind): void {
-    const revealed = reveal(); // coming back from Home: show it, never close it
+    const revealed = reveal();
     const p = this.get(kind);
     if (!p) {
       this.add(kind);
       return;
     }
     if (p.api.isVisible && !revealed) this.close(kind);
-    else p.api.setActive(); // hidden behind another tab: bring it forward
+    else p.api.setActive();
   }
 
   openPlugin(target: PluginTarget): void {
@@ -532,7 +473,6 @@ class WindowManager {
     const saved = this.floatBounds.plugin;
     const off = (this.cascade++ % 6) * 26;
     const w = saved?.width ?? def.width;
-    // Default: the right side of the workspace, clear of the Channel Rack's channel buttons.
     const x0 = saved?.x ?? Math.max(300, (api.width || 1200) - w - 60);
     const box = this.floatingBox('__plugin', w, saved?.height ?? def.height, x0 - off, (saved?.y ?? 40) + off);
     try {
@@ -542,7 +482,6 @@ class WindowManager {
     }
   }
 
-  /** Toggle a channel's plugin editor (FL: clicking the channel button). */
   togglePlugin(target: PluginTarget): void {
     const id = pluginPanelId(target);
     if (this.isOpen(id)) this.close(id);
@@ -556,8 +495,6 @@ class WindowManager {
       if (p.id.startsWith('plugin:') && t && pred(t)) p.api.close();
     }
   }
-
-  // ── Window modes ────────────────────────────────────────────────────
 
   float(id: string): void {
     const api = this.api;

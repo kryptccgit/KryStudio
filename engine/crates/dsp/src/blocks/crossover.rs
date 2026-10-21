@@ -1,18 +1,7 @@
-//! Linkwitz–Riley crossovers built from TPT SVF sections.
-//!
-//! An LR4 split is two cascaded Butterworth 2nd-order sections per side.
-//! Its low and high outputs sum to the 2nd-order allpass with the same
-//! (Butterworth) poles: (1 + s⁴)/(s² + √2 s + 1)² = (s² − √2 s + 1)/(s² + √2 s + 1).
-//! A 3-band tree therefore reconstructs the input magnitude exactly when
-//! the low band also passes through the upper crossover's allpass, and a
-//! signal that is not split (e.g. the mid channel of an imager) stays in
-//! phase with the bands by going through both allpasses.
-
 use super::filters::{svf_g, Svf, SvfMode};
 
 const BUTTER_Q: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
-/// One LR4 crossover point: `split` returns (low, high).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Lr4 {
     first: Svf,
@@ -30,7 +19,6 @@ impl Lr4 {
 
     #[inline]
     pub fn split(&mut self, x: f64) -> (f64, f64) {
-        // the first section yields both Butterworth outputs at once
         let (lp1, _, hp1) = self.first.tick3(x);
         (self.lp2.tick(lp1), self.hp2.tick(hp1))
     }
@@ -42,7 +30,6 @@ impl Lr4 {
     }
 }
 
-/// 2nd-order allpass with Butterworth poles (= LR4 low + high).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Allpass2 {
     s: Svf,
@@ -67,7 +54,6 @@ impl Allpass2 {
     }
 }
 
-/// Three-band LR4 splitter (low | mid | high) whose bands sum to an allpass.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Split3 {
     lo: Lr4,
@@ -76,7 +62,6 @@ pub struct Split3 {
 }
 
 impl Split3 {
-    /// Crossover frequencies (f_low < f_high; swapped if needed).
     pub fn set(&mut self, f_low: f64, f_high: f64, fs: f64) {
         let (a, b) = if f_low <= f_high { (f_low, f_high) } else { (f_high, f_low) };
         self.lo.set(a, fs);
@@ -99,7 +84,6 @@ impl Split3 {
     }
 }
 
-/// The allpass a `Split3` applies to the band sum, for unsplit signals.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Split3Allpass {
     a: Allpass2,

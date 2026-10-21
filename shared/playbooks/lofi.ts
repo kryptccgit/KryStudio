@@ -1,4 +1,3 @@
-// Lo-fi hip-hop: lazy swung drums, jazzy 7th/9th chords, worn tape and vinyl.
 import type { Playbook } from './types';
 
 export const LOFI: Playbook = {

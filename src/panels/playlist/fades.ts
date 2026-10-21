@@ -1,22 +1,10 @@
-// ──────────────────────────────────────────────────────────────────────
-// Playlist audio-clip fades (Wave 12.2b): the two handles at an audio
-// clip's top corners, dragging them, and the fade lines drawn over the
-// waveform. The engine's fades are linear gain ramps (core.rs ClipEnv), so
-// the lines are straight: what you see is what plays. Alt-dragging the
-// fade-in handle of a clip that touches the previous audio clip makes a
-// crossfade instead (playlist.crossfade). Geometry here is pure + tested.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { Clip } from '@shared/schema/project';
 import { clampFades } from '@shared/commands/fades';
 import { tickToX, type TimeView } from '../../editors/viewport';
 import { rgba } from '../../editors/theme';
 
-/** Grab radius around a handle, in px. */
 export const FADE_HANDLE_PX = 7;
-/** How far below the clip's top edge a handle can be grabbed, in px. */
 export const FADE_ZONE_H = 10;
-/** Drawn handle size, in px. */
 const HANDLE = 5;
 
 export type FadeEdge = 'in' | 'out';
@@ -25,21 +13,17 @@ export interface FadeDrag {
   clipId: string;
   which: FadeEdge;
   orig: Clip;
-  /** The fade length being dragged (ticks). */
   len: number;
-  /** Alt held at grab: crossfade with the previous clip instead. */
   crossfade: boolean;
   downX: number;
   moved: boolean;
   committing?: boolean;
 }
 
-/** Screen x of the fade-in end and the fade-out start (the handle positions). */
 export function fadeHandleXs(c: Clip, tv: TimeView): { inX: number; outX: number } {
   return { inX: tickToX(tv, c.start + (c.fadeIn ?? 0)), outX: tickToX(tv, c.start + c.length - (c.fadeOut ?? 0)) };
 }
 
-/** The fade handle under (x, y) for an audio clip whose box starts at `clipTop` (screen px); null when none. */
 export function hitFadeHandle(c: Clip, tv: TimeView, clipTop: number, x: number, y: number): FadeEdge | null {
   if (c.kind !== 'audio') return null;
   if (y < clipTop - 2 || y > clipTop + FADE_ZONE_H) return null;
@@ -53,19 +37,16 @@ export function hitFadeHandle(c: Clip, tv: TimeView, clipTop: number, x: number,
   return dIn <= dOut ? 'in' : 'out';
 }
 
-/** The fade length for a handle dragged to song tick `tick`: never negative, never past the other fade. */
 export function fadeLenAt(c: Clip, which: FadeEdge, tick: number): number {
   const raw = which === 'in' ? tick - c.start : c.start + c.length - tick;
   const f = which === 'in' ? clampFades(c.length, raw, c.fadeOut ?? 0, 'out') : clampFades(c.length, c.fadeIn ?? 0, raw, 'in');
   return which === 'in' ? f.fadeIn : f.fadeOut;
 }
 
-/** The clip as it looks mid-drag. */
 export function withFade(c: Clip, which: FadeEdge, len: number): Clip {
   return which === 'in' ? { ...c, fadeIn: len } : { ...c, fadeOut: len };
 }
 
-/** "1/2 beat", "2 beats", "1 bar 1 beat"-style readout for the drag label. */
 export function fadeLabel(ticks: number, ticksPerBeat: number): string {
   if (ticks <= 0) return 'No fade';
   const beats = ticks / ticksPerBeat;
@@ -74,12 +55,10 @@ export function fadeLabel(ticks: number, ticksPerBeat: number): string {
 }
 
 export interface FadeLines {
-  /** Fade-in line from (x0, bottom) up to (x1, top); null when there is no fade-in. */
   fadeIn: { x0: number; x1: number } | null;
   fadeOut: { x0: number; x1: number } | null;
 }
 
-/** Where the fade lines run on screen (pure). */
 export function fadeLines(c: Clip, tv: TimeView): FadeLines {
   const xs = tickToX(tv, c.start);
   const xe = tickToX(tv, c.start + c.length);
@@ -91,10 +70,6 @@ export function fadeLines(c: Clip, tv: TimeView): FadeLines {
   };
 }
 
-/**
- * Draw an audio clip's fades: the silenced triangle shaded, the gain line, and the two corner handles.
- * `top`/`h` = the clip box, `bodyTop`/`bodyH` = the waveform area under the header.
- */
 export function paintFades(ctx: CanvasRenderingContext2D, c: Clip, tv: TimeView, top: number, h: number, bodyTop: number, bodyH: number, color: string): void {
   if (c.kind !== 'audio' || h < 10) return;
   const L = fadeLines(c, tv);
@@ -129,7 +104,6 @@ export function paintFades(ctx: CanvasRenderingContext2D, c: Clip, tv: TimeView,
     }
     ctx.stroke();
   }
-  // Corner handles (grab them to fade).
   const { inX, outX } = fadeHandleXs(c, tv);
   ctx.fillStyle = '#FFFFFF';
   ctx.strokeStyle = rgba(color, 1);

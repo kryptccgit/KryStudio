@@ -1,9 +1,3 @@
-// Keys & mallets: vibraphone (soft and hard mallets), marimba, glockenspiel and kalimba from the Versilian
-// Community Sample Library (VCSL) by Versilian Studios, CC0 1.0, pinned to a commit of github.com/sgossner/VCSL.
-// WAV files; our mapping peak-normalises each velocity layer, skips leading silence and keeps whole notes.
-// Note names follow VCSL's convention (C3 = MIDI 60); the kalimba's per-tine tuning offsets are the measured cents
-// VCSL publishes with its own mapping (a fact about the recording), checked against our pitch estimates.
-
 import { melodic, noteIn, safeName, velLayers, type InstrumentSpec, type Opcodes, type PackSpec, type SampleRef, type Zone } from '../lib';
 
 const SHA = 'c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e';
@@ -27,7 +21,6 @@ const VIBES_HARD: Source = {
 const MARIMBA: Source = {
   dir: 'Idiophones/Struck Idiophones/Marimba',
   packDir: 'marimba',
-  // The soft F5 and C6 takes peak near -65 dBFS (barely recorded): the soft layer borrows the medium takes there.
   files: ['F1', 'C2', 'G2', 'B2', 'F3', 'C4', 'G4', 'B4', 'F5', 'C6'].flatMap((n) => ['soft', 'med', 'loud'].map((d) => `Marimba_hit_Outrigger_${n}_${d}_01.wav`)).filter((f) => !/_(F5|C6)_soft_/.test(f)),
 };
 const GLOCK: Source = {
@@ -39,7 +32,6 @@ const GLOCK: Source = {
     'glock_loud_G4_01.wav', 'glock_loud_C5_01.wav', 'glock_loud_G5_01.wav', 'glock_loud_C6_01.wav', 'glock_loud_G#6_01.wav', 'glock_loud_C7_01.wav',
   ],
 };
-/** Kalimba tines: file, MIDI root, tuning correction in cents (VCSL's measured values). */
 const KALIMBA_TINES: [string, number, number][] = [
   ['G1_k12', 43, -9], ['G#1_k11', 44, 0], ['B1_k13', 47, 78], ['C#2_k10', 49, 24], ['D#2_k14', 51, -38], ['F2_k9alt', 53, -41],
   ['G2_k15', 55, -45], ['A#2_k8', 58, -54], ['C#3_k16', 61, 43], ['D#3_k7', 63, -49], ['F3_k17', 65, -39], ['G3_k6', 67, -16],

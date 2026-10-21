@@ -1,13 +1,7 @@
-// Cover images through Electron's nativeImage (no image libraries): decode a
-// PNG / JPEG, crop it to a centred square, scale it down to at most 1400 px
-// and re-encode it. Opaque images become JPEG (quality 90); images with
-// transparent pixels stay PNG so their alpha survives.
-
 import { nativeImage } from 'electron';
 import { COVER_MAX_SIDE } from '@shared/schema/project';
 import { sniffImage, type CoverMime } from '../project/assets';
 
-/** Biggest source image accepted (a file the user picks, or bytes an agent points at). */
 export const MAX_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024;
 
 export interface NormalizedImage {
@@ -15,7 +9,6 @@ export interface NormalizedImage {
   mime: CoverMime;
   width: number;
   height: number;
-  /** The source size, for messages ("cropped from 3000×2000"). */
   sourceWidth: number;
   sourceHeight: number;
 }
@@ -28,12 +21,11 @@ export class ImageError extends Error {
 }
 
 function hasTransparency(img: Electron.NativeImage): boolean {
-  const bmp = img.toBitmap(); // BGRA
+  const bmp = img.toBitmap();
   for (let i = 3; i < bmp.length; i += 4) if (bmp[i] < 255) return true;
   return false;
 }
 
-/** Square, ≤ 1400 px, JPEG (or PNG with alpha). Throws ImageError with a sentence for the user. */
 export function normalizeCoverImage(src: Uint8Array, maxSide = COVER_MAX_SIDE): NormalizedImage {
   if (src.length > MAX_SOURCE_IMAGE_BYTES) throw new ImageError(`That image is ${(src.length / 1048576).toFixed(1)} MB. Pick one under ${MAX_SOURCE_IMAGE_BYTES / 1048576} MB.`);
   const kind = sniffImage(src);

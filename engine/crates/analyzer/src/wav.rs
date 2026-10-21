@@ -1,8 +1,3 @@
-//! WAV output: mono for the voice jobs (`tts`, `sing`), and `extract` (any
-//! audio file → a WAV at its own rate, mono or stereo). 32-bit float, written
-//! to `<out>.partial` and renamed into place, so a failed or cancelled job
-//! never leaves a half-written file behind under the final name.
-
 use std::path::Path;
 
 use hound::{SampleFormat, WavSpec, WavWriter};
@@ -10,7 +5,6 @@ use hound::{SampleFormat, WavSpec, WavWriter};
 use crate::protocol::{ExtractArgs, ExtractResult};
 use crate::{JobCtx, JobError};
 
-/// Writes `samples` (non-finite → 0) as a mono 32-bit float WAV at `sample_rate`.
 pub fn write_mono(out: &str, samples: &[f32], sample_rate: u32) -> Result<(), JobError> {
     if out.trim().is_empty() {
         return Err(JobError::Failed("No output path was given".into()));
@@ -35,7 +29,6 @@ pub fn write_mono(out: &str, samples: &[f32], sample_rate: u32) -> Result<(), Jo
     result.map_err(JobError::Failed)
 }
 
-/// Writes interleaved channels (1 or 2; non-finite → 0) as a 32-bit float WAV at `sample_rate`, via `<out>.partial`.
 pub fn write_channels(out: &str, channels: &[&[f32]], sample_rate: u32, ctx: &JobCtx) -> Result<(), JobError> {
     if out.trim().is_empty() {
         return Err(JobError::Failed("No output path was given".into()));
@@ -69,7 +62,6 @@ pub fn write_channels(out: &str, channels: &[&[f32]], sample_rate: u32, ctx: &Jo
     result
 }
 
-/// `extract`: decode `path` (any format the engine reads) and write it to `out` as a WAV at its own rate.
 pub fn extract(args: &ExtractArgs, ctx: &JobCtx) -> Result<ExtractResult, JobError> {
     ctx.progress("decoding", -1.0);
     let data = crate::audio::load(&args.path)?;

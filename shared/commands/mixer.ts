@@ -5,7 +5,6 @@ import { ID_PREFIX } from '../schema/ids';
 import { findPlugin } from '../schema/params';
 import { clampToSpec } from '../plugins/types';
 
-/** True if routing from → to would create a cycle (including sidechains). */
 export function wouldCycle(p: Project, from: string, to: string): boolean {
   if (from === to) return true;
   const seen = new Set<string>();
@@ -68,7 +67,7 @@ export const mixerRemoveInsert = defineCommand({
       delete other.routes[a.id];
       for (const s of Object.values(other.slots)) if (s.sidechainFrom === a.id) s.sidechainFrom = null;
     }
-    if (d.recording?.insertId === a.id) d.recording.insertId = null; // takes get their own insert again
+    if (d.recording?.insertId === a.id) d.recording.insertId = null;
     return {};
   },
 });
@@ -167,8 +166,6 @@ export const mixerSetSlot = defineCommand({
       if (a.sidechainFrom !== null) {
         must(d.mixer.inserts[a.sidechainFrom], `Insert ${a.sidechainFrom} not found`);
         if (!findPlugin(ctx.catalog, slot.type)?.sidechain) throw new CommandError('This effect has no sidechain input');
-        // The sidechain source must be processed before this insert: reject if
-        // this insert (transitively) feeds the source.
         if (wouldCycle(d, a.sidechainFrom, a.insertId)) throw new CommandError('That sidechain would create a feedback loop');
       }
       slot.sidechainFrom = a.sidechainFrom;

@@ -1,9 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// App status stores fed by window.krypt subscriptions (installed ONCE at
-// boot by installStatusFeeds). Components select from these instead of
-// each polling IPC.
-// ──────────────────────────────────────────────────────────────────────
-
 import { create } from 'zustand';
 import type { AgentActivity, EngineStatus, McpStatus, ProjectStatus, Settings } from '@shared/types';
 import { useDocStore } from '../doc/store';
@@ -11,11 +5,8 @@ import { connectTelemetry } from '../live/telemetry';
 import { toast } from '../app/notify';
 import { flashHint } from '../app/hints';
 
-// ── Project file status ───────────────────────────────────────────────
-
 interface ProjectState {
   status: ProjectStatus | null;
-  /** Edited since main's last status push (covers the browser mock, which never pushes). */
   editedSinceStatus: boolean;
 }
 export const useProjectStatus = create<ProjectState>(() => ({ status: null, editedSinceStatus: false }));
@@ -29,15 +20,10 @@ export async function refreshProjectStatus(): Promise<void> {
     const status = await window.krypt.project.status();
     useProjectStatus.setState({ status, editedSinceStatus: false });
   } catch {
-    /* keep the last known status */
   }
 }
 
-// ── Engine ────────────────────────────────────────────────────────────
-
 export const useEngineStatus = create<{ status: EngineStatus | null }>(() => ({ status: null }));
-
-// ── Settings ──────────────────────────────────────────────────────────
 
 export const useSettings = create<{ settings: Settings | null }>(() => ({ settings: null }));
 
@@ -53,14 +39,10 @@ export async function updateSettings(patch: Partial<Settings>, success?: string)
   }
 }
 
-// ── MCP / agents ──────────────────────────────────────────────────────
-
 interface AgentsState {
   mcp: McpStatus | null;
   activity: AgentActivity[];
-  /** performance.now() of the last agent edit/tool call (drives the AI pulse). */
   lastAgentAt: number;
-  /** The agent panel's open tab (menus open it on a given tab). */
   agentTab: AgentTab;
 }
 export type AgentTab = 'chat' | 'activity' | 'connect';
@@ -70,15 +52,10 @@ export async function refreshMcpStatus(): Promise<void> {
   try {
     useAgents.setState({ mcp: await window.krypt.mcp.status() });
   } catch {
-    /* ignore */
   }
 }
 
-// ── Render progress ───────────────────────────────────────────────────
-
 export const useRender = create<{ active: boolean; progress: number; label: string }>(() => ({ active: false, progress: 0, label: '' }));
-
-// ── Wiring ────────────────────────────────────────────────────────────
 
 let installed = false;
 
@@ -108,7 +85,6 @@ export function installStatusFeeds(): void {
   let lastState: string | null = null;
   k.engine.onStatus((status) => {
     useEngineStatus.setState({ status });
-    // Telemetry port + token change on every engine (re)start.
     if (status.state === 'running') void connectTelemetry();
     if (lastState && lastState !== status.state) {
       if (status.state === 'failed') toast.error(`Audio engine failed${status.message ? `: ${status.message}` : ''}`);

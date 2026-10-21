@@ -1,7 +1,3 @@
-// Start here (step by step) · 6: master a finished song, then an album (research/23 §3). Every label is the one
-// on screen: Home ▸ Audio Tools' Master a song card (src/home/screens/AudioToolsScreen.tsx), the Master a song dialog (src/automix/AutoMixDialog.tsx,
-// target 'file'), the preset names and loudness targets (shared/automix/presets.ts), the Export audio window.
-
 import type { GuideArticle } from '../articles';
 
 export const MASTER: GuideArticle = {

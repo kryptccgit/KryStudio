@@ -1,25 +1,8 @@
-// ──────────────────────────────────────────────────────────────────────
-// Live input + recording: settings defaults and the pure planning that
-// turns an engine `recorded` report into document commands (applied by
-// electron/input/liveInput.ts as ONE undo group per take). No I/O here.
-//
-// Where recorded notes go (FL-like; documented in ENGINE_PROTOCOL.md §7):
-//   - Pattern mode: into the pattern that was looping, overdubbing on every
-//     loop pass. Ticks wrap at the pattern length; notes never extend it.
-//   - Song mode: if a clip of the active pattern covers the point where
-//     recording started, into that pattern through that clip (its offset,
-//     looping at the pattern length). Otherwise into a NEW pattern placed on
-//     the playlist at the bar where recording started, on the first track
-//     that is free there (a new track if none is).
-// ──────────────────────────────────────────────────────────────────────
-
 import type { AudioInputSettings, MidiMapping, MidiSettings, RecordingSettings, Settings } from '../types';
 import type { RecordedNote, RecordedTake } from '../engine/protocol';
 import type { Clip, Project } from '../schema/project';
 import { patternLength } from '../schema/project';
 import { secondsToTicks, ticksPerBar } from '../schema/time';
-
-// ── Settings ──────────────────────────────────────────────────────────
 
 export const DEFAULT_MIDI_SETTINGS: MidiSettings = { autoEnable: true, inputs: {}, mappings: [] };
 export const DEFAULT_RECORDING: RecordingSettings = { mode: 'midi', quantize: 0, countInBars: 0 };
@@ -51,7 +34,6 @@ const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object'
 const int = (v: unknown, d: number, lo: number, hi: number): number => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : d);
 const unit = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : undefined);
 
-/** Validate untrusted live-input settings (settings.json / renderer patches) over a base. */
 export function mergeLiveSettings(
   base: { midi: MidiSettings; recording: RecordingSettings; audioInput: AudioInputSettings },
   input: unknown,
@@ -100,22 +82,16 @@ export function mergeLiveSettings(
   };
 }
 
-// ── Controller links ──────────────────────────────────────────────────
-
-/** Mappings an incoming CC drives (a mapping with device null matches any device). */
 export function matchMappings(mappings: MidiMapping[], device: string, channel: number, cc: number): MidiMapping[] {
   return mappings.filter((m) => m.cc === cc && m.channel === channel && (m.device === null || m.device === device));
 }
 
-/** CC value 0..127 → normalized param position within the mapping's range. */
 export function ccToNormalized(m: Pick<MidiMapping, 'min' | 'max'>, value: number): number {
   const lo = m.min ?? 0;
   const hi = m.max ?? 1;
   const v = Math.max(0, Math.min(127, value)) / 127;
   return Math.max(0, Math.min(1, lo + (hi - lo) * v));
 }
-
-// ── Recorded notes ────────────────────────────────────────────────────
 
 export interface PlannedNote {
   tick: number;
@@ -147,14 +123,12 @@ function push(groups: Map<string, NoteGroup>, patternId: string, channelId: stri
   g.notes.push(n);
 }
 
-/** Pattern-relative tick → quantized, wrapped into [0, len). */
 function wrapTick(rel: number, len: number, grid: number): number {
   let t = q(Math.max(0, rel), grid);
   if (len > 0) t = ((t % len) + len) % len;
   return t;
 }
 
-/** Pattern mode: notes go into their (looping) pattern, overdubbed. */
 export function planPatternNotes(p: Project, notes: RecordedNote[], quantize: number): NoteGroup[] {
   const groups = new Map<string, NoteGroup>();
   for (const n of notes) {
@@ -167,7 +141,6 @@ export function planPatternNotes(p: Project, notes: RecordedNote[], quantize: nu
   return [...groups.values()];
 }
 
-/** Song mode, target A: a clip of the active pattern covers the take start. */
 export function songClipFor(p: Project, startTick: number): Clip | null {
   const pid = p.transport.activePatternId;
   if (!pid || !p.patterns[pid]) return null;
@@ -176,7 +149,6 @@ export function songClipFor(p: Project, startTick: number): Clip | null {
   return clips[0] ?? null;
 }
 
-/** Song mode through an existing clip: map song ticks into its pattern. */
 export function planSongNotesInClip(p: Project, clip: Clip, notes: RecordedNote[], quantize: number): NoteGroup[] {
   const pat = clip.patternId ? p.patterns[clip.patternId] : undefined;
   if (!pat) return [];
@@ -190,13 +162,11 @@ export function planSongNotesInClip(p: Project, clip: Clip, notes: RecordedNote[
   return [...groups.values()];
 }
 
-/** Bar where a song-mode take starts its new pattern. */
 export function takeBarStart(p: Project, startTick: number): number {
   const bar = ticksPerBar(p.transport.timeSig);
   return Math.max(0, Math.floor(Math.max(0, startTick) / bar) * bar);
 }
 
-/** Song mode, target B: notes relative to `barStart` for a new pattern (no wrap). */
 export function planSongNotesNew(p: Project, barStart: number, notes: RecordedNote[], quantize: number): Array<{ channelId: string; notes: PlannedNote[] }> {
   const by = new Map<string, PlannedNote[]>();
   for (const n of notes) {
@@ -209,7 +179,6 @@ export function planSongNotesNew(p: Project, barStart: number, notes: RecordedNo
   return [...by.entries()].map(([channelId, list]) => ({ channelId, notes: list }));
 }
 
-/** End of the content of planned notes, rounded up to whole bars (min one bar). */
 export function plannedLength(p: Project, groups: Array<{ notes: PlannedNote[] }>): number {
   const bar = ticksPerBar(p.transport.timeSig);
   let end = 0;
@@ -217,35 +186,27 @@ export function plannedLength(p: Project, groups: Array<{ notes: PlannedNote[] }
   return Math.max(bar, Math.ceil(end / bar) * bar);
 }
 
-// ── Playlist placement ────────────────────────────────────────────────
-
-/** First track (in order) with no clip overlapping [start, end). */
 export function freeTrack(p: Project, start: number, end: number): string | null {
-  // The Recording Studio's track first (Project.recording), when it has room.
   const target = p.recording?.trackId;
   if (target && p.playlist.tracks[target] && trackIsFree(p, target, start, end)) return target;
   for (const id of p.playlist.trackOrder) if (trackIsFree(p, id, start, end)) return id;
   return null;
 }
 
-/** No clip on track `id` overlaps [start, end). */
 export function trackIsFree(p: Project, id: string, start: number, end: number): boolean {
   return !Object.values(p.playlist.clips).some((c) => c.trackId === id && c.start < end && c.start + c.length > start);
 }
 
-/** The insert audio takes play through (Project.recording), when it still exists. */
 export function recordingInsert(p: Project): string | undefined {
   const id = p.recording?.insertId;
   return id && p.mixer.inserts[id] && !p.mixer.inserts[id].isMaster ? id : undefined;
 }
 
-/** Length of an audio take on the timeline at the current tempo. */
 export function audioTakeTicks(p: Project, frames: number, sampleRate: number): number {
   if (!(frames > 0) || !(sampleRate > 0)) return 1;
   return Math.max(1, Math.round(secondsToTicks(frames / sampleRate, p.transport.bpm)));
 }
 
-/** Where an audio take lands: its song position (song mode) or bar 1 (pattern mode). */
 export function audioTakeStart(take: Pick<RecordedTake, 'mode'>, startTick: number): number {
   return take.mode === 'song' ? Math.max(0, Math.round(startTick)) : 0;
 }

@@ -1,5 +1,3 @@
-// Project tabs (electron/project/tabs.ts) with the real DocHost + ProjectService in temp dirs and fakes for the
-// engine (transport stop), the windows (broadcast) and the switch guards.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -56,7 +54,6 @@ function rig(root = tmp()) {
   return { root, doc, project, tabs, states, guard, resets, logs, recent, boot, stops: () => stops };
 }
 
-/** A .kstudio on disk named `name`, with `bpm`. */
 function projectFile(dir: string, name: string, bpm = 120): string {
   fs.mkdirSync(dir, { recursive: true });
   const p = createDefaultProject(name);
@@ -132,12 +129,10 @@ test('open: replaces the untouched new tab, else opens a new tab; an already-ope
   assert.equal(again.data!.id, oa.data!.id);
   assert.equal(r.tabs.state().activeId, oa.data!.id);
   assert.equal(r.doc.project.transport.bpm, 101);
-  // The old project.open API follows the same rules (Home, Recent, File ▸ Open, file association).
   const viaOld = await r.project.open(b);
   assert.equal(viaOld.ok, true);
   assert.equal(r.tabs.state().activeId, ob.data!.id);
   assert.equal(r.tabs.state().tabs.length, 2);
-  // A touched new tab is never replaced.
   await r.tabs.newTab();
   addNote(r.doc);
   const c = projectFile(path.join(r.root, 'docs'), 'Gamma');
@@ -162,7 +157,6 @@ test('close: unsaved needs a decision; save writes the file; discard + reopen br
   assert.equal(ask.data?.needsDecision, true);
   assert.match(ask.message!, /"Alpha" has unsaved changes/);
 
-  // Close an INACTIVE dirty tab with 'save': it is activated, saved, then closed.
   const nb = await r.tabs.newTab();
   const saved = await r.tabs.close(aId, 'save');
   assert.equal(saved.ok, true, saved.message);
@@ -171,7 +165,6 @@ test('close: unsaved needs a decision; save writes the file; discard + reopen br
   assert.deepEqual(titles(r.tabs), ['Untitled']);
   assert.equal(r.tabs.state().activeId, nb.data!.id);
 
-  // Discard an unsaved untitled tab, then reopen it: its edits and dirty flag are back.
   addNote(r.doc, 67);
   const other = await r.tabs.newTab();
   await r.tabs.switchTo(nb.data!.id);
@@ -187,7 +180,6 @@ test('close: unsaved needs a decision; save writes the file; discard + reopen br
   assert.equal((await r.tabs.reopenClosed()).ok, true, 'Alpha (closed after saving) reopens too');
   assert.match((await r.tabs.reopenClosed()).message!, /No closed tab/);
 
-  // Close everything: never zero tabs.
   for (const t of r.tabs.state().tabs) await r.tabs.close(t.id, 'discard');
   const left = r.tabs.state();
   assert.equal(left.tabs.length, 1);
@@ -233,7 +225,6 @@ test('guards: an agent group or a busy job refuses switching (busy shown), but m
   const closing = await r.tabs.close(r.tabs.state().activeId, 'discard');
   assert.equal(closing.ok, false, "the busy tab can't close");
 
-  // Audio → Project / Auto Mashup / agents: ProjectService.newProject() opens a NEW tab (their own job is busy).
   addNote(r.doc, 70);
   const np = r.project.newProject();
   assert.equal(np.ok, true, np.message);
@@ -273,11 +264,11 @@ test('session: quit and relaunch restores every tab (active first, others lazily
     const r = rig(root);
     await r.boot();
     await r.tabs.open(a);
-    addNote(r.doc, 61); // Alpha: dirty
+    addNote(r.doc, 61);
     await r.tabs.newTab();
-    addNote(r.doc, 62); // Untitled (the only untitled tab): never saved
-    await r.tabs.open(b); // Beta: clean
-    await r.tabs.switchTo(r.tabs.state().tabs[1].id); // quit on Untitled
+    addNote(r.doc, 62);
+    await r.tabs.open(b);
+    await r.tabs.switchTo(r.tabs.state().tabs[1].id);
     addNote(r.doc, 63);
     const res = await r.tabs.shutdown();
     assert.equal(res.ok, true, res.message);
@@ -298,16 +289,15 @@ test('session: quit and relaunch restores every tab (active first, others lazily
   assert.deepEqual(noteKeys(r.doc.project), [62, 63]);
   assert.equal(r.project.status().dirty, true);
   const resets = r.resets.length;
-  await r.tabs.switchTo(s.tabs[0].id); // lazily loaded from its snapshot
+  await r.tabs.switchTo(s.tabs[0].id);
   assert.equal(r.resets.length, resets + 1);
   assert.equal(r.doc.project.transport.bpm, 101);
   assert.deepEqual(noteKeys(r.doc.project), [61]);
   assert.equal(r.project.status().dirty, true);
   assert.equal(r.project.status().path, a, 'the restored tab still saves to its file');
-  await r.tabs.switchTo(s.tabs[2].id); // lazily loaded from its file
+  await r.tabs.switchTo(s.tabs[2].id);
   assert.equal(r.doc.project.transport.bpm, 102);
   assert.equal(r.project.status().dirty, false);
-  // Untitled came back from memory (its state was kept when switching away), still dirty.
   await r.tabs.switchTo(s.tabs[1].id);
   assert.deepEqual(noteKeys(r.doc.project), [62, 63]);
   await r.tabs.shutdown();
@@ -324,7 +314,7 @@ test('session: a missing file becomes a tab that says so instead of failing the 
     await r.tabs.open(b);
     await r.tabs.shutdown();
   }
-  fs.rmSync(b); // Beta was the active tab
+  fs.rmSync(b);
   const r = rig(root);
   await r.boot();
   const s = r.tabs.state();
@@ -342,13 +332,13 @@ test('crash: recovery gives the active tab its journaled edits, inactive tabs co
   {
     const r = rig(root);
     await r.boot();
-    addNote(r.doc, 71); // Untitled: edits, then switched away from
+    addNote(r.doc, 71);
     await r.tabs.newTab();
-    addNote(r.doc, 72); // Untitled 2: active at the crash, edits only in the recovery journal
+    addNote(r.doc, 72);
     addNote(r.doc, 73);
-    await r.tabs.saveSession(); // what tab changes already wrote (the active tab's content isn't in it)
-    await sleep(500); // the recovery snapshot waits for the outgoing tab's session file
-    await r.project.shutdown(false); // a crash: the journal is flushed, the lock stays
+    await r.tabs.saveSession();
+    await sleep(500);
+    await r.project.shutdown(false);
   }
   const r = rig(root);
   await r.boot();

@@ -1,7 +1,3 @@
-//! Factory library tests. Everything is generated into a temp dir (never
-//! resources/), checked against its index, then generated again and
-//! compared byte for byte.
-
 use super::*;
 use super::synth::db;
 use crate::wav::decode_wav;
@@ -54,7 +50,6 @@ fn smpl_root(bytes: &[u8]) -> Option<u32> {
     None
 }
 
-/// The string literals of `export const <name> = [ ... ]` in a TS file.
 fn ts_list(src: &str, name: &str) -> Vec<String> {
     let start = src.find(&format!("export const {name} = [")).unwrap_or_else(|| panic!("{name} not found"));
     let body = &src[start..];
@@ -117,7 +112,6 @@ fn library_specs_are_well_formed() {
         if matches!(s.kind, "808" | "bass-oneshot" | "stab-oneshot") {
             assert!(s.root.is_some(), "{}: tonal samples need a root note", s.rel);
         }
-        // no product / trademark names
         let lower = format!("{} {}", s.rel, s.name).to_ascii_lowercase();
         for bad in ["909", "707", "606", "tr-", "linn", "m1 ", "serum", "sylenth", "nexus", "splice", "fruity", "image-line", "korg", "roland", "moog"] {
             assert!(!lower.contains(bad), "{}: trademark-like word {bad}", s.rel);
@@ -131,8 +125,6 @@ fn index_root(samples: &[serde_json::Value], rel: &str) -> f32 {
     s["rootNote"].as_f64().unwrap_or_else(|| panic!("{rel}: no rootNote")) as f32
 }
 
-/// Everything in one generation (debug builds are slow): structure, audio
-/// checks, size, then a second run for byte-identical output.
 #[test]
 fn factory_library_is_complete_valid_and_deterministic() {
     let dir = temp_dir("a");
@@ -140,7 +132,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
     eprintln!("{}", rep.table(false));
     eprintln!("total {:.2} MB in {:.1} s", rep.total_bytes as f64 / 1_048_576.0, rep.seconds);
 
-    // index.json
     let text = std::fs::read_to_string(dir.join("index.json")).unwrap();
     let idx: serde_json::Value = serde_json::from_str(&text).expect("index.json parses");
     assert_eq!(idx["version"], 1);
@@ -155,7 +146,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
         assert!(paths.contains(p), "legacy {p} missing from the index");
     }
 
-    // legacy files are byte-identical to generate_kit
     let kit_dir = temp_dir("kit");
     for p in generate_kit(&kit_dir).unwrap() {
         let name = p.file_name().unwrap();
@@ -190,7 +180,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
         assert!((len * 48_000.0 - frames as f64).abs() < 5.0, "{path}: lengthSec {len} vs {frames} frames");
         let legacy = LEGACY_FACTORY_PATHS.contains(&path);
 
-        // bit depth: legacy 24-bit; library one-shots 24-bit up to 2 s, 16-bit beyond and for synced files
         let bits = bits_of(&bytes);
         if legacy || (s.get("bars").is_none() && frames as f32 / 48_000.0 <= 2.0) {
             assert_eq!(bits, 24, "{path}: {bits}-bit");
@@ -198,7 +187,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
             assert_eq!(bits, 16, "{path}: {bits}-bit");
         }
 
-        // no clipping, peak at or below its normalisation target
         let peak_db = s["peakDb"].as_f64().unwrap() as f32;
         let pk = ch.iter().flat_map(|c| c.iter()).fold(0.0f32, |m, v| m.max(v.abs()));
         assert!(pk < 0.999, "{path}: clips ({pk})");
@@ -207,7 +195,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
         let tp = ch.iter().map(|c| crate::blocks::truepeak::true_peak(c)).fold(0.0f32, f32::max);
         assert!(tp <= db(peak_db) * 1.01 + 1e-4, "{path}: true peak {:.2} dB over {peak_db}", 20.0 * tp.log10());
 
-        // tempo-synced files are exactly bars × 4 beats at 128 BPM
         if let Some(bars) = s["bars"].as_u64() {
             assert_eq!(s["bpm"].as_f64(), Some(128.0), "{path}: bpm");
             assert_eq!(frames, bars as usize * 90_000, "{path}: not exactly {bars} bars");
@@ -216,7 +203,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
             assert!(s.get("bpm").is_none(), "{path}: bpm without bars");
         }
 
-        // tonal samples carry their root in the index and the smpl chunk
         let root = s["rootNote"].as_u64();
         if matches!(kind, "808" | "bass-oneshot" | "stab-oneshot") {
             assert!(root.is_some(), "{path}: no rootNote");
@@ -229,10 +215,8 @@ fn factory_library_is_complete_valid_and_deterministic() {
             continue;
         }
         let mono: Vec<f32> = if ch.len() == 2 { ch[0].iter().zip(&ch[1]).map(|(a, b)| 0.5 * (a + b)).collect() } else { ch[0].clone() };
-        // no DC
         let mean = mono.iter().map(|v| *v as f64).sum::<f64>() / frames as f64;
         assert!((mean.abs() as f32) < pk * 0.01, "{path}: DC {mean}");
-        // click-free ends (loops are seamless instead)
         let looped = rel.starts_with("textures/");
         if looped {
             for c in &ch {
@@ -246,7 +230,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
                 assert!(c[frames - 1].abs() < pk * 0.02 + 2e-4, "{path}: ends with a click ({})", c[frames - 1]);
             }
         }
-        // where the energy sits
         let env: Vec<f32> = mono.chunks(240).map(|c| c.iter().fold(0.0f32, |m, v| m.max(v.abs()))).collect();
         let first10 = env.iter().take(2).fold(0.0f32, |m, v| m.max(*v));
         let emax = env.iter().fold(0.0f32, |m, v| m.max(*v));
@@ -258,17 +241,12 @@ fn factory_library_is_complete_valid_and_deterministic() {
         match kind {
             "riser" | "swell" | "reverse-cymbal" => {
                 assert!(at > 0.85, "{path}: climax at {at:.2} of the length, not the end");
-                // end-aligned: the last 5 % is clearly louder than the first half
                 let (head, tail) = (rms(0, frames / 2), rms(frames * 95 / 100, frames));
                 assert!(tail > head * 2.0, "{path}: last 5% ({:.1} dB) not louder than the first half ({:.1} dB)", 20.0 * tail.log10(), 20.0 * head.log10());
             }
             "sweep-up" => assert!(at > 0.85, "{path}: climax at {at:.2} of the length, not the end"),
-            // a pass-by: approaches, crosses near the end, short fall-off
             "whoosh" => assert!(at > 0.75, "{path}: whoosh crosses at {at:.2}, want the last quarter"),
             "tape-stop" => {
-                // everything has slid down low near the end (dominant < ~300 Hz),
-                // still sounding until it halts on the last sample
-                // (the exact speed curve is checked in tape_stop_slows_pitch_and_speed_together)
                 let zcr = |a: usize, b: usize| mono[a..b].windows(2).filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0)).count() as f32 / (b - a) as f32;
                 let z1 = zcr(frames * 80 / 100, frames * 95 / 100);
                 assert!(z1 < 0.0125, "{path}: still high-pitched near the end (zero-crossing rate {z1:.4})");
@@ -285,14 +263,12 @@ fn factory_library_is_complete_valid_and_deterministic() {
     assert!(total <= MAX_TOTAL_BYTES, "factory is {total} bytes (> {MAX_TOTAL_BYTES})");
     assert!(rep.total_bytes <= MAX_TOTAL_BYTES);
 
-    // every WAV on disk is indexed
     let mut on_disk = Vec::new();
     walk(&dir, &mut on_disk);
     let wavs: Vec<_> = on_disk.iter().filter(|p| p.extension().is_some_and(|e| e == "wav")).collect();
     assert_eq!(wavs.len(), samples.len(), "unindexed files on disk");
     assert!(!on_disk.iter().any(|p| p.extension().is_some_and(|e| e == "tmp")), "temp files left behind");
 
-    // measured sanity per category
     let stat = |rel: &str| rep.files.iter().find(|f| f.rel == rel).map(|f| f.stat.clone()).unwrap();
     for f in &rep.files {
         let s = &f.stat;
@@ -301,7 +277,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
         }
         match s.kind.as_str() {
             "kick" | "808" | "sub-drop" | "tom" => {
-                // the low end (sub / low band) is the loudest part
                 let lowest = s.bands[0].max(s.bands[1]);
                 assert!(s.bands[2..].iter().all(|b| *b <= lowest + 1.0), "{}: bands {:?}", s.rel, s.bands);
                 assert!(s.kind != "kick" || s.centroid_hz < 3500.0, "{}: kick centroid {}", s.rel, s.centroid_hz);
@@ -317,21 +292,18 @@ fn factory_library_is_complete_valid_and_deterministic() {
                 assert!((f0 / 65.406 - 1.0).abs() < 0.03, "{}: bass f0 {f0} Hz, want C2 65.41 Hz", s.rel);
             }
             "zap" => {
-                // lasers / blips / glitches live above 500 Hz
                 assert!(s.centroid_hz > 500.0, "{}: zap centroid {}", s.rel, s.centroid_hz);
                 let low = s.bands[0].max(s.bands[1]);
                 let high = s.bands[3].max(s.bands[4]).max(s.bands[5]);
                 assert!(high > low + 6.0, "{}: zap bands {:?}", s.rel, s.bands);
             }
             "vox" => {
-                // formant voices: energy in the voice band, nothing above ~8 kHz to speak of
                 assert!((250.0..3000.0).contains(&s.centroid_hz), "{}: vox centroid {}", s.rel, s.centroid_hz);
             }
             _ => {}
         }
     }
     assert!(stat("drums/kick/punchy-club.wav").t20_ms < 400.0);
-    // single-voice vocal shots sing their root (within a quarter tone)
     for rel in ["oneshots/vox/ah-shot.wav", "oneshots/vox/oh-shot.wav", "oneshots/vox/ee-chop.wav", "oneshots/vox/uh-chop-low.wav", "oneshots/vox/hey-shot.wav"] {
         let s = stat(rel);
         let root = index_root(samples, rel);
@@ -339,7 +311,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
         let f0 = s.f0_hz.unwrap_or(0.0);
         assert!((f0 / want).log2().abs() * 12.0 < 0.5, "{rel}: sings {f0:.1} Hz, root {root} is {want:.1} Hz");
     }
-    // sub drops: the sub / low bands dominate and the centroid stays low
     for f in rep.files.iter().filter(|f| f.stat.kind == "sub-drop") {
         assert!(f.stat.centroid_hz < 1000.0, "{}: sub-drop centroid {}", f.rel, f.stat.centroid_hz);
     }
@@ -350,7 +321,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
         assert!(per_kind.get(k).copied().unwrap_or(0) > 0, "no {k} samples");
     }
 
-    // a second run writes identical bytes
     let dir_b = temp_dir("b");
     let rep_b = generate_factory(&dir_b, "krypt-studio-engine test").expect("generate again");
     assert_eq!(rep.files.len(), rep_b.files.len());
@@ -361,7 +331,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
         let b = dir_b.join(rel);
         assert!(std::fs::read(a).unwrap() == std::fs::read(&b).unwrap(), "{rel:?} differs between runs");
     }
-    // regenerating over an existing dir removes stale library files
     let stale = dir_b.join("fx").join("riser").join("old-name-2bar.wav");
     std::fs::write(&stale, b"RIFF").unwrap();
     let keep: BTreeSet<PathBuf> = rep_b.files.iter().map(|f| f.path.clone()).collect();
@@ -372,8 +341,6 @@ fn factory_library_is_complete_valid_and_deterministic() {
     let _ = std::fs::remove_dir_all(&dir_b);
 }
 
-/// A tape stop on a steady 1 kHz tone: the pitch follows the speed curve
-/// down to a halt on the last sample, and the tone stays audible meanwhile.
 #[test]
 fn tape_stop_slows_pitch_and_speed_together() {
     use super::synth::{BAR, FS, TAU64};
@@ -401,8 +368,6 @@ fn tape_stop_slows_pitch_and_speed_together() {
     assert!(x.iter().all(|v| v.is_finite()));
 }
 
-/// Manual check: `cargo test -p krypt-studio-dsp factory_table -- --ignored --nocapture`
-/// prints the per-file measurement table.
 #[test]
 #[ignore]
 fn factory_table() {

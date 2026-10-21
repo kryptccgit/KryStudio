@@ -1,7 +1,3 @@
-// Visual controls: Knob, Fader, Slider. All take a NORMALIZED value and a
-// preformatted display string; the Param* wrappers (ParamKnob.tsx) bind them
-// to the document. No React state per frame: only the dragged control renders.
-
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useParamDrag } from './useParamDrag';
@@ -9,17 +5,13 @@ import { setLiveHint } from '../app/hints';
 import { cls } from '../utils/format';
 
 export interface ControlProps {
-  /** Normalized 0..1. */
   value: number;
   defaultValue: number;
-  /** Formatted display of the current value ("-6.0 dB"). */
   display: string;
   label?: string;
   steps?: number;
-  /** Fill from the centre (pan, detune). */
   bipolar?: boolean;
   disabled?: boolean;
-  /** Accent color for the value arc/fill (defaults to the Krypt gradient). */
   color?: string;
   hint?: string;
   className?: string;
@@ -30,7 +22,6 @@ export interface ControlProps {
   onContextMenu?: (e: React.MouseEvent) => void;
 }
 
-/** Floating value readout shown next to a control while it's being changed. */
 export function ValueTooltip({ anchor, text, show }: { anchor: HTMLElement | null; text: string; show: boolean }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   useLayoutEffect(() => {
@@ -75,8 +66,6 @@ function useControl(p: ControlProps, axis: 'x' | 'y', rangePx?: number) {
   };
   return { drag, anchor, setRef };
 }
-
-// ── Knob ──────────────────────────────────────────────────────────────
 
 const A0 = -135;
 const A1 = 135;
@@ -151,8 +140,6 @@ export function Knob(p: ControlProps & { size?: number; showLabel?: boolean; sho
   );
 }
 
-// ── Fader (vertical) ──────────────────────────────────────────────────
-
 export function Fader(p: ControlProps & { height?: number; width?: number; marks?: number[] }) {
   const h = p.height ?? 120;
   const w = p.width ?? 22;
@@ -194,8 +181,6 @@ export function Fader(p: ControlProps & { height?: number; width?: number; marks
     </div>
   );
 }
-
-// ── Slider (horizontal) ───────────────────────────────────────────────
 
 export function Slider(p: ControlProps & { width?: number; height?: number }) {
   const w = p.width ?? 80;

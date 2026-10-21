@@ -1,4 +1,3 @@
-/* Frameless window chrome: drag the title bar, never the controls on it. */
 .app-drag {
   -webkit-app-region: drag;
 }

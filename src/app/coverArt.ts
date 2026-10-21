@@ -1,16 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Generated cover art, drawn on a canvas in the renderer (the bundled
-// Chakra Petch font is only here): a 1400×1400 picture made from the
-// project's own notes (when they play, how high, how hard), with the song
-// title and artist. Four looks (waves, grid, orbit, bars); the same project,
-// style and seed always draw the same picture, so "Shuffle" just bumps the
-// seed. Krypt style: void background, indigo → purple → pink accents, no
-// third-party marks.
-//
-// Main asks for one when an agent calls set_cover {generate}
-// (installCoverResponder); the Export dialog draws one directly.
-// ──────────────────────────────────────────────────────────────────────
-
 import { COVER_STYLES, type CoverStyle } from '@shared/types';
 import { patternLength, songInfo, type Project } from '@shared/schema/project';
 import { getProject } from '../doc/store';
@@ -31,15 +18,12 @@ export interface CoverDrawOptions {
   artist: string;
 }
 
-/** A note of the song, normalized: t = when (0..1), k = how high (0..1), v = velocity, c = channel index. */
 export interface CloudPoint {
   t: number;
   k: number;
   v: number;
   c: number;
 }
-
-// ── Deterministic randomness ───────────────────────────────────────────
 
 export function hashString(s: string): number {
   let h = 0x811c9dc5;
@@ -62,9 +46,6 @@ export function styleForSeed(seed: number): CoverStyle {
   return COVER_STYLES[((Math.floor(seed) % COVER_STYLES.length) + COVER_STYLES.length) % COVER_STYLES.length];
 }
 
-// ── The song as points ─────────────────────────────────────────────────
-
-/** The project's notes as a point cloud: the song's arrangement, else its patterns back to back, else a seeded walk. */
 export function noteCloud(p: Project, seed: number, max = 1400): CloudPoint[] {
   const ts = p.transport.timeSig;
   const chIndex = new Map(p.channelOrder.map((id, i) => [id, i]));
@@ -90,7 +71,6 @@ export function noteCloud(p: Project, seed: number, max = 1400): CloudPoint[] {
     }
   }
   if (!raw.length) {
-    // An empty project still gets a picture: a seeded melodic walk.
     const rnd = mulberry32(hashString(`walk|${seed}`));
     let key = 60;
     for (let i = 0; i < 160; i++) {
@@ -114,7 +94,6 @@ export function noteCloud(p: Project, seed: number, max = 1400): CloudPoint[] {
   return picked.map((n) => ({ t: (n.tick - t0) / (t1 - t0), k: Math.max(0, Math.min(1, 0.5 + (n.key - mid) / span)), v: Math.max(0.05, Math.min(1, n.vel)), c: n.c }));
 }
 
-/** How busy the song is over time: `bins` values 0..1, smoothed. */
 export function density(points: CloudPoint[], bins: number): number[] {
   const h = new Array<number>(bins).fill(0);
   for (const p of points) h[Math.min(bins - 1, Math.floor(p.t * bins))] += 0.4 + p.v;
@@ -123,10 +102,7 @@ export function density(points: CloudPoint[], bins: number): number[] {
   return sm.map((x) => x / top);
 }
 
-// ── Drawing helpers ────────────────────────────────────────────────────
-
 const mix = (a: Rgb, b: Rgb, f: number): Rgb => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
-/** The Krypt gradient at 0..1 (indigo → purple → pink), shifted by `hue` (0..1) so seeds lean different ways. */
 function grad(f: number, hue = 0): Rgb {
   const x = Math.max(0, Math.min(1, (f + hue) % 1.0001));
   return x < 0.5 ? mix(INDIGO, PURPLE, x * 2) : mix(PURPLE, PINK, (x - 0.5) * 2);
@@ -143,7 +119,6 @@ function backdrop(ctx: CanvasRenderingContext2D, rnd: () => number, hue: number)
   const S = COVER_SIZE;
   ctx.fillStyle = VOID;
   ctx.fillRect(0, 0, S, S);
-  // Two soft colour blooms from the palette.
   for (let i = 0; i < 2; i++) {
     const x = S * (0.2 + rnd() * 0.6);
     const y = S * (0.15 + rnd() * 0.45);
@@ -161,8 +136,6 @@ function grain(ctx: CanvasRenderingContext2D, rnd: () => number): void {
   ctx.fillStyle = 'rgba(255,255,255,0.035)';
   for (let i = 0; i < 4200; i++) ctx.fillRect(rnd() * S, rnd() * S, 1.6, 1.6);
 }
-
-// ── The four looks ─────────────────────────────────────────────────────
 
 function drawWaves(ctx: CanvasRenderingContext2D, pts: CloudPoint[], rnd: () => number, hue: number): void {
   const S = COVER_SIZE;
@@ -189,7 +162,6 @@ function drawWaves(ctx: CanvasRenderingContext2D, pts: CloudPoint[], rnd: () => 
     ctx.stroke();
   }
   ctx.shadowBlur = 0;
-  // The notes themselves as sparks along the brightest line.
   for (const p of pts) {
     if (rnd() > 0.5) continue;
     const x = p.t * S;
@@ -203,7 +175,6 @@ function drawWaves(ctx: CanvasRenderingContext2D, pts: CloudPoint[], rnd: () => 
 
 function drawGrid(ctx: CanvasRenderingContext2D, pts: CloudPoint[], rnd: () => number, hue: number): void {
   const S = COVER_SIZE;
-  // Fewer, bigger cells for a sparse song; a fine grid for a busy one.
   const cols = Math.max(16, Math.min(40, Math.round(Math.sqrt(pts.length) * 2.6)));
   const rows = 20;
   ctx.save();
@@ -228,7 +199,6 @@ function drawGrid(ctx: CanvasRenderingContext2D, pts: CloudPoint[], rnd: () => n
     ctx.lineTo(W, r * rh);
     ctx.stroke();
   }
-  // Faint ghost cells give the grid texture between the notes.
   for (let i = 0; i < cols * rows * 0.07; i++) {
     const c = Math.floor(rnd() * cols);
     const r = Math.floor(rnd() * rows);
@@ -237,7 +207,6 @@ function drawGrid(ctx: CanvasRenderingContext2D, pts: CloudPoint[], rnd: () => n
     ctx.roundRect(c * cw + 2, r * rh + 2, cw - 4, rh - 4, 4);
     ctx.fill();
   }
-  // Notes: pitch picks the row (kept off the edges), channels that share a pitch (drums) sit on neighbouring rows.
   const cells = new Map<string, number>();
   for (const p of pts) {
     const r = Math.min(rows - 3, 2 + Math.floor((1 - p.k) * (rows - 7)) + (p.c % 3));
@@ -283,7 +252,6 @@ function drawOrbit(ctx: CanvasRenderingContext2D, pts: CloudPoint[], rnd: () => 
     const a = rot + p.t * Math.PI * 2 * (1.5 + (p.c % 3) * 0.25);
     return [cx + Math.cos(a) * r, cy + Math.sin(a) * r, ring];
   };
-  // Arcs between consecutive notes of a channel.
   const last = new Map<number, CloudPoint>();
   for (const p of pts) {
     const prev = last.get(p.c);
@@ -308,7 +276,6 @@ function drawOrbit(ctx: CanvasRenderingContext2D, pts: CloudPoint[], rnd: () => 
     ctx.fill();
   }
   ctx.shadowBlur = 0;
-  // A glowing core.
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r0 * 1.4);
   g.addColorStop(0, rgba(grad(0.5, hue), 0.9));
   g.addColorStop(1, rgba(grad(0.5, hue), 0));
@@ -346,16 +313,12 @@ function drawBars(ctx: CanvasRenderingContext2D, pts: CloudPoint[], rnd: () => n
     ctx.fill();
   }
   ctx.shadowBlur = 0;
-  // Centre line.
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
   ctx.fillRect(60, mid - 1, S - 120, 2);
 }
 
-// ── Title + artist ─────────────────────────────────────────────────────
-
 const FONT = '"Chakra Petch", "Segoe UI", sans-serif';
 
-/** Split a title into at most `maxLines` lines that fit `width` at the current font. */
 function wrap(ctx: CanvasRenderingContext2D, text: string, width: number, maxLines: number): string[] | null {
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
@@ -364,7 +327,7 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, width: number, maxLin
     const next = cur ? `${cur} ${w}` : w;
     if (ctx.measureText(next).width <= width) cur = next;
     else {
-      if (!cur) return null; // one word wider than the line
+      if (!cur) return null;
       lines.push(cur);
       cur = w;
       if (lines.length >= maxLines) return null;
@@ -378,7 +341,6 @@ function drawText(ctx: CanvasRenderingContext2D, title: string, artist: string, 
   const S = COVER_SIZE;
   const left = 96;
   const width = S - left * 2;
-  // A scrim keeps the text readable over any art.
   const scrim = ctx.createLinearGradient(0, S * 0.58, 0, S);
   scrim.addColorStop(0, 'rgba(10,10,15,0)');
   scrim.addColorStop(0.55, 'rgba(10,10,15,0.82)');
@@ -395,7 +357,6 @@ function drawText(ctx: CanvasRenderingContext2D, title: string, artist: string, 
     if (lines) break;
   }
   if (!lines) {
-    // Still too long: one line, ellipsized.
     ctx.font = `700 ${size}px ${FONT}`;
     let s = t;
     while (s.length > 1 && ctx.measureText(`${s}…`).width > width) s = s.slice(0, -1);
@@ -408,7 +369,6 @@ function drawText(ctx: CanvasRenderingContext2D, title: string, artist: string, 
   const titleLast = artist ? artistY - artistSize - 30 : bottom;
   const titleTop = titleLast - (lines.length - 1) * lineH;
 
-  // Accent bar above the title.
   ctx.fillStyle = linear(ctx, left, 0, left + 220, 0, hue, 1);
   ctx.fillRect(left, titleTop - size * 0.82 - 34, 220, 8);
 
@@ -428,9 +388,6 @@ function drawText(ctx: CanvasRenderingContext2D, title: string, artist: string, 
   ctx.shadowBlur = 0;
 }
 
-// ── Public API ─────────────────────────────────────────────────────────
-
-/** Draw a cover onto a COVER_SIZE² canvas context. Deterministic for (project notes, style, seed, text). */
 export function drawCover(ctx: CanvasRenderingContext2D, p: Project, o: CoverDrawOptions): void {
   const rnd = mulberry32(hashString(`${p.id}|${o.style}|${o.seed}`));
   const hue = rnd() * 0.35;
@@ -450,17 +407,14 @@ async function fontsReady(): Promise<void> {
   try {
     await Promise.all([document.fonts.load(`700 120px ${FONT}`, 'Aa'), document.fonts.load(`500 48px ${FONT}`, 'Aa')]);
   } catch {
-    /* a fallback font still draws a usable cover */
   }
 }
 
-/** The song info the cover shows: the export title (or project name) and artist (or author). */
 export function coverText(p: Project = getProject()): { title: string; artist: string } {
   const info = songInfo(p.meta, useProjectStatus.getState().status?.name);
   return { title: info.title, artist: info.artist };
 }
 
-/** Draw and encode a cover (JPEG, quality 0.92). */
 export async function renderCover(p: Project, o: CoverDrawOptions): Promise<{ bytes: Uint8Array; mime: 'image/jpeg' }> {
   await fontsReady();
   const canvas = document.createElement('canvas');
@@ -476,7 +430,6 @@ export async function renderCover(p: Project, o: CoverDrawOptions): Promise<{ by
 
 let responderInstalled = false;
 
-/** Answer main's set_cover {generate} requests (once, at app start). */
 export function installCoverResponder(): void {
   if (responderInstalled) return;
   responderInstalled = true;

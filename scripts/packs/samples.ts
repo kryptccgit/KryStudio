@@ -1,17 +1,3 @@
-// Sample packs (Wave 7b, research/14 §2.2) for the manifest tool (scripts/packs/build.ts): one-shots, loops and FX
-// from CC0 / public-domain sources, pinned by URL + SHA-256 + size. Three kinds of source:
-//   github  one download per sample from a commit-pinned repository (raw URL + jsDelivr mirror)
-//   url     one download per sample from a stable direct URL on the source's own site
-//   zip     one archive per source; only the samples' members are extracted at install (each with its own SHA-256)
-// Writes shared/packs/data/<id>.gen.ts with FILES (PackFile[], archives carry `archive.members`), SAMPLES
-// (PackSample[]) and the audio facts test/packs-catalog.test.ts checks.
-//
-// Measuring: every sample is decoded with ffmpeg (a dev tool on PATH, never shipped and never linked; paths are
-// passed as arguments) for its rate, channels, length and peak. WAV headers are also read by scripts/packs/audio.mjs
-// so only PCM / float WAV gets in. Downloads are untrusted data: nothing in them is executed, archives are read with
-// fflate (MIT) in memory, and member names must be plain ASCII (fflate decodes names without the UTF-8 flag as
-// Latin-1, and the installer must see the same bytes).
-
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -22,7 +8,6 @@ import { GENRE_IDS } from '@shared/sounds/genres';
 import { probeAudio } from './audio.mjs';
 import { assertSafePath, extOf, urlFor, type SampleDef, type SamplePackSpec, type SampleSource } from './lib';
 
-/** Formats the engine decodes natively (symphonia; shared/audio/formats.ts) that sample packs may use. */
 const OK_EXT = new Set(['.wav', '.flac', '.ogg', '.mp3']);
 const ASCII_NAME = /^[\x20-\x7e]+$/;
 
@@ -41,10 +26,9 @@ interface Facts {
   codec: string;
 }
 
-/** Decodes one file with ffmpeg (path as an argument) and measures it. */
 function measureFile(file: string, bytes: Uint8Array): Facts {
   const ext = extOf(file);
-  if (ext === '.wav') probeAudio(bytes.subarray(0, 65536), bytes.length); // throws on non-PCM/float WAV
+  if (ext === '.wav') probeAudio(bytes.subarray(0, 65536), bytes.length);
   const pr = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=sample_rate,channels,codec_name', '-of', 'json', file], { encoding: 'utf8' });
   if (pr.error) throw new Error(`ffprobe is needed to measure sample packs (${pr.error.message}); install ffmpeg and put it on PATH`);
   const st = JSON.parse(pr.stdout).streams?.[0];
@@ -65,7 +49,6 @@ function measureFile(file: string, bytes: Uint8Array): Facts {
 }
 
 interface Built {
-  /** PackFile-shaped rows. */
   files: { path: string; url: string; mirrors?: string[]; sha256: string; bytes: number; members?: { from: string; path: string; sha256: string; bytes: number }[] }[];
   samples: (SampleDef & { facts: Facts })[];
 }
@@ -98,7 +81,6 @@ function validate(spec: SamplePackSpec) {
   }
 }
 
-/** Downloads (or reuses from the cache) and measures every sample. */
 export async function buildSamples(spec: SamplePackSpec, cacheAbs: string, f: Fetcher): Promise<Built> {
   validate(spec);
   const dir = path.join(cacheAbs, spec.id);
@@ -155,7 +137,6 @@ export async function buildSamples(spec: SamplePackSpec, cacheAbs: string, f: Fe
     }
   }
   for (const s of spec.samples) out.push({ ...s, facts: byPath.get(s.path)! });
-  // Byte-identical takes (some sources ship the same file twice under two names) are listed once.
   const bySha = new Map<string, string>();
   for (const x of files) {
     for (const r of x.members ?? [x]) {
@@ -171,7 +152,6 @@ export async function buildSamples(spec: SamplePackSpec, cacheAbs: string, f: Fe
 const q = (s: string) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 const arr = (a: string[]) => `[${a.map(q).join(', ')}]`;
 
-/** The generated data file's text. */
 export function renderSamples(spec: SamplePackSpec, b: Built): string {
   const total = b.files.reduce((a, x) => a + x.bytes, 0);
   const L: string[] = [];
@@ -250,7 +230,6 @@ export function summarize(spec: SamplePackSpec, b: Built): void {
   if (quiet.length) console.log(`  ⚠ very quiet: ${quiet.join(', ')}`);
 }
 
-/** --check: re-downloads every file (and every mirror with --mirrors) and compares SHA-256 and size; archives are re-read for their members. */
 export async function checkSamples(spec: SamplePackSpec, b: Built, f: Fetcher, mirrors: boolean): Promise<string[]> {
   const bad: string[] = [];
   await f.pool(b.files, 4, async (x) => {

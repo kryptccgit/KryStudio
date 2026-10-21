@@ -1,16 +1,3 @@
-// Default sounds for channels an agent creates by name (write_pattern
-// create_missing, add_channel without an instrument), plus the sound-library
-// helpers the preset tools share.
-//
-// A channel called "Supersaw Lead" gets a REAL sound: the role its name implies
-// (shared/sounds/select.ts roleFromName) + the project's genre pick
-//   drums       → the best factory sample of that kind (resources/factory/
-//                 index.json), else the legacy factory kit file, else DrumSynth
-//   808 / bass / melodic roles → the best factory preset (with its FX chain),
-//                 else the old hand-made TriOsc patches
-// The genre comes from the project's genre field, else the reference-library
-// focus. Never a hard-coded preset id: presets are found by role.
-
 import fs from 'node:fs';
 import path from 'node:path';
 import type { MainDeps } from '../types';
@@ -25,23 +12,16 @@ import { findPluginRef, norm } from './util';
 
 export interface InstrumentChoice {
   type: string;
-  /** factory:… sample for sampler channels. */
   sample?: string;
   params?: Record<string, number>;
-  /** Human description for messages ("preset Anthem Supersaw", "Krypt Sampler (Punchy Kick)"). */
   label: string;
-  /** Load this preset (presets.addChannel / presets.applyToChannel, with its FX) instead of type + params. */
   preset?: InstrumentPreset;
-  /** The role the name implied (null = none). */
   role?: InstrumentRole | null;
 }
-
-// ── The sound library (service, or the shared factory data as a fallback) ─────
 
 export interface SoundLibrary {
   presets: readonly Preset[];
   index: FactoryIndex | null;
-  /** Set when Krypt Studio's sounds service isn't wired (factory data only, no user presets). */
   note?: string;
 }
 
@@ -49,7 +29,6 @@ const NO_SERVICE_NOTE = "Krypt Studio's sounds service isn't running in this ses
 
 const readers = new Map<string, IndexReader>();
 
-/** The factory folder (where factory:… paths resolve), or null. */
 export function factoryRoot(deps: Pick<MainDeps, 'project'>): string | null {
   try {
     const probe = deps.project.resolveSamplePath('factory:index.json');
@@ -59,7 +38,6 @@ export function factoryRoot(deps: Pick<MainDeps, 'project'>): string | null {
   }
 }
 
-/** The factory sample index: from the sounds service, else read from the factory folder. */
 export function factoryIndexOf(deps: MainDeps): FactoryIndex | null {
   if (deps.sounds) {
     try {
@@ -90,7 +68,6 @@ export function instrumentPresets(presets: readonly Preset[]): InstrumentPreset[
   return presets.filter((p): p is InstrumentPreset => p.kind === 'instrument');
 }
 
-/** The genre to choose sounds for: the project's genre field, else the reference-library focus (its brief / name). */
 export function genreContext(deps: MainDeps): GenreId | null {
   const g = deps.doc.project.meta.genre ?? '';
   const fromMeta = resolveGenre(g) ?? (g.trim() ? genreInText(g) : null);
@@ -113,19 +90,13 @@ function fileExists(deps: MainDeps, sample: string): boolean {
   }
 }
 
-/** A preset is usable as a default when the sound pack it needs (if any) is installed and its sample (if any) is on disk. */
 export function presetPlayable(deps: MainDeps, p: InstrumentPreset): boolean {
   if (missingPack(deps.packs, p)) return false;
   return !p.sample || fileExists(deps, p.sample);
 }
 
-/**
- * The best playable instrument preset for a role (+ genre, optionally one plugin), or null. `words` (the channel
- * name) refine the pick within the role: "Supersaw" prefers a supersaw lead, "Reese" a reese bass.
- */
 export function bestPreset(deps: MainDeps, presets: readonly Preset[], role: InstrumentRole, genre: GenreId | null, plugin?: string, words?: string): InstrumentPreset | null {
   const ranked = rankPresets(instrumentPresets(presets), { role, genre: genre ?? undefined, plugin, kind: 'instrument', text: words }, 60);
-  // A sound word in the name ("Reese", "Acid", "Supersaw") is a stronger wish than the genre: prefer presets that have it.
   const distinct = (words ?? '')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
@@ -137,14 +108,10 @@ export function bestPreset(deps: MainDeps, presets: readonly Preset[], role: Ins
   return ranked.find((p) => presetPlayable(deps, p)) ?? null;
 }
 
-/** Channel-name words that say nothing about the sound. */
 const GENERIC_NAME_WORDS: ReadonlySet<string> = new Set(['synth', 'sound', 'main', 'new', 'track', 'channel', 'line', 'part', 'layer', 'melody', 'hook', 'leads', 'pads', 'plucks', 'chords', 'bells', 'arps', 'stabs', 'the', 'and', 'for', 'drop', 'intro', 'verse', 'chorus', 'outro', 'build']);
-
-// ── Drums ─────────────────────────────────────────────────────────────
 
 const DRUM_ROLES: ReadonlySet<InstrumentRole> = new Set(['kick', 'snare', 'clap', 'hat', 'openhat', 'ride', 'crash', 'perc', 'tom']);
 
-/** Factory sample kinds a drum role can use, best first. */
 const KINDS_FOR_ROLE: Partial<Record<InstrumentRole, SampleKind[]>> = {
   kick: ['kick'],
   snare: ['snare'],
@@ -157,7 +124,6 @@ const KINDS_FOR_ROLE: Partial<Record<InstrumentRole, SampleKind[]>> = {
   tom: ['tom'],
 };
 
-/** Legacy factory kit files by role (projects made before the indexed kit). */
 const LEGACY_KIT: Partial<Record<InstrumentRole, string>> = {
   kick: FACTORY_KIT.kick,
   snare: FACTORY_KIT.snare,
@@ -180,7 +146,6 @@ export const SYNTH_PRESETS: Array<{ match: RegExp; label: string; params: Record
   { match: /(lead|melody|synth|saw|hook|vox|vocal)/, label: 'TriOsc lead', params: { osc1Shape: 2, osc2Shape: 2, osc2Fine: 9, osc3Shape: 3, osc3Coarse: 12, osc3Level: 0.25, unisonDetune: 0.2, cutoff: 6500, reso: 0.15, ampAttack: 2, ampSustain: 0.8, ampRelease: 180, gain: -8 } },
 ];
 
-/** Loose drum words in squashed names ("kick2", "bd", "openhh"). */
 function drumKind(n: string): string | null {
   if (/^(kick|bd|bassdrum|kickdrum|kik)/.test(n)) return 'kick';
   if (/^(openhat|oh|ohh|openhihat|open)/.test(n)) return 'openhat';
@@ -196,7 +161,6 @@ function drumKind(n: string): string | null {
   return null;
 }
 
-/** The role a channel name implies: word-level first, then squashed drum words. */
 export function roleForName(name: string): InstrumentRole | null {
   const r = roleFromName(name);
   if (r) return r;
@@ -205,11 +169,9 @@ export function roleForName(name: string): InstrumentRole | null {
   return k === 'rim' || k === 'cowbell' ? 'perc' : (k as InstrumentRole);
 }
 
-/** The best factory sample for a drum role (genre-aware), from the index; null when none is installed. */
 export function bestDrumSample(deps: MainDeps, index: FactoryIndex | null, role: InstrumentRole, genre: GenreId | null, name?: string): FactorySample | null {
   if (!index) return null;
   for (const kind of KINDS_FOR_ROLE[role] ?? []) {
-    // Words of the channel name (other than the drum word itself) refine the pick: "Trap Hat" / "Snare Tight".
     const hits = rankSamples(index.samples, { kind, genre: genre ?? undefined, text: name }, 6);
     const ok = hits.find((x) => fileExists(deps, x.path));
     if (ok) return ok;
@@ -232,12 +194,6 @@ function presetChoice(p: InstrumentPreset, role: InstrumentRole | null): Instrum
   return { type: p.plugin, label: `preset ${p.name}`, preset: p, role, sample: p.sample };
 }
 
-/**
- * Pick a sound for a new channel called `name`. `inst` (a plugin id or alias from {inst=…} / add_channel) wins
- * over the name's role, but still gets the best preset FOR that plugin when the name implies a role. `gridLine` =
- * the KPN line was a step grid (a drum part) rather than note tokens. `usePresets` false = the classic defaults
- * (for callers that set plugin params themselves): factory drum samples, the 808, the hand-made TriOsc patches.
- */
 export function chooseInstrument(deps: MainDeps, name: string, inst: string | undefined, gridLine: boolean, usePresets = true): InstrumentChoice {
   const role = roleForName(name);
   const lib: SoundLibrary = usePresets ? soundLibrary(deps) : { presets: [], index: factoryIndexOf(deps) };
@@ -276,7 +232,6 @@ export function chooseInstrument(deps: MainDeps, name: string, inst: string | un
   } else if (gridLine) {
     return { type: 'krypt.drumsynth', params: { voice: 6 }, label: 'Krypt DrumSynth (rim/perc)', role: null };
   } else {
-    // No hint in the name: a playable keys sound suits melodies and chords alike.
     const p = bestPreset(deps, lib.presets, 'keys', genre);
     if (p) return presetChoice(p, null);
   }

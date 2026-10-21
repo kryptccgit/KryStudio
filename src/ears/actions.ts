@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// "Ears" verbs behind the clip / channel / browser menus and the analysis
-// dialog: detect tempo & key, separate stems, convert audio to a pattern,
-// use a detected tempo, make a clip follow the project tempo. Long jobs show
-// in the status bar (JobsIndicator); every verb ends in a toast. A cancelled
-// job is reported by its Cancel click, not again when the job settles.
-// ──────────────────────────────────────────────────────────────────────
-
 import { create } from 'zustand';
 import type { AudioAnalysis, TranscribeMode } from '@shared/analyzer/protocol';
 import type { ActionResult, AudioTarget } from '@shared/types';
@@ -45,7 +37,6 @@ async function call<T>(what: string, fn: () => Promise<ActionResult<T>>): Promis
   }
 }
 
-/** False (with a toast) when the analyzer binary is missing. */
 async function analyzerReady(): Promise<boolean> {
   if (!getAnalyzerState()) await refreshAnalyzer();
   const s = getAnalyzerState();
@@ -56,17 +47,13 @@ async function analyzerReady(): Promise<boolean> {
   return true;
 }
 
-// ── Detect tempo & key (analysis runs, shared with the dialog) ────────
-
 export type AnalysisRun =
   | { status: 'running'; name: string; target: AudioTarget; startedAt: number }
   | { status: 'done'; name: string; target: AudioTarget; analysis: AudioAnalysis }
   | { status: 'error'; name: string; target: AudioTarget; message: string };
 
-/** Analyses of this session by target key (the dialog reads them; main caches per sample hash too). */
 export const useAnalyses = create<{ runs: Record<string, AnalysisRun> }>(() => ({ runs: {} }));
 
-/** How many analysis dialogs show each key (a finished run toasts only when nobody is looking). */
 const viewers = new Map<string, number>();
 
 export function watchAnalysis(key: string): () => void {
@@ -78,10 +65,6 @@ function setRun(key: string, run: AnalysisRun): void {
   useAnalyses.setState((s) => ({ runs: { ...s.runs, [key]: run } }));
 }
 
-/**
- * Start (or reuse) the analysis of a target. Returns its key. `onShow`
- * reopens the dialog from the "finished" toast when the dialog was closed.
- */
 export function startAnalysis(target: AudioTarget, onShow?: () => void, force = false): string {
   const p = getProject();
   const key = targetKey(p, target);
@@ -108,8 +91,6 @@ export function startAnalysis(target: AudioTarget, onShow?: () => void, force = 
   return key;
 }
 
-// ── Tempo ─────────────────────────────────────────────────────────────
-
 export async function useAsProjectTempo(bpm: number): Promise<boolean> {
   const v = snapBpm(bpm);
   if (!(v >= 10 && v <= 999)) {
@@ -121,20 +102,17 @@ export async function useAsProjectTempo(bpm: number): Promise<boolean> {
   return r.ok;
 }
 
-/** Does this build's Audio Clip support tempo sync (src_bpm + tempo_sync)? */
 export function audioClipCanFollowTempo(): boolean {
   const d = pluginById('krypt.audioclip');
   return !!d && d.params.some((p) => p.id === 'tempo_sync') && d.params.some((p) => p.id === 'src_bpm');
 }
 
-/** Is this audio-clip channel already following the project tempo from `bpm`? */
 export function isFollowingTempo(channelId: string, bpm?: number): boolean {
   const g = getProject().channels[channelId]?.generator;
   if (!g || Math.round(g.params.tempo_sync ?? 0) !== 1) return false;
   return bpm === undefined || Math.abs((g.params.src_bpm ?? 0) - snapBpm(bpm)) < 0.01;
 }
 
-/** Make an audio clip follow the project tempo: source tempo = the detected one, tempo sync on. */
 export async function followProjectTempo(channelId: string, bpm: number): Promise<boolean> {
   const ch = getProject().channels[channelId];
   if (!ch) return false;
@@ -167,8 +145,6 @@ export async function stopFollowingTempo(channelId: string): Promise<boolean> {
   return r.ok;
 }
 
-// ── Separate stems ────────────────────────────────────────────────────
-
 export async function separateStems(clipId: string, modelId?: string): Promise<boolean> {
   if (!(await analyzerReady())) return false;
   const p = getProject();
@@ -195,8 +171,6 @@ export async function separateStems(clipId: string, modelId?: string): Promise<b
   toast.success(`${stemsSentence(d.stems.length, name)} · ${model.name} on the ${d.device === 'directml' ? 'GPU' : 'CPU'}${secs}`);
   return true;
 }
-
-// ── Convert to pattern ────────────────────────────────────────────────
 
 export function modeLabel(mode: TranscribeMode): string {
   return TRANSCRIBE_MODES.find((m) => m.mode === mode)?.label ?? mode;
@@ -241,8 +215,6 @@ export async function convertToPattern(target: AudioTarget, mode: TranscribeMode
   return true;
 }
 
-// ── Jobs ──────────────────────────────────────────────────────────────
-
 export async function cancelAnalyzerJob(a: { jobId?: string; modelId?: string; label: string }): Promise<void> {
   const r = a.jobId
     ? await call('Cancel', () => window.krypt.analyzer.cancelJob(a.jobId!))
@@ -253,7 +225,6 @@ export async function cancelAnalyzerJob(a: { jobId?: string; modelId?: string; l
   else toast.error(r.message || `Couldn't cancel ${a.label}`);
 }
 
-/** Short "what's running" sentence for hints: "2 analyzer jobs running". */
 export function jobsHint(n: number): string {
   return n ? `${plural(n, 'analyzer job')} running · click for details` : 'No analyzer jobs';
 }

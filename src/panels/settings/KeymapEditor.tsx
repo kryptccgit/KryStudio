@@ -1,8 +1,3 @@
-// Settings → Shortcuts: every app command with its keys. Rebind captures
-// the next key combo (Esc cancels, Backspace/Delete unbinds), warns about
-// conflicts in the same scope (global vs. an editor's own shortcuts), and
-// stores only the differences from the FL defaults in settings.keymap.
-
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard, RotateCcw, Search } from 'lucide-react';
 import { listAppCommands } from '../../input/commands';
@@ -43,13 +38,11 @@ const GROUPS: Array<[prefix: string, label: string]> = [
 
 let pendingReveal = false;
 
-/** Open Settings scrolled to the Shortcuts section (Help → Keyboard shortcuts → Customize). */
 export function revealShortcuts(): void {
   pendingReveal = true;
   window.dispatchEvent(new CustomEvent('krypt:reveal-shortcuts'));
 }
 
-/** "pianoRoll.quickChop" → "Quick chop" for commands that aren't registered yet. */
 function humanize(id: string): string {
   const last = id.split('.').pop() ?? id;
   const words = last.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
@@ -87,7 +80,6 @@ export function KeymapEditor() {
   const labelOf = (id: string): string => rows.find((r) => r.id === id)?.label ?? humanize(id);
   const overriddenCount = Object.keys(overrides).length;
 
-  // Help → "Customize shortcuts…" scrolls here.
   useEffect(() => {
     const reveal = (): void => {
       pendingReveal = false;
@@ -107,7 +99,6 @@ export function KeymapEditor() {
     void save(next, keys ? `${labelOf(command)}: ${prettyKeys(keys)}` : `${labelOf(command)}: no shortcut`);
   };
 
-  // Key capture: the global keymap is suspended and this listener eats every key.
   useEffect(() => {
     if (!capturing) return;
     const doc = rootRef.current?.ownerDocument ?? document;
@@ -129,12 +120,11 @@ export function KeymapEditor() {
         return;
       }
       const keys = eventToKeys(e);
-      if (!keys) return; // a modifier on its own: keep waiting
+      if (!keys) return;
       setCapturing(null);
       const ctx = contextForCommand(command);
       const conflicts = findKeyConflicts(map, keys, command, ctx);
       if (!ctx && /^[A-Z0-9]$/.test(keys)) {
-        // a bare letter/digit also plays notes when the typing keyboard is on
         conflicts.push({ binding: { keys, command: 'input.toggleTypingPiano' }, kind: 'shadowed' });
       }
       if (conflicts.length) setPending({ command, keys, conflicts });
@@ -148,7 +138,6 @@ export function KeymapEditor() {
       win.removeEventListener('blur', cancel);
       setKeymapSuspended(false);
     };
-    // commit/map are read fresh on each capture start
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capturing]);
 

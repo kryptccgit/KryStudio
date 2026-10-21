@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Reference library verbs behind the Library panel, its menus, the focus
-// chip, the agent panel and the originality report. Every verb ends in
-// visible feedback (toast or dialog). Records only: removing a track or a
-// collection never touches the user's files, and every confirm says so.
-// A dismissed file / folder picker is silent (the user cancelled it).
-// ──────────────────────────────────────────────────────────────────────
-
 import type { ActionResult } from '@shared/types';
 import type { Collection, LibraryTrack, StyleProfile } from '@shared/library/types';
 import { profileText } from '@shared/library/profile';
@@ -64,7 +56,6 @@ export function openModelManager(): void {
   wm.open('modelManager');
 }
 
-/** Show the Library panel, optionally on a collection and tab. */
 export function openLibrary(opts: { collectionId?: string | null; view?: LibraryView } = {}): void {
   if (opts.collectionId !== undefined) selectCollection(opts.collectionId, opts.view);
   else if (opts.view) useLibrary.setState({ view: opts.view });
@@ -76,9 +67,6 @@ export function collectionById(id: string | null | undefined): Collection | null
   return getLibraryState()?.collections.find((c) => c.id === id) ?? null;
 }
 
-// ── Collections ───────────────────────────────────────────────────────
-
-/** New collection (name + tags dialog). Resolves with it, or null when cancelled / failed. */
 export function createCollection(doc?: Document | null, opts: { name?: string; thenAddFolder?: boolean } = {}): Promise<Collection | null> {
   return new Promise((resolve) => {
     openCollectionDialog({
@@ -104,7 +92,6 @@ export function createCollection(doc?: Document | null, opts: { name?: string; t
   });
 }
 
-/** Rename + tags. */
 export function editCollection(c: Collection, doc?: Document | null): void {
   openCollectionDialog({
     doc,
@@ -149,7 +136,6 @@ export async function removeCollection(c: Collection): Promise<boolean> {
   return true;
 }
 
-/** Add a folder (no path = folder picker) and queue it. */
 export async function addFolder(c: Collection, path?: string): Promise<boolean> {
   setBusy(c.id, 'Adding');
   const r = await call('Add folder', () => window.krypt.library.addFolder(c.id, path));
@@ -164,7 +150,6 @@ export async function addFolder(c: Collection, path?: string): Promise<boolean> 
   return r.data.added > 0;
 }
 
-/** Add files (no paths = file picker) and queue them. */
 export async function addFiles(c: Collection, paths?: string[]): Promise<boolean> {
   setBusy(c.id, 'Adding');
   const r = await call('Add files', () => window.krypt.library.addFiles(c.id, paths));
@@ -179,7 +164,6 @@ export async function addFiles(c: Collection, paths?: string[]): Promise<boolean
   return r.data.added > 0;
 }
 
-/** Paths dropped from Explorer onto a collection: audio files + folders, one summary toast. */
 export async function addDropped(c: Collection, paths: string[]): Promise<void> {
   const { files, folders, ignored } = classifyDrop(paths);
   if (!files.length && !folders.length) {
@@ -212,13 +196,11 @@ export async function addDropped(c: Collection, paths: string[]): Promise<void> 
   if (ignored.length) toast.warn(`Skipped ${ignored.map(baseName).join(', ')}: not audio`);
 }
 
-/** A DataTransfer from Explorer onto a collection. */
 export async function dropOnCollection(c: Collection, dt: DataTransfer): Promise<void> {
   const paths = droppedPaths(dt);
   if (paths.length) await addDropped(c, paths);
 }
 
-/** A drop on "new collection": name it after the first folder, then add everything. */
 export async function dropAsNewCollection(dt: DataTransfer): Promise<void> {
   const paths = droppedPaths(dt);
   if (!paths.length) return;
@@ -256,8 +238,6 @@ export async function rescanCollection(c: Collection): Promise<void> {
   toast.success(rescanSentence(r.data, c.name));
 }
 
-// ── Queue ─────────────────────────────────────────────────────────────
-
 export async function setQueuePaused(paused: boolean): Promise<void> {
   const r = await call(paused ? 'Pause' : 'Resume', () => window.krypt.library.setPaused(paused));
   if (!r.ok) {
@@ -280,7 +260,6 @@ export async function retryFailed(c?: Collection | null): Promise<void> {
   else toast.info('No failed tracks to retry');
 }
 
-/** Deep analysis on: needs a stem model, then a confirm with the time estimate. Off: straight away. */
 export async function setDeep(c: Collection, on: boolean, doc?: Document | null): Promise<void> {
   if (!on) {
     setBusy(c.id, 'Deep');
@@ -323,9 +302,6 @@ export async function setDeep(c: Collection, on: boolean, doc?: Document | null)
   });
 }
 
-// ── Focus ─────────────────────────────────────────────────────────────
-
-/** The focus dialog (brief text) for a collection. */
 export function chooseFocus(c: Collection, doc?: Document | null): void {
   const cur = getLibraryState()?.focus;
   openFocusDialog({
@@ -366,9 +342,6 @@ export async function clearFocus(): Promise<boolean> {
   return true;
 }
 
-// ── Tracks ────────────────────────────────────────────────────────────
-
-/** "Detect tempo & key" on a library file: the Wave 3A analysis dialog (cached per file hash). */
 export function analyseTrack(t: LibraryTrack, doc?: Document | null): void {
   if (t.status === 'missing') {
     toast.warn(`${t.name} is missing on disk, so it can't be analysed. Rescan the collection when it's back.`);
@@ -426,7 +399,6 @@ export async function copyTrackPath(t: Pick<LibraryTrack, 'path'>): Promise<void
   }
 }
 
-/** Remove track records (confirm; files stay). */
 export async function removeTracks(tracks: Array<Pick<LibraryTrack, 'id' | 'name'>>): Promise<boolean> {
   if (!tracks.length) return false;
   const one = tracks.length === 1;
@@ -449,7 +421,6 @@ export async function removeTracks(tracks: Array<Pick<LibraryTrack, 'id' | 'name
   return true;
 }
 
-/** Point the Library panel at one track (its collection, searched by name, selected). */
 export async function revealTrack(trackId: string, fallbackName?: string): Promise<void> {
   const r = await call('Show reference', () => window.krypt.library.track(trackId));
   if (!r.ok || !r.data) {
@@ -468,9 +439,6 @@ export async function revealTrack(trackId: string, fallbackName?: string): Promi
   wm.open('library');
 }
 
-// ── Profiles ──────────────────────────────────────────────────────────
-
-/** Fetch (or refetch) a collection's style profile into the cache. */
 export async function loadProfile(collectionId: string): Promise<StyleProfile | null> {
   const basis = profileBasis(collectionId);
   const prev = useLibrary.getState().profiles[collectionId];
@@ -484,7 +452,6 @@ export async function loadProfile(collectionId: string): Promise<StyleProfile | 
   return r.data;
 }
 
-/** Copy the profile as the compact text agents get (profileText). */
 export async function copyProfileText(p: StyleProfile): Promise<void> {
   const focus = getLibraryState()?.focus;
   let text: string;
@@ -511,9 +478,6 @@ export async function copyText(text: string, what: string): Promise<void> {
   }
 }
 
-// ── Originality ───────────────────────────────────────────────────────
-
-/** Compare the project's melodic lines (or one pattern's) with the deep-analysed references. */
 export function checkOriginality(opts: { patternId?: string; doc?: Document | null } = {}): void {
   if (!libraryAvailable()) {
     toast.error('This build has no reference library, so the originality check is unavailable. Update Krypt Studio.');
@@ -526,7 +490,6 @@ export function checkOriginality(opts: { patternId?: string; doc?: Document | nu
   openOriginalityDialog({ patternId: opts.patternId, doc: opts.doc });
 }
 
-/** "Open pattern" from a match: make it active and show its notes. */
 export async function openPatternFromMatch(patternId: string, channelId: string): Promise<void> {
   const p = getProject();
   if (!p.patterns[patternId]) {

@@ -1,6 +1,3 @@
-//! Minimal WAV writer (PCM 16/24-bit or float32), used by the factory kit
-//! and the render example. Writes atomically (tmp file + rename).
-
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
@@ -12,7 +9,6 @@ pub enum WavFormat {
     Float32,
 }
 
-/// Encode interleaved-by-channel planar data to WAV bytes.
 pub fn encode_wav(channels: &[&[f32]], sample_rate: u32, fmt: WavFormat) -> Vec<u8> {
     let nch = channels.len().max(1) as u16;
     let frames = channels.iter().map(|c| c.len()).min().unwrap_or(0);
@@ -57,7 +53,6 @@ pub fn encode_wav(channels: &[&[f32]], sample_rate: u32, fmt: WavFormat) -> Vec<
     v
 }
 
-/// Write a WAV file atomically.
 pub fn write_wav(path: &Path, channels: &[&[f32]], sample_rate: u32, fmt: WavFormat) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
@@ -72,7 +67,6 @@ pub fn write_wav(path: &Path, channels: &[&[f32]], sample_rate: u32, fmt: WavFor
     fs::rename(&tmp, path)
 }
 
-/// Read back a PCM16/24/float32 WAV written by `encode_wav` (tests, examples).
 pub fn decode_wav(bytes: &[u8]) -> Option<(u32, Vec<Vec<f32>>)> {
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return None;

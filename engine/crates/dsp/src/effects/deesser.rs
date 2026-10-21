@@ -1,18 +1,3 @@
-//! krypt.deesser — split-band de-esser (Auto Mix, research/20 §8).
-//!
-//! The input is split at `frequency` (4–10 kHz) by a Linkwitz–Riley 24 dB/oct
-//! crossover (blocks::crossover::Lr4). The high band is the sidechain: a
-//! stereo-linked peak envelope (0.2 ms attack, 30 ms decay) feeds a 6:1,
-//! 6 dB soft-knee gain computer (effects::comp::gain_computer) whose
-//! reduction is capped at `range` and smoothed (0.5 ms attack, 60 ms
-//! release). Only the HIGH band is turned down; the low band passes
-//! untouched, so a voice keeps its body while the "s" sounds shrink.
-//!
-//! Output = low + high · k with k = 1 − mix · (1 − g): the two LR4 bands sum
-//! to an allpass, so with no reduction (or mix 0) the magnitude response is
-//! exactly flat. `listen` solos the high band (what the detector hears).
-//! Zero latency, no allocation in `process`, denormal-safe.
-
 use super::comp::gain_computer;
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::crossover::Lr4;
@@ -54,7 +39,6 @@ pub fn descriptor() -> PluginDescriptor {
 
 pub struct DeEsser {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     freq: f32,
@@ -66,11 +50,9 @@ pub struct DeEsser {
     env_dec: f32,
     gr_att: f32,
     gr_rel: f32,
-    /// sidechain peak envelope (linear) and the applied reduction (dB, >= 0)
     env: f32,
     gr: f32,
     mix: Smooth,
-    /// high-band gain applied on the last sample (for the meter)
     k_last: f32,
 }
 
@@ -115,7 +97,6 @@ impl DeEsser {
         self.mix.set(p.get(P::Mix as usize));
     }
 
-    /// Current reduction of the high band in dB (>= 0) before the mix, for tests.
     pub fn gain_reduction_db(&self) -> f32 {
         self.gr
     }
@@ -150,7 +131,6 @@ impl Effect for DeEsser {
             let (ll, hl) = self.split[0].split(xl as f64);
             let (lr, hr) = self.split[1].split(xr as f64);
             let (ll, hl, lr, hr) = (ll as f32, hl as f32, lr as f32, hr as f32);
-            // sidechain: the high band's stereo-linked peak envelope
             let level = hl.abs().max(hr.abs());
             let c = if level > self.env { self.env_att } else { self.env_dec };
             self.env = flush(self.env + (level - self.env) * c);
@@ -184,7 +164,6 @@ impl Effect for DeEsser {
     }
 
     fn meter(&self) -> Option<f32> {
-        // how far the "s" band is turned down right now, after the mix
         let k = self.k_last;
         Some(if k > 1e-6 && k < 1.0 { -20.0 * k.log10() } else { 0.0 })
     }
@@ -205,7 +184,6 @@ mod tests {
         d
     }
 
-    /// Run a mono signal (both channels) through in 32-frame blocks; returns (left output, meter per block).
     fn run(d: &mut DeEsser, input: &[f32]) -> (Vec<f32>, Vec<f32>) {
         let mut out = Vec::with_capacity(input.len());
         let mut meters = Vec::new();
@@ -232,8 +210,6 @@ mod tests {
         (0..n).map(|i| amp * (std::f32::consts::TAU * hz * i as f32 / SR).sin()).collect()
     }
 
-    /// A synthetic "s": white noise high-passed at 5 kHz (two cascaded 2nd-order sections), 150 ms, after 100 ms of
-    /// a quiet 220 Hz "voice".
     fn s_burst() -> (Vec<f32>, std::ops::Range<usize>) {
         use crate::blocks::filters::{Svf, SvfMode};
         let mut seed = 0x1234_5678u32;
@@ -264,14 +240,11 @@ mod tests {
         assert!(drop > 4.0, "the burst should come down by several dB: {drop} dB");
         let peak_meter = meters.iter().cloned().fold(0.0f32, f32::max);
         assert!(peak_meter > 6.0 && peak_meter <= 10.0 + 1e-3, "meter shows the reduction, capped at the range: {peak_meter}");
-        // before the burst (the quiet low "voice") nothing is reduced
         assert!(meters[4800 / SUB - 2] < 0.05, "no reduction on the voice: {}", meters[4800 / SUB - 2]);
     }
 
     #[test]
     fn a_tone_well_inside_the_band_settles_at_the_range() {
-        // 20 dB over the threshold at 6:1 wants 16.7 dB; Range caps it at 8 dB (10 kHz sits 1.3 octaves above a
-        // 4 kHz split, so almost all of it is in the high band)
         let x = sine(10000.0, 0.316, 24000);
         let mut d = make(&[(P::Frequency, 4000.0), (P::Threshold, -30.0), (P::Range, 8.0)]);
         let (y, meters) = run(&mut d, &x);
@@ -299,7 +272,6 @@ mod tests {
         assert!(meters.iter().all(|m| *m == 0.0), "mix 0 reduces nothing");
         let diff = (rms_db(&x[4800..]) - rms_db(&y[4800..])).abs();
         assert!(diff < 0.02, "mix 0 keeps the dry level: {diff} dB");
-        // half mix is in between
         let mut h = make(&[(P::Threshold, -40.0), (P::Range, 20.0), (P::Mix, 0.5)]);
         let (yh, _) = run(&mut h, &x);
         let dh = rms_db(&x[12000..]) - rms_db(&yh[12000..]);
@@ -333,7 +305,6 @@ mod tests {
         let tail = &y[y.len() - 4800..];
         assert!(tail.iter().all(|v| *v == 0.0 || v.is_normal()), "no denormals after silence");
         assert!(d.env == 0.0 || d.env.is_normal());
-        // every parameter at both ends stays finite
         for (p, lo, hi) in [(P::Frequency, 4000.0, 10000.0), (P::Threshold, -60.0, 0.0), (P::Range, 0.0, 24.0), (P::Mix, 0.0, 1.0)] {
             for v in [lo, hi, f32::NAN] {
                 let mut e = make(&[(p, v)]);

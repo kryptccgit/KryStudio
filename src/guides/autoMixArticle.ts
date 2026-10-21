@@ -1,6 +1,3 @@
-// The Auto Mix & Master guide (research/20). Kept in its own file; articles.ts
-// lists it in the Mixing group. Pure data.
-
 import type { GuideArticle } from './articles';
 
 export const AUTOMIX_ARTICLE: GuideArticle = {

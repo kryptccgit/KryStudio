@@ -1,69 +1,21 @@
-//! MP3 export through Windows' own MP3 encoder (the Media Foundation MP3
-//! encoder MFT that ships with Windows 8 and later). Krypt ships no MP3
-//! encoder code: the OS codec is driven through a Sink Writer that writes
-//! the .mp3 file (see `decode::mf::encode_mp3`).
-//!
-//! Pipeline: planar f32 stereo → resampled to 32 / 44.1 / 48 kHz when the
-//! render rate is anything else ([`encode_rate`]) → TPDF-dithered 16-bit PCM
-//! → constant-bitrate MPEG-1 Layer III at [`BITRATES_KBPS`].
-//!
-//! Files: the Sink Writer writes `<name>.mp3.enc.part`; that is copied to
-//! `<name>.mp3.part` without its leading ID3v2 tag, which is then renamed
-//! over the target (atomic, like the WAV writer).
-//!
-//! What the result holds: only MPEG-1 Layer III frames at one bitrate (CBR),
-//! no ID3 tag (v1 or v2) and no Xing / Info / LAME frame. Windows' MP3 sink
-//! writes an ID3v2.3 tag first (a `TFLT` "MPG/3" frame and a `COMM` frame
-//! described `iTunSMPB` with the gapless numbers, then zero padding; 431
-//! bytes); it is removed here so callers can prepend their own tag.
-//! [`Mp3Info::itunsmpb`] carries the gapless numbers for the real audio for
-//! them to write back.
-//!
-//! Encoder delay: Windows' encoder primes 672 samples
-//! ([`Mp3Info::encoder_delay`], from the sink's `iTunSMPB`). Decoders that
-//! keep the standard 529-sample decoder delay (symphonia, ffmpeg without
-//! gapless info) start the audio 1201 samples late; Windows' own MP3 decoder
-//! removes 528 of those 529, so there it starts 673 samples late.
-//!
-//! End of stream: the encoder drops some frames of its last input when it
-//! is drained. How many depends on how the input reached it, so it varies
-//! with CPU load: usually up to ~3 frames, measured up to 4+ on a busy
-//! machine; inputs of ≤ 1152 samples produced no frames at all. So
-//! [`TAIL_PAD`] samples of silence follow the audio, and every file is
-//! checked afterwards: if the drain still ate into the audio, the encode is
-//! run again (up to [`ENCODE_ATTEMPTS`] times) and then fails with a
-//! sentence, never a silently truncated file. The file ends roughly
-//! 2-8 MPEG frames (≈ 50-190 ms) after the audio ([`Mp3Info::end_padding`]).
-
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 use crate::blocks::sinc::resample;
 
-/// Bitrates (kbit/s) offered for export.
 pub const BITRATES_KBPS: [u32; 4] = [128, 192, 256, 320];
-/// Bitrate when the request doesn't name one.
 pub const DEFAULT_KBPS: u32 = 320;
-/// Sample rates the MP3 encoder takes (MPEG-1 Layer III).
 pub const SAMPLE_RATES: [u32; 3] = [32_000, 44_100, 48_000];
 
-/// Silence (samples) fed after the audio so the encoder's drain loss only
-/// ever eats padding (see the module docs).
 pub const TAIL_PAD: usize = 6 * 1152;
 
-/// Encodes tried before a file whose end was cut off is reported as an error.
 pub const ENCODE_ATTEMPTS: usize = 3;
 
-/// The standard MP3 decoder delay: a decoder that keeps it needs this many
-/// samples after the audio's last one to output it.
 const DECODER_DELAY: u64 = 529;
 
-/// Media Foundation or its MP3 encoder isn't on this Windows.
 pub const ENCODER_MISSING: &str = "MP3 export needs Windows' MP3 encoder, which is missing on Windows N editions without the Media Feature Pack.";
 
-/// The bitrate a render job asks for: `None` → [`DEFAULT_KBPS`]; anything
-/// not in [`BITRATES_KBPS`] is an error sentence.
 pub fn parse_kbps(kbps: Option<f64>) -> Result<u32, String> {
     let Some(k) = kbps else { return Ok(DEFAULT_KBPS) };
     if let Some(&b) = BITRATES_KBPS.iter().find(|&&b| b as f64 == k) {
@@ -77,8 +29,6 @@ fn unsupported_kbps(shown: &str) -> String {
     format!("MP3 bitrate {shown} kbps is not supported: use 128, 192, 256 or 320")
 }
 
-/// Fails with [`ENCODER_MISSING`] when Windows' MP3 encoder isn't installed
-/// (a quick check, answered before a render starts).
 pub fn check_encoder() -> Result<(), String> {
     #[cfg(all(windows, feature = "mediafoundation"))]
     {
@@ -94,9 +44,6 @@ pub fn check_encoder() -> Result<(), String> {
     }
 }
 
-/// The rate the MP3 is written at: the render rate when the encoder takes it,
-/// otherwise 44.1 kHz for the 44.1 kHz family (22.05, 88.2, 176.4 kHz ...)
-/// and 48 kHz for everything else.
 pub fn encode_rate(sample_rate: u32) -> u32 {
     if SAMPLE_RATES.contains(&sample_rate) {
         sample_rate
@@ -107,38 +54,20 @@ pub fn encode_rate(sample_rate: u32) -> u32 {
     }
 }
 
-/// What [`write_mp3`] wrote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mp3Info {
-    /// Sample rate of the MP3 (see [`encode_rate`]).
     pub sample_rate: u32,
     pub kbps: u32,
-    /// Audio samples per channel encoded (at `sample_rate`, after
-    /// resampling; the silent [`TAIL_PAD`] not included).
     pub frames: usize,
-    /// File size in bytes.
     pub bytes: u64,
-    /// MPEG frames in the file (1152 samples each).
     pub mpeg_frames: usize,
-    /// Encoder priming samples at the start, from the sink's `iTunSMPB`.
     pub encoder_delay: Option<u32>,
-    /// Samples after the audio up to the end of the last MPEG frame
-    /// (`mpeg_frames × 1152 − encoder_delay − frames`).
     pub end_padding: Option<u32>,
-    /// iTunes-style gapless info for the audio: the sink's `iTunSMPB` text
-    /// with its padding and sample-count fields set for `frames` (the sink
-    /// counted [`TAIL_PAD`] as audio), e.g.
-    /// `" 00000000 000002a0 00001260 0000000000017700 00000000 ..."`.
     pub itunsmpb: Option<String>,
-    /// The sink's own `iTunSMPB` text, verbatim.
     pub sink_itunsmpb: Option<String>,
-    /// Bytes of the sink's ID3v2 tag that were removed (0 if none).
     pub stripped_tag_bytes: u64,
 }
 
-/// Triangular-PDF dither for float → 16-bit: the sum of two independent
-/// uniform values in ±0.5 LSB (xorshift32, fixed seed: renders are
-/// reproducible).
 pub struct Tpdf(u32);
 
 impl Default for Tpdf {
@@ -158,7 +87,6 @@ impl Tpdf {
         (x >> 8) as f32 * (1.0 / 16_777_216.0) - 0.5
     }
 
-    /// One float sample (full scale ±1) → dithered 16-bit. Non-finite → 0.
     #[inline]
     pub fn quantize(&mut self, x: f32) -> i16 {
         let d = self.uniform() + self.uniform();
@@ -169,10 +97,6 @@ impl Tpdf {
     }
 }
 
-/// Encode stereo f32 audio at `sample_rate` to a constant-bitrate MP3 at
-/// `path`, atomically (a `.mp3.part` file renamed over `path`). Setting
-/// `cancel` stops the encode (the partial file is removed). Errors are
-/// sentences.
 pub fn write_mp3(path: &Path, left: &[f32], right: &[f32], sample_rate: u32, kbps: u32, cancel: Option<&AtomicBool>) -> Result<Mp3Info, String> {
     if !BITRATES_KBPS.contains(&kbps) {
         return Err(unsupported_kbps(&kbps.to_string()));
@@ -213,8 +137,6 @@ pub fn write_mp3(path: &Path, left: &[f32], right: &[f32], sample_rate: u32, kbp
                 return Err(e);
             }
         };
-        // The encoder's drain loss must only have eaten padding (see the
-        // module docs). Without the sink's delay, assume a whole frame.
         let delay = staged.1.as_deref().and_then(sink_delay).unwrap_or(1152) as u64;
         if staged.2 as u64 * 1152 >= delay + frames as u64 + DECODER_DELAY {
             break staged;
@@ -241,8 +163,6 @@ pub fn write_mp3(path: &Path, left: &[f32], right: &[f32], sample_rate: u32, kbp
     Ok(Mp3Info { sample_rate: rate, kbps, frames, bytes, mpeg_frames, encoder_delay, end_padding, itunsmpb, sink_itunsmpb, stripped_tag_bytes: tag_len })
 }
 
-/// `iTunSMPB` text `t` with its padding (field 3) and sample count (field 4)
-/// replaced; the other fields and the sink's spacing / hex case are kept.
 fn gapless_text(t: &str, padding: u32, samples: u64) -> Option<String> {
     let mut f: Vec<String> = t.split_whitespace().map(str::to_string).collect();
     if f.len() < 4 {
@@ -253,8 +173,6 @@ fn gapless_text(t: &str, padding: u32, samples: u64) -> Option<String> {
     Some(format!(" {}", f.join(" ")))
 }
 
-/// Byte length of the MPEG audio frame (MPEG-1/2/2.5 Layer III) whose
-/// header is `h`, or None when `h` isn't one.
 pub fn mpeg_frame_len(h: u32) -> Option<usize> {
     let (ver, layer, bi, si) = ((h >> 19) & 3, (h >> 17) & 3, ((h >> 12) & 0xF) as usize, ((h >> 10) & 3) as usize);
     if h >> 21 != 0x7FF || ver == 1 || layer != 1 || bi == 0 || bi == 15 || si == 3 {
@@ -272,8 +190,6 @@ pub fn mpeg_frame_len(h: u32) -> Option<usize> {
     Some((coef * kbps * 1000 / rate + ((h >> 9) & 1)) as usize)
 }
 
-/// MPEG audio frames from the start of the file at `path` up to the first
-/// bytes that aren't a frame header (reads only the 4-byte headers).
 fn count_mpeg_frames(path: &Path) -> std::io::Result<usize> {
     let mut f = std::io::BufReader::with_capacity(1 << 16, std::fs::File::open(path)?);
     let (mut n, mut h) = (0usize, [0u8; 4]);
@@ -285,13 +201,10 @@ fn count_mpeg_frames(path: &Path) -> std::io::Result<usize> {
     Ok(n)
 }
 
-/// `song.mp3` → `song.mp3.part` (next to the target, so the rename is atomic).
 fn part_path(path: &Path) -> PathBuf {
     path.with_extension("mp3.part")
 }
 
-/// Total length of an ID3v2 tag that starts `head` (header, body and
-/// footer), or None when `head` doesn't start with one.
 pub fn id3v2_len(head: &[u8]) -> Option<u64> {
     if head.len() < 10 || &head[0..3] != b"ID3" || head[3] == 0xFF || head[4] == 0xFF || head[6..10].iter().any(|b| b & 0x80 != 0) {
         return None;
@@ -304,22 +217,19 @@ fn syncsafe(b: &[u8]) -> u32 {
     b.iter().fold(0u32, |a, &x| (a << 7) | (x & 0x7F) as u32)
 }
 
-/// The text of the `COMM` frame described `iTunSMPB` in an ID3v2.3 / 2.4
-/// tag (the whole tag, header included), trailing NULs removed.
 pub fn itunsmpb(tag: &[u8]) -> Option<String> {
     let total = id3v2_len(tag)? as usize;
     let (ver, flags) = (tag[3], tag[5]);
     let end = total.min(tag.len()).saturating_sub(if flags & 0x10 != 0 { 10 } else { 0 });
     let mut pos = 10;
     if flags & 0x40 != 0 {
-        // Extended header: the v2.3 size excludes its own 4 bytes, the v2.4 (syncsafe) one includes them.
         let b = tag.get(10..14)?;
         pos += if ver >= 4 { syncsafe(b) as usize } else { 4 + u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize };
     }
     while pos + 10 <= end {
         let id = &tag[pos..pos + 4];
         if id[0] == 0 {
-            break; // padding
+            break;
         }
         let sb = &tag[pos + 4..pos + 8];
         let size = if ver >= 4 { syncsafe(sb) } else { u32::from_be_bytes([sb[0], sb[1], sb[2], sb[3]]) } as usize;
@@ -335,7 +245,6 @@ pub fn itunsmpb(tag: &[u8]) -> Option<String> {
     None
 }
 
-/// An ID3v2 "description NUL text" pair in text encoding `enc`.
 fn split_text(enc: u8, b: &[u8]) -> (String, String) {
     let wide = enc == 1 || enc == 2;
     let cut = if wide { (0..b.len().saturating_sub(1)).step_by(2).find(|&i| b[i] == 0 && b[i + 1] == 0) } else { b.iter().position(|&x| x == 0) };
@@ -361,19 +270,15 @@ fn decode_text(enc: u8, b: &[u8]) -> String {
     }
 }
 
-/// [`strip_id3v2`] the sink's file into `tmp` and count its MPEG frames.
 fn stage(enc: &Path, tmp: &Path) -> std::io::Result<(u64, Option<String>, usize)> {
     let (tag_len, info) = strip_id3v2(enc, tmp)?;
     Ok((tag_len, info, count_mpeg_frames(tmp)?))
 }
 
-/// The encoder delay (priming samples) in an `iTunSMPB` text.
 fn sink_delay(itunsmpb: &str) -> Option<u32> {
     itunsmpb.split_whitespace().nth(1).and_then(|h| u32::from_str_radix(h, 16).ok())
 }
 
-/// Copy `src` to `dst` without a leading ID3v2 tag (and flush it to disk).
-/// Returns the tag's length (0 if none) and its `iTunSMPB` text.
 fn strip_id3v2(src: &Path, dst: &Path) -> std::io::Result<(u64, Option<String>)> {
     let mut f = std::fs::File::open(src)?;
     let mut head = [0u8; 10];
@@ -452,7 +357,7 @@ mod tests {
     #[test]
     fn tpdf_dither_is_unbiased_and_bounded() {
         let mut d = Tpdf::default();
-        let x = 0.3 / 32_767.0; // 0.3 LSB
+        let x = 0.3 / 32_767.0;
         let n = 200_000;
         let qs: Vec<i16> = (0..n).map(|_| d.quantize(x)).collect();
         let mean = qs.iter().map(|&q| q as f64).sum::<f64>() / n as f64;
@@ -473,7 +378,6 @@ mod tests {
         assert!(!p.exists() && !part_path(&p).exists() && !dir.exists());
     }
 
-    /// An ID3v2.3 tag like the one Windows' MP3 sink writes.
     fn sink_like_tag() -> Vec<u8> {
         let mut body = Vec::new();
         let tflt: &[u8] = &[1, 0xFF, 0xFE, b'M', 0, b'P', 0, b'G', 0, b'/', 0, b'3', 0, 0, 0];
@@ -500,7 +404,6 @@ mod tests {
         let tag = sink_like_tag();
         assert_eq!(id3v2_len(&tag), Some(tag.len() as u64));
         assert_eq!(itunsmpb(&tag).as_deref(), Some(" 00000000 000002a0 00000780 0000000000017700"));
-        // v2.4: syncsafe frame sizes, UTF-16 text with a BOM.
         let mut comm = vec![1u8];
         comm.extend_from_slice(b"eng");
         for part in ["iTunSMPB", " 00000000 00000210"] {
@@ -515,7 +418,6 @@ mod tests {
         let size = (v4.len() - 10) as u32;
         v4[6..10].copy_from_slice(&[(size >> 21) as u8 & 0x7F, (size >> 14) as u8 & 0x7F, (size >> 7) as u8 & 0x7F, size as u8 & 0x7F]);
         assert_eq!(itunsmpb(&v4).as_deref(), Some(" 00000000 00000210"));
-        // Not a tag / truncated / no iTunSMPB.
         assert_eq!(id3v2_len(&[0xFF, 0xFB, 0xE4, 0x40, 0, 0, 0, 0, 0, 0]), None);
         assert_eq!(id3v2_len(b"ID3"), None);
         assert_eq!(itunsmpb(&tag[..20]), None);
@@ -547,8 +449,6 @@ mod tests {
         use crate::decode::{decode_file, decode_mf};
         use crate::SampleData;
 
-        /// Windows' MP3 encoder is here, or the test is skipped with a note
-        /// (and the error is the sentence users see).
         fn encoder() -> bool {
             match check_encoder() {
                 Ok(()) => true,
@@ -570,7 +470,6 @@ mod tests {
             (0..n).map(|i| (amp * (2.0 * std::f64::consts::PI * hz * i as f64 / sr as f64).sin()) as f32).collect()
         }
 
-        /// Middle half of the first `len` samples (away from priming and padding).
         fn mid(x: &[f32], len: usize) -> &[f32] {
             &x[len / 4..len * 3 / 4]
         }
@@ -583,8 +482,6 @@ mod tests {
             10.0 * (x.iter().map(|&v| v as f64 * v as f64).sum::<f64>() / x.len() as f64).log10()
         }
 
-        /// Walk the MPEG audio frames of a file that must hold nothing else:
-        /// (frame count, every frame's bitrate kbps, every frame's rate).
         fn frames(bytes: &[u8]) -> (usize, Vec<u32>, Vec<u32>) {
             let (mut pos, mut n, mut kb, mut sr) = (0usize, 0usize, Vec::new(), Vec::new());
             while pos < bytes.len() {
@@ -609,7 +506,6 @@ mod tests {
             (n, kb, sr)
         }
 
-        /// ffprobe from $FFPROBE, else on PATH; None (the check is skipped) when it isn't installed.
         fn ffprobe() -> Option<PathBuf> {
             if let Some(p) = std::env::var_os("FFPROBE").map(PathBuf::from).filter(|p| p.is_file()) {
                 return Some(p);
@@ -618,7 +514,6 @@ mod tests {
             on_path.status.success().then(|| PathBuf::from("ffprobe"))
         }
 
-        /// ffprobe's view (codec, rate, channels, bitrate, duration), when ffprobe is installed.
         fn probe(path: &Path) -> Option<serde_json::Value> {
             let exe = ffprobe()?;
             let out = std::process::Command::new(exe)
@@ -630,7 +525,6 @@ mod tests {
             v["streams"][0].as_object().map(|o| serde_json::Value::Object(o.clone()))
         }
 
-        /// Encode a 1 kHz / 1.5 kHz stereo tone and check the file and its decodes.
         fn check_roundtrip(dir: &Path, sr: u32, kbps: u32, secs: f64) -> Mp3Info {
             let n = (secs * sr as f64) as usize;
             let (l, r) = (tone(1000.0, sr, n, 0.5), tone(1500.0, sr, n, 0.5));
@@ -644,7 +538,6 @@ mod tests {
             let delay = info.encoder_delay.expect("the sink reports its encoder delay") as usize;
             assert!(delay < 2304, "{what}: delay {delay}");
             assert!(info.stripped_tag_bytes > 0, "{what}: the sink's ID3 tag was removed");
-            // File: nothing but CBR MPEG-1 Layer III frames at the asked rate.
             let bytes = std::fs::read(&p).unwrap();
             assert_eq!(bytes.len() as u64, info.bytes);
             let (count, kb, rates) = frames(&bytes);
@@ -652,7 +545,6 @@ mod tests {
             assert_eq!(count, info.mpeg_frames, "{what}");
             let pcm_frames = count * 1152;
             assert!(pcm_frames >= n_out + delay + 529 && pcm_frames <= n_out + delay + TAIL_PAD + 2 * 1152, "{what}: {count} frames for {n_out} samples");
-            // Gapless info: the sink's delay, the real sample count, padding to the end.
             let g: Vec<u64> = info.itunsmpb.as_deref().unwrap().split_whitespace().map(|h| u64::from_str_radix(h, 16).unwrap()).collect();
             assert_eq!((g[1], g[3], g[1] + g[2] + g[3]), (delay as u64, n_out as u64, pcm_frames as u64), "{what}: {:?}", info.itunsmpb);
             for (dec, d, extra) in [("Media Foundation", decode_mf(&p).unwrap(), delay), ("symphonia", decode_file(&p).unwrap(), delay + 529)] {
@@ -671,7 +563,6 @@ mod tests {
             info
         }
 
-        /// Duration (written + delay + padding), level and frequency of a decode.
         fn check_decoded(d: &SampleData, rate: u32, n: usize, delay: usize, what: &str) {
             assert_eq!((d.sample_rate, d.channels.len()), (rate as f32, 2), "{what}");
             let len = d.frames();
@@ -717,9 +608,6 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
         }
 
-        /// Where an onset written at 0.25 s lands after decoding: the encoder
-        /// delay the sink reports plus the 529-sample decoder delay
-        /// (symphonia), or plus 1 (Windows' decoder removes 528 of the 529).
         #[test]
         fn encoder_delay_matches_itunsmpb() {
             if !encoder() {
@@ -737,7 +625,6 @@ mod tests {
                 for (dec, d, extra) in [("Media Foundation", decode_mf(&p).unwrap(), 1i64), ("symphonia", decode_file(&p).unwrap(), 529)] {
                     let onset = d.channels[0].iter().position(|v| v.abs() > 0.05).unwrap() as i64;
                     eprintln!("{sr} Hz, {dec}: onset at {onset} (written at {at}): +{} samples ({:.1} ms); iTunSMPB delay {delay}", onset - at as i64, (onset - at as i64) as f64 * 1000.0 / sr as f64);
-                    // +1: the first sample of the 0-phase sine above the threshold.
                     assert!((onset - at as i64 - delay - extra - 1).abs() <= 1, "{sr} Hz {dec}: onset {onset}");
                 }
             }
@@ -761,7 +648,6 @@ mod tests {
             let dir = temp_dir("atomic");
             let sr = 48_000;
             let x = tone(440.0, sr, sr as usize, 0.25);
-            // A new nested folder is created; an existing file is replaced.
             let p = dir.join("a").join("b").join("song.mp3");
             write_mp3(&p, &x, &x, sr, 128, None).unwrap();
             let first = std::fs::metadata(&p).unwrap().len();
@@ -769,25 +655,20 @@ mod tests {
             assert!(std::fs::metadata(&p).unwrap().len() < first, "replaced");
             let leftovers = |d: &Path| std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".part")).collect::<Vec<_>>();
             assert!(leftovers(p.parent().unwrap()).is_empty());
-            // Cancel: an error, the old file stays, no temp files.
             let cancel = AtomicBool::new(true);
             let e = write_mp3(&p, &x, &x, sr, 128, Some(&cancel)).unwrap_err();
             assert_eq!(e, "Render cancelled");
             assert!(p.is_file() && leftovers(p.parent().unwrap()).is_empty());
-            // A folder that can't exist (a file is in the way): a sentence naming it.
             let blocked = dir.join("song.mp3").join("x.mp3");
             std::fs::write(dir.join("song.mp3"), b"x").unwrap();
             let e = write_mp3(&blocked, &x, &x, sr, 128, None).unwrap_err();
             assert!(e.starts_with("Cannot create folder") && e.contains("song.mp3"), "{e}");
-            // Silence and a single sample encode too.
             write_mp3(&dir.join("silence.mp3"), &[0.0; 4800], &[0.0; 4800], sr, 320, None).unwrap();
             let one = write_mp3(&dir.join("one.mp3"), &[0.5], &[0.5], sr, 320, None).unwrap();
             assert!(one.bytes > 0);
             let _ = std::fs::remove_dir_all(&dir);
         }
 
-        /// The end of the audio survives whatever the length (the encoder's
-        /// drain loss lands in the silent pad), and very short inputs encode.
         #[test]
         fn the_last_samples_survive_any_length() {
             if !encoder() {
@@ -798,7 +679,6 @@ mod tests {
             let mut lens = vec![1usize, 100, 1152, 1500, 2304, 16_384, 16_384 + 614, 49_152 + 614, 66_150, 66_151];
             lens.extend((0..12).map(|k| 20_000 + k * 2_977));
             for n in lens {
-                // Silence, then a 1 kHz burst in the last 20 ms (or all of a short input).
                 let burst = n.min(960);
                 let mut x = vec![0f32; n];
                 x[n - burst..].copy_from_slice(&tone(1000.0, sr, burst, 0.5));
@@ -808,7 +688,6 @@ mod tests {
                 assert!(info.mpeg_frames * 1152 >= n + delay + 529, "n={n}: {} frames", info.mpeg_frames);
                 assert_eq!(info.mpeg_frames * 1152, delay + n + info.end_padding.unwrap() as usize);
                 let d = decode_mf(&p).unwrap();
-                // Windows' decoder: the burst sits at [n - burst, n) + delay.
                 let (a, b) = (n - burst + delay, (n + delay).min(d.frames()));
                 assert!(d.frames() >= n + delay, "n={n}: decoded {} frames", d.frames());
                 if burst >= 100 {
@@ -819,7 +698,6 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
         }
 
-        /// Encode time of 3 minutes of stereo audio (`--ignored`).
         #[test]
         #[ignore]
         fn perf_three_minutes() {
@@ -829,7 +707,6 @@ mod tests {
             let dir = temp_dir("perf");
             for (sr, kbps) in [(48_000u32, 320u32), (44_100, 320), (44_100, 128), (96_000, 320)] {
                 let n = sr as usize * 180;
-                // A chord with a slow tremolo (not trivially compressible).
                 let l: Vec<f32> = (0..n)
                     .map(|i| {
                         let t = i as f64 / sr as f64;

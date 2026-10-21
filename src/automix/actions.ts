@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Auto Mix / Auto Master (research/20) through window.krypt.automix
-// (electron/automix). Entry points: the Mixer's Auto Mix button, the
-// Auto Master button on the master strip, Tools ▸ Auto Mix…, Home ▸ Audio
-// Tools ▸ Master a song, and the playlist audio-clip menu ▸ Auto-mix this
-// vocal. The prompt is read live (debounced automix.understand). The
-// result is ONE history entry: A/B = doc.toggleEntry(entryId), Undo =
-// toggle it off. Every outcome ends in visible feedback.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { ActionResult } from '@shared/types';
 import type { AutoMixIntent, AutoMixMode, AutoMixOutcome } from '@shared/automix/types';
 import type { SampleInfo } from '@shared/engine/protocol';
@@ -48,17 +38,13 @@ import { referencePath } from './logic';
 
 const UNDERSTAND_DEBOUNCE_MS = 550;
 
-// ── Opening ───────────────────────────────────────────────────────────
-
 export interface OpenAutoMix {
   mode?: AutoMixMode;
   target?: AutoMixTarget;
-  /** Treat these inserts / channels as the vocals (playlist clip menu). */
   vocal?: { inserts: string[]; label: string };
   doc?: Document | null;
 }
 
-/** Open the Auto Mix dialog: the form (set up for the entry point), the running job, or a result still waiting for Keep / Undo. */
 export function openAutoMix(opts: OpenAutoMix = {}): void {
   const s = getAutoMix();
   const asks = !!(opts.mode || opts.target || opts.vocal);
@@ -77,22 +63,18 @@ export function openAutoMix(opts: OpenAutoMix = {}): void {
     } else if (opts.mode) updateForm({ type: 'setMode', mode: opts.mode });
   }
   void loadPresets();
-  // Already open on the same target: it's on screen. A new target (Master a song ↔ the project) re-opens it with its title.
   if (getAutoMix().visible && getAutoMix().target === s.target) return;
   openAutoMixDialog(opts.doc, getAutoMix().target);
 }
 
-/** Mixer ▸ master strip ▸ Auto Master. */
 export function openAutoMaster(doc?: Document | null): void {
   openAutoMix({ mode: 'master', doc });
 }
 
-/** Home ▸ Audio Tools ▸ Master a song: master an audio file in a new project tab. */
 export function openMasterSong(doc?: Document | null): void {
   openAutoMix({ target: 'file', doc });
 }
 
-/** The vocal an audio clip plays: its channel's insert (or the channel itself when it plays straight into the Master). */
 export function vocalForClip(clipId: string): { inserts: string[]; label: string } | null {
   let p;
   try {
@@ -109,7 +91,6 @@ export function vocalForClip(clipId: string): { inserts: string[]; label: string
   return { inserts: [ch.id], label: ch.name };
 }
 
-/** Playlist audio-clip menu ▸ Auto-mix this vocal: Vocals mode, that clip's insert as the vocal. */
 export function autoMixVocalClip(clipId: string, doc?: Document | null): void {
   const v = vocalForClip(clipId);
   if (!v) {
@@ -120,9 +101,6 @@ export function autoMixVocalClip(clipId: string, doc?: Document | null): void {
   openAutoMix({ mode: 'vocals', vocal: v, doc });
 }
 
-// ── The reference song ────────────────────────────────────────────────
-
-/** The form's reference row (pick / drop / clear); locked while a job runs. Master a song: never the song itself. */
 export const autoMixReference = referenceController({
   get: () => getAutoMix().reference,
   set: (reference) => useAutoMix.setState({ reference }),
@@ -130,11 +108,8 @@ export const autoMixReference = referenceController({
   guard: (p) => (getAutoMix().target === 'file' ? referenceClash(p, [getAutoMix().song.path]) : null),
 });
 
-// ── Master a song, step ①: your song (picking never runs anything) ────
-
 let songSeq = 0;
 
-/** Use this file as the song to master: read its length and format (engine.sampleInfo, no analysis). */
 export async function chooseSongFile(path: string): Promise<void> {
   if (isRunning()) {
     toast.warn('Mastering is running: change the song after it finishes, or cancel it');
@@ -152,7 +127,7 @@ export async function chooseSongFile(path: string): Promise<void> {
   } catch (err) {
     r = { ok: false, message: failureMessage(err, "Couldn't read the song") };
   }
-  if (mine !== songSeq) return; // a newer pick won
+  if (mine !== songSeq) return;
   if (!r.ok || !r.data) {
     const error = failureMessage(r.message ?? '', "Couldn't read the song");
     useAutoMix.setState({ song: { status: 'failed', path, summary: null, error } });
@@ -165,7 +140,6 @@ export async function chooseSongFile(path: string): Promise<void> {
   else toast.info(`Your song: "${songNameFromPath(path)}". Next, pick a style, then click Master my song.`);
 }
 
-/** "Choose your song…" / "Change…": a file dialog. Closing it leaves step ① as it was (visible). */
 export async function pickSong(): Promise<void> {
   if (isRunning()) {
     toast.warn('Mastering is running: change the song after it finishes, or cancel it');
@@ -182,7 +156,6 @@ export async function pickSong(): Promise<void> {
   await chooseSongFile(paths[0]);
 }
 
-/** A file dropped on step ①. */
 export function dropSong(dt: DataTransfer): void {
   const paths = droppedPaths(dt);
   if (!paths.length) return;
@@ -195,12 +168,10 @@ export function dropSong(dt: DataTransfer): void {
   void chooseSongFile(audio[0]);
 }
 
-/** Unfold step ③ (the reference) or "More options" in Master a song (a guide's Show me). */
 export function unfoldMasterPart(part: 'reference' | 'more'): void {
   useAutoMix.setState(part === 'reference' ? { showReference: true } : { showMore: true });
 }
 
-/** A/B ▸ Reference: play the reference loudness-matched to the result (the song stops). */
 export async function playMatchedReference(): Promise<void> {
   const o = getAutoMix().outcome;
   if (!o?.reference) {
@@ -216,8 +187,6 @@ export async function stopMatchedReference(): Promise<void> {
   await stopReference();
 }
 
-// ── Presets ───────────────────────────────────────────────────────────
-
 export async function loadPresets(force = false): Promise<void> {
   const cur = getAutoMix().presets;
   if (cur.status === 'loading' || (cur.status === 'ready' && !force)) return;
@@ -232,8 +201,6 @@ export async function loadPresets(force = false): Promise<void> {
   }
 }
 
-// ── The form ──────────────────────────────────────────────────────────
-
 export function editForm(act: FormAction): void {
   if (isRunning()) {
     toast.warn('Auto Mix is running: change the options after it finishes, or cancel it');
@@ -244,23 +211,19 @@ export function editForm(act: FormAction): void {
   if (form.prompt !== before) scheduleUnderstand();
 }
 
-/** Forget the vocal pick (Auto Mix finds the vocals itself). */
 export function clearVocals(): void {
   editForm({ type: 'setVocals', inserts: null, label: null });
 }
 
-// ── Understanding the prompt (live) ───────────────────────────────────
-
 let uTimer: ReturnType<typeof setTimeout> | null = null;
 let uSeq = 0;
 
-/** Read the prompt once the user stops typing ("Understood as: …"). Nothing in the project changes. */
 export function scheduleUnderstand(now = false): void {
   const text = getAutoMix().form.prompt.trim();
   if (uTimer) clearTimeout(uTimer);
   uTimer = null;
   if (!promptWorthUnderstanding(text)) {
-    uSeq++; // drop an answer still on its way
+    uSeq++;
     useAutoMix.setState({ understand: { ...IDLE_UNDERSTAND } });
     return;
   }
@@ -279,16 +242,13 @@ async function runUnderstand(text: string): Promise<void> {
   } catch (err) {
     r = { ok: false, message: failureMessage(err, "Couldn't read the prompt") };
   }
-  if (mine !== uSeq || getAutoMix().form.prompt.trim() !== text) return; // the prompt changed meanwhile: a newer read is on its way
+  if (mine !== uSeq || getAutoMix().form.prompt.trim() !== text) return;
   if (!r.ok || !r.data) {
-    // Shown under the prompt (visible); the run still reads the prompt itself.
     useAutoMix.setState({ understand: { status: 'failed', text, intent: null, error: failureMessage(r.message ?? '', "Couldn't read the prompt") } });
     return;
   }
   useAutoMix.setState({ understand: { status: 'ready', text, intent: r.data, error: null } });
 }
-
-// ── Run ───────────────────────────────────────────────────────────────
 
 export async function startRun(): Promise<void> {
   if (isRunning()) {
@@ -317,7 +277,6 @@ export async function startRun(): Promise<void> {
       if (isRunning()) useAutoMix.setState({ progress: p });
     });
   } catch {
-    /* no progress feed: the bar stays indeterminate */
   }
   let r: ActionResult<AutoMixOutcome>;
   try {
@@ -360,7 +319,7 @@ function finish(r: ActionResult<AutoMixOutcome>): void {
   }
   useAutoMix.setState({ phase: 'done', outcome: o, progress: null, ab: 'after', verdict: 'open' });
   void refreshProjectStatus();
-  if (s.target === 'file') onProjectPicked(); // Home steps aside: the mastered song is in a new tab behind the result
+  if (s.target === 'file') onProjectPicked();
   const notes = o.notes.length ? ` Good to know: ${o.notes[0]}` : '';
   const what = s.target === 'file' ? `"${s.runSong ?? 'Your song'}" is mastered: ${fmtLufs(o.before.lufs)} → ${fmtLufs(o.after.lufs)}. Next: play it and switch Before / After` : doneToast(o);
   toast.success(`${what}.${notes}`, { ...(show ?? {}), durationMs: 10000 });
@@ -381,9 +340,6 @@ export async function cancelRun(): Promise<void> {
   }
 }
 
-// ── The result: A/B, Keep, Undo, Export ───────────────────────────────
-
-/** Put the project on Before (the Auto Mix step off) or After (on). Checks the real history first, so it never inverts. */
 export async function setAB(want: 'after' | 'before'): Promise<boolean> {
   await stopMatchedReference();
   const s = getAutoMix();
@@ -444,7 +400,6 @@ export async function undoResult(): Promise<void> {
   toast.info('Undone: your mix is back as it was. Edit ▸ History can bring the Auto Mix back.');
 }
 
-/** Export… after a run: After is applied, the dialog's song scope without stems or normalize (that would undo the ceiling). */
 export async function exportResult(close: () => void): Promise<void> {
   await stopMatchedReference();
   const s = getAutoMix();
@@ -460,22 +415,19 @@ export async function exportResult(close: () => void): Promise<void> {
   openExport();
 }
 
-// ── The dialog's life ─────────────────────────────────────────────────
-
 export function onDialogOpened(): void {
   useAutoMix.setState({ visible: true });
   void loadPresets();
   if (!isRunning() && getAutoMix().phase === 'idle') scheduleUnderstand(true);
 }
 
-/** Closed: a running job carries on (and says so); an undecided result counts as kept (and says so). */
 export function onDialogClosed(): void {
   const s = getAutoMix();
   useAutoMix.setState({ visible: false });
   void stopMatchedReference();
   if (uTimer) clearTimeout(uTimer);
   uTimer = null;
-  if (s.understand.status === 'busy') useAutoMix.setState({ understand: { ...s.understand, status: 'idle', text: '' } }); // read again on open
+  if (s.understand.status === 'busy') useAutoMix.setState({ understand: { ...s.understand, status: 'idle', text: '' } });
   if (isRunning(s)) {
     toast.info('Auto Mix keeps going in the background', { action: { label: 'Show', run: () => openAutoMix() } });
     return;

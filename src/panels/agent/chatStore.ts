@@ -1,6 +1,3 @@
-// Built-in agent chat state (survives closing the panel). Streams events
-// from window.krypt.agent.onEvent into a message list.
-
 import { create } from 'zustand';
 import { toast } from '../../app/notify';
 
@@ -105,7 +102,6 @@ export async function resetChat(): Promise<void> {
   try {
     await window.krypt.agent.reset();
   } catch {
-    /* ignore */
   }
   useChat.setState({ items: [], streaming: false });
 }

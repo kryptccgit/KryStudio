@@ -1,5 +1,3 @@
-// Factory STRINGS, BRASS and VOX presets (synth approximations: no samples).
-
 import type { InstrumentPreset } from '../../types';
 import {
   ALG, DIV, FM, HALL, LFO, PLATE, POS, ROOM, SH, T, TAPE, TRI, WAVE,

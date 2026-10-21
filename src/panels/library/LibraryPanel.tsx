@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Library panel (Wave 3B "reference memory"): the user's own songs in
-// collections, analysed on this PC into a local database. Collections
-// sidebar (narrow widths: a picker in the header), the analysis queue,
-// a windowed track table and each collection's style profile, which can
-// be made the AI focus. Records only: Krypt never moves or deletes files.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react';
 import { Crosshair, FolderPlus, Layers, LibraryBig, Loader2, ShieldCheck, Sparkles } from 'lucide-react';
 import { hasFiles } from '../../app/fileDrop';
@@ -92,7 +84,7 @@ export function LibraryPanel() {
 
   useEffect(() => {
     void refreshLibrary();
-    void refreshAnalyzer(); // stem models (deep analysis), analyzer availability
+    void refreshAnalyzer();
   }, []);
 
   useLayoutEffect(() => {

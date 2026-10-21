@@ -1,4 +1,3 @@
-// Song transcription (research/15 §3.3): analysis + stems → SongTranscription on the project grid. Pure.
 export * from './types';
 export { transcribeSong, sectionPatterns, referenceMelodyShape, songGrid, DRUM_GRID, PITCHED_GRID, DRUM_FEEL, PITCHED_FEEL, type TranscriptionInput, type SectionPattern, type SectionPart } from './transcribe';
 export { transcriptionGrid, quantize, FALLBACK_BPM, type TranscriptionGrid, type TempoFactor } from './grid';

@@ -1,8 +1,3 @@
-// Demos ship inside the app (resources/demos). Opening one used to set the
-// project path to the shipped file: Ctrl+S overwrote the demo, Save As and
-// exports defaulted into the app's folder (a user's song + a 40 MB export
-// ended up in resources/demos and would have shipped in the installer).
-// A project opened from a template dir now opens as a template.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';

@@ -1,23 +1,3 @@
-// Generate resources/factory/fingerprints.json (FingerprintIndex, shared/sound-match/types.ts): the timbre
-// fingerprint of every factory instrument preset and every factory sample, so match_sounds can pick the sounds
-// closest to a reference song (research/15 §3.2). GENERATED: never hand-edit the output.
-//
-//   node scripts/fingerprints.mjs [--engine <exe>] [--analyzer <exe>] [--jobs 8] [--packs-dir <dir>] [--keep-wav]
-//   npm run fingerprints
-//
-// Presets: one tiny project per preset (its instrument, params, channel settings and FX chain on its own insert,
-// master without a limiter) rendered by the engine's offline renderer at a role-appropriate note: bass / 808 / sub
-// at C2 (MIDI 36), chord-ish roles (chord, stab) as a C-minor triad on C4, everything else at C4 (moved by octaves
-// into the preset's range), held 1.5 s (measured over the held part only, like the reference's notes); drum
-// presets one hit on C4 (measured whole). Full-kit presets (one
-// channel = a GM kit) are skipped; presets that need a sound pack are rendered only with --packs-dir (the
-// installed packs folder). Every render and every factory sample (resources/factory/index.json) is measured
-// with the analyzer's `fingerprint` cmd. Entries: presets by id, then samples by path (deterministic).
-//
-// Defaults: the NEWEST build of each binary among engine/target/{release,debug} and resources/bin (the same
-// rule the app uses in dev). Exit 1 when nothing could be measured or the analyzer has no `fingerprint` cmd; exit 2 on
-// a missing binary. Writes atomically (tmp + rename).
-
 import { build } from 'esbuild';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
@@ -64,8 +44,6 @@ if (!existsSync(path.join(factoryDir, 'index.json'))) die('resources/factory/ind
 mkdirSync(workDir, { recursive: true });
 const started = Date.now();
 
-// ── Bundle the TS sources we need ─────────────────────────────────────
-
 const bundle = path.join(outDir, 'fingerprints.bundle.mjs');
 await build({
   stdin: {
@@ -87,21 +65,17 @@ await build({
 });
 const M = await import(`file://${bundle.replace(/\\/g, '/')}?t=${Date.now()}`);
 
-// ── Notes per role (PPQ 960, 120 BPM: a beat = 0.5 s) ─────────────────
-
 const BPM = 120;
-const HOLD = 2880; // 1.5 s
-const HIT = 240; // a 16th: drums are one-shots
+const HOLD = 2880;
+const HIT = 240;
 const BAR = 3840;
 const DRUM_ROLES = new Set(['kick', 'snare', 'clap', 'hat', 'openhat', 'ride', 'crash', 'perc', 'tom']);
 const LOW_ROLES = new Set(['bass', '808', 'sub']);
 const CHORD_ROLES = new Set(['chord', 'stab']);
 const CYMBAL_ROLES = new Set(['hat', 'openhat', 'ride', 'crash']);
 
-/** A full drum kit on one channel (GM layout): not one sound. */
 const isKit = (p) => p.role === 'kick' && ['snare', 'hat'].every((r) => (p.alsoRoles ?? []).includes(r));
 
-/** Move `key` by octaves into the preset's range (closest octave; unchanged without a range or for drums). */
 function intoRange(p, key, span = 0) {
   if (!p.range || DRUM_ROLES.has(p.role)) return key;
   const [lo, hi] = p.range;
@@ -118,7 +92,6 @@ function intoRange(p, key, span = 0) {
   return best;
 }
 
-/** [tick, dur, key][] and the root note recorded in the index. */
 function notesFor(p) {
   if (DRUM_ROLES.has(p.role)) return { root: 60, notes: [[0, HIT, 60]] };
   if (LOW_ROLES.has(p.role)) {
@@ -211,8 +184,6 @@ async function pool(items, n, fn) {
   return results;
 }
 
-// ── Analyzer (NDJSON over stdio) ──────────────────────────────────────
-
 function startAnalyzer() {
   const p = spawn(analyzerExe, [], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const waiting = new Map();
@@ -254,13 +225,10 @@ function startAnalyzer() {
         p.stdin.write(`${JSON.stringify({ id: ++seq, cmd: 'shutdown' })}\n`);
         p.stdin.end();
       } catch {
-        /* already gone */
       }
     },
   };
 }
-
-// ── Numbers: rounded so the file stays small and diffs stay readable ──
 
 const sig = (x, d = 4) => (x === null || x === undefined ? x : Number.isFinite(x) ? Number(x.toPrecision(d)) : x);
 function tidyFp(fp) {
@@ -284,15 +252,12 @@ function tidyFp(fp) {
 const usable = (fp) =>
   fp && [fp.lengthSec, fp.centroidHz, fp.rolloffHz, fp.flatness, fp.harmonicity, fp.attackMs, fp.decayMs, fp.sustain, fp.crestDb, fp.width, fp.peakDb, fp.rmsDb].every(Number.isFinite) && fp.centroidHz > 0 && fp.rmsDb > -90 && fp.lengthSec > 0;
 
-// ── Run ───────────────────────────────────────────────────────────────
-
 const analyzer = startAnalyzer();
 const hello = await analyzer.request('hello');
 if (!hello.ok) die(`the analyzer didn't answer hello: ${hello.message}`);
 const analyzerVersion = hello.data?.version ?? '?';
 const engineVersion = spawnSync(engineExe, ['--version'], { encoding: 'utf8', windowsHide: true }).stdout?.trim() || 'krypt-studio-engine';
 
-/** The whole file, or only `held` seconds from the start (a held note without its release tail). */
 async function fingerprint(file, pitch, held) {
   const r = await analyzer.request('fingerprint', held ? { path: file, pitch, segments: [{ startSec: 0, endSec: held }] } : { path: file, pitch });
   if (!r.ok) return { error: r.message ?? 'fingerprint failed' };
@@ -300,7 +265,6 @@ async function fingerprint(file, pitch, held) {
   return usable(fp) ? { fp: tidyFp(fp) } : { error: 'silent or unmeasurable' };
 }
 
-// Probe: an analyzer without the cmd fails here with one clear line instead of 460 times.
 const factoryIndex = JSON.parse(readFileSync(path.join(factoryDir, 'index.json'), 'utf8'));
 const samples = (Array.isArray(factoryIndex.samples) ? factoryIndex.samples : []).filter((s) => typeof s?.path === 'string' && s.path.startsWith('factory:') && typeof s.kind === 'string');
 const fileOf = (p) => path.join(factoryDir, ...p.replace(/^factory:/, '').split('/'));
@@ -339,7 +303,6 @@ const presetRows = await pool(presets, jobs, async (p) => {
     failures.push(`${p.id}: render failed (${r.error})`);
     return null;
   }
-  // Tonal presets: the held note only (1.5 s, no release tail), the way match_sounds slices the reference's notes.
   const f = await fingerprint(wavPath, !CYMBAL_ROLES.has(p.role), DRUM_ROLES.has(p.role) ? undefined : HOLD / 1920);
   if (!keepWav) rmSync(wavPath, { force: true });
   if (f.error) {

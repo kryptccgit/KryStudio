@@ -1,7 +1,3 @@
-// Clip launcher (Session view) tools: build_session edits the grid through the
-// session.* commands (one history group per call); launch drives playback
-// through the main-process launcher runtime (electron/session).
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import type { Project } from '@shared/schema/project';
@@ -36,8 +32,6 @@ const zSlot = z.object({
   follow: zFollow.optional(),
 });
 
-// ── Lookups ───────────────────────────────────────────────────────────
-
 export function findScene(p: Project, ref: string | number): string {
   const s = p.session;
   const order = s?.sceneOrder ?? [];
@@ -57,7 +51,6 @@ export function findScene(p: Project, ref: string | number): string {
   fail(`No scene "${safeName(r)}". Scenes: ${order.map((id, i) => `${i + 1}. ${safeName(s.scenes[id].name)}`).join(', ')}`);
 }
 
-/** A track by number / id / name; an unknown NAME creates a track (reported in `created`). */
 function trackFor(ctx: RunCtx, deps: MainDeps, ref: string | number, created: string[]): string {
   const p = deps.doc.project;
   const order = p.playlist.trackOrder;
@@ -71,8 +64,6 @@ function trackFor(ctx: RunCtx, deps: MainDeps, ref: string | number, created: st
   const hit = order.filter((id) => p.playlist.tracks[id].name.toLowerCase() === r.toLowerCase());
   if (hit.length === 1) return hit[0];
   if (hit.length > 1) fail(`Several playlist tracks are called "${safeName(r)}": use the track number.`);
-  // Reuse the first untouched default lane ("Track 3": no playlist or launch clips) before adding a track,
-  // so a new project's live set starts in column 1 instead of after 16 empty tracks.
   const used = new Set([...Object.values(p.playlist.clips).map((c) => c.trackId), ...Object.values(p.session?.clips ?? {}).map((c) => c.trackId)]);
   const spare = order.find((tid) => !used.has(tid) && /^Track \d+$/.test(p.playlist.tracks[tid].name));
   if (spare) {
@@ -90,7 +81,6 @@ function clipName(p: Project, c: LaunchClip): string {
   return (c.kind === 'pattern' ? p.patterns[c.patternId ?? '']?.name : p.channels[c.channelId ?? '']?.name) ?? '?';
 }
 
-/** Compact grid summary for results and get_project. */
 export function sessionSummary(p: Project, maxScenes = 32): string {
   const s: Session | undefined = p.session;
   if (!s || (!s.sceneOrder.length && !Object.keys(s.clips).length)) return 'Session (clip launcher): empty.';
@@ -119,8 +109,6 @@ export function sessionSummary(p: Project, maxScenes = 32): string {
   if (s.sceneOrder.length > maxScenes) lines.push(`  … ${s.sceneOrder.length - maxScenes} more scenes`);
   return lines.join('\n');
 }
-
-// ── build_session ─────────────────────────────────────────────────────
 
 export const buildSession = defineTool({
   name: 'build_session',
@@ -233,8 +221,6 @@ export const buildSession = defineTool({
   },
 });
 
-// ── launch ────────────────────────────────────────────────────────────
-
 export const launch = defineTool({
   name: 'launch',
   title: 'Launch clips / scenes',
@@ -284,7 +270,6 @@ export const launch = defineTool({
   },
 });
 
-/** An existing playlist track (launch never creates one). */
 function trackOnly(p: Project, ref: string | number): string {
   const order = p.playlist.trackOrder;
   if (typeof ref === 'number' || /^\d+$/.test(String(ref))) {

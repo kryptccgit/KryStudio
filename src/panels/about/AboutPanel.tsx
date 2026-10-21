@@ -1,5 +1,3 @@
-// About: the Krypt cross-promo (house rules §8/§13).
-
 import { useEffect, useState } from 'react';
 import { ExternalLink, Globe, MessageCircle, Wrench } from 'lucide-react';
 import { report } from '../../app/notify';

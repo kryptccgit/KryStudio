@@ -1,21 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// AnalyzerService: "Ears" for both the UI (IPC, actor = user) and agents
-// (MCP tools, actor = the agent, inside the call's undo group).
-//
-//   analyze(target)         tempo / beats / key / swing / sections / loudness
-//                           cache: userData/analysis/<key>.json
-//   separateStems(clip)     stems (installed model only) → audio.addStems
-//                           cache: userData/stems/<key>-<model>/
-//   toPattern(target, mode) transcription → audio.addTranscription
-//                           cache: userData/analysis/<key>-notes-<mode>.json
-//
-// <key> = SampleRef.hash when present, else a hash of the absolute path +
-// size + mtime. A cache hit never starts the analyzer. Results enter the
-// project through ONE command each (one undo step, all-or-nothing). Jobs
-// are listed in AnalyzerState with progress and can be cancelled.
-// Node-only (no Electron import): tests drive it with a fake analyzer.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import { USER, type DocHost } from '@shared/doc/DocHost';
 import type { Channel, Clip, SampleRef } from '@shared/schema/project';
@@ -33,28 +15,22 @@ import { DRUM_ROLES, clipPlayback, effectiveBpm, findChannelByName, heardSemis, 
 import { PRE_SEC, SOURCE_WAV, drumEvents, monoEvents, sourceInstrument, type SourceEvent } from './fromSource';
 import { AUDIO_FILE_RE } from '@shared/audio/formats';
 
-/** Applies a command as the caller (user or agent); throws an Error with a human message on failure. */
 export type Apply = <T = unknown>(cmd: string, args: unknown) => T;
 
 export interface RunOptions {
-  /** Progress of the analyzer job behind this call (MCP progress notifications). */
   onProgress?(stage: string, fraction: number): void;
-  /** Abort = cancel the analyzer job (MCP request cancellation). */
   signal?: AbortSignal;
 }
 
-/** stemFiles: the cached stems of a song (no project change). */
 export interface StemFiles {
   stems: Partial<Record<StemName, { path: string; peakDb: number; rmsDb: number }>>;
   model: string;
-  /** "HT-Demucs" … */
   modelName: string;
   device: StemsResult['device'];
   cached: boolean;
   seconds: number;
 }
 
-/** fingerprint: one SoundFingerprint per segment, plus `whole` when no segments were given. */
 export interface FingerprintResult {
   segments: SoundFingerprint[];
   whole?: SoundFingerprint;
@@ -63,17 +39,10 @@ export interface FingerprintResult {
 export interface ToPatternOptions {
   mode: TranscribeMode;
   name?: string;
-  /** Snap note starts / ends to this grid in ticks (0 / absent = keep the performance timing). */
   quantize?: number;
-  /**
-   * What plays the notes. 'source' (default for mono and drums): an instrument made of the audio itself, each note
-   * its own original recording (fromSource.ts), so the pattern sounds like the source. 'synth': a stock synth / the
-   * factory kit (always for poly: one recording per chord can't be split over its notes).
-   */
   sound?: 'source' | 'synth';
 }
 
-/** Transcription cache version: bump when the analyzer's notes change (2: low lines segmented by lowline.rs). */
 const TRANSCRIBE_CACHE_V = 2;
 
 export interface AnalyzerServiceDeps {
@@ -81,23 +50,18 @@ export interface AnalyzerServiceDeps {
   supervisor: Pick<AnalyzerSupervisor, 'run' | 'status' | 'available' | 'onStatus' | 'stop'>;
   models: ModelManager;
   userDataDir: string;
-  /** 'factory:…' / stored sample path → absolute file path. */
   resolveSamplePath(p: string): string;
-  /** Engine sample info (frames / rate) for new stem samples; optional. */
   sampleInfo?(absPath: string): Promise<ActionResult<SampleInfo>>;
-  /** Fan the state out to every renderer (called throttled on progress). */
   broadcast?(state: AnalyzerState): void;
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
 }
 
 interface ResolvedTarget {
   abs: string;
-  /** Display name (channel / sample / file name). */
   name: string;
   sample: SampleRef | null;
   channel: Channel | null;
   clip: Clip | null;
-  /** Cache key (file-name safe). */
   key: string;
 }
 
@@ -120,7 +84,6 @@ function joinList(xs: string[]): string {
   return `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 }
 
-/** DocHost.exec as the user: one command = one undo step. */
 export function userApply(doc: DocHost): Apply {
   return <T>(cmd: string, args: unknown): T => {
     const r = doc.exec<T>(cmd, args, { actor: USER });
@@ -137,7 +100,6 @@ export class AnalyzerService {
   private broadcastTimer: NodeJS.Timeout | null = null;
   private readonly analysisDir: string;
   private readonly stemsDir: string;
-  /** Instruments made of transcribed audio: <key>/source.wav + .sfz mappings (fromSource.ts). */
   private readonly instrumentsDir: string;
 
   constructor(private readonly deps: AnalyzerServiceDeps) {
@@ -147,7 +109,6 @@ export class AnalyzerService {
     deps.supervisor.onStatus(() => this.notify());
   }
 
-  /** Verify models, drop half-written stem folders. */
   async init(): Promise<void> {
     await this.deps.models.refresh();
     for (const name of await listDir(this.stemsDir)) {
@@ -162,8 +123,6 @@ export class AnalyzerService {
     this.broadcastTimer = null;
     await this.deps.supervisor.stop();
   }
-
-  // ── State ──────────────────────────────────────────────────────────
 
   state(): AnalyzerState {
     const s = this.deps.supervisor.status();
@@ -183,15 +142,10 @@ export class AnalyzerService {
     return this.deps.models.states();
   }
 
-  /**
-   * The shared sidecar + Model Manager for the reference library's own queue (electron/library). Library jobs
-   * report their progress in LibraryState.queue, so they stay out of `jobs`.
-   */
   shared(): { supervisor: AnalyzerServiceDeps['supervisor']; models: ModelManager } {
     return { supervisor: this.deps.supervisor, models: this.deps.models };
   }
 
-  /** Broadcast now (structural change) or throttled to ~6/s (progress). */
   notify(throttle = false): void {
     const send = (): void => {
       this.broadcastTimer = null;
@@ -199,7 +153,6 @@ export class AnalyzerService {
       try {
         this.deps.broadcast?.(this.state());
       } catch {
-        /* a window mid-teardown */
       }
     };
     if (!throttle) {
@@ -211,8 +164,6 @@ export class AnalyzerService {
     this.broadcastTimer = setTimeout(send, Math.max(0, 150 - (Date.now() - this.lastBroadcast)));
     this.broadcastTimer.unref?.();
   }
-
-  // ── Models (UI only: agents never download) ────────────────────────
 
   async installModel(id: string): Promise<ActionResult<AnalyzerState>> {
     const r = await this.deps.models.install(String(id));
@@ -235,8 +186,6 @@ export class AnalyzerService {
     return { ...r, data: this.state() };
   }
 
-  // ── Jobs ───────────────────────────────────────────────────────────
-
   cancelJob(jobId: string): ActionResult {
     const j = this.jobs.get(String(jobId));
     if (!j) return fail('That job already finished');
@@ -254,7 +203,6 @@ export class AnalyzerService {
       try {
         opts.onProgress?.(info.stage, fraction);
       } catch {
-        /* best effort */
       }
       this.notify(true);
     });
@@ -272,9 +220,6 @@ export class AnalyzerService {
     }
   }
 
-  // ── Krypt Voice (electron/voice): tts / sing / syllables jobs, listed and cancellable like the others ──
-
-  /** The Local voice model (Kokoro, Model Manager task 'tts'): dir null until installed; null when this build has none. */
   voiceModel(): { id: string; name: string; dir: string | null; status?: string; message?: string } | null {
     const def = this.deps.models.defs().find((m) => (m.task as string) === 'tts' && m.default) ?? this.deps.models.defs().find((m) => (m.task as string) === 'tts');
     if (!def) return null;
@@ -286,7 +231,6 @@ export class AnalyzerService {
     return this.runJob<C, T>(cmd, args, label, opts, cmd === 'tts' ? this.voiceModel()?.id : undefined);
   }
 
-  /** Share one in-flight run per key (two clicks on the same clip = one job). */
   private once<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const hit = this.inflight.get(key);
     if (hit) return hit as Promise<T>;
@@ -294,8 +238,6 @@ export class AnalyzerService {
     this.inflight.set(key, p);
     return p;
   }
-
-  // ── Targets ────────────────────────────────────────────────────────
 
   private async resolve(target: AudioTarget): Promise<ActionResult<ResolvedTarget>> {
     const p = this.deps.doc.project;
@@ -337,14 +279,6 @@ export class AnalyzerService {
     return { ok: true, data: { abs, name, sample, channel, clip, key } };
   }
 
-  // ── analyze ────────────────────────────────────────────────────────
-
-  /**
-   * `drums`: also return the drum hits (study_reference); a cached analysis without them is redone once with them.
-   * `light`: only what the harmony and level readings need (pitchProfile, key, levels; no beat model, no sections),
-   * for stems (Auto Mashup's key fit): a cached full analysis with a pitch profile serves, else a quick run cached on
-   * its own (`<key>.light.json`), never over the full one.
-   */
   async analyze(target: AudioTarget, opts: RunOptions & { drums?: boolean; cachedOnly?: boolean; light?: boolean } = {}): Promise<ActionResult<AudioAnalysis>> {
     const r = await this.resolve(target);
     if (!r.ok || !r.data) return fail(r.message ?? 'Nothing to analyze');
@@ -352,7 +286,6 @@ export class AnalyzerService {
     const beatDir = this.deps.models.dirFor('beat-this-small');
     const file = path.join(this.analysisDir, `${t.key}.json`);
     const cached = await readJson<{ v: number; beatModel: boolean; analysis: AudioAnalysis }>(file);
-    // cachedOnly (set_tempo's reference lock): any cached reading, never a new analyzer run.
     if (opts.cachedOnly) return cached?.analysis ? { ok: true, data: { ...cached.analysis, path: t.abs } } : fail(`"${t.name}" hasn't been analysed yet`);
     if (opts.light) {
       if (cached?.v === ANALYSIS_CACHE_VERSION && cached.analysis?.pitchProfile) return { ok: true, data: { ...cached.analysis, path: t.abs } };
@@ -388,8 +321,6 @@ export class AnalyzerService {
     });
   }
 
-  // ── separateStems ──────────────────────────────────────────────────
-
   async separateStems(clipId: string, opts: { model?: string } = {}, apply: Apply = userApply(this.deps.doc), run: RunOptions = {}): Promise<ActionResult<StemsOutcome>> {
     const def = opts.model ? this.deps.models.def(opts.model) : this.deps.models.defaultFor('stems');
     if (!def) return fail(`Unknown stem model "${opts.model}". Stem models: ${this.deps.models.defs().filter((m) => m.task === 'stems').map((m) => m.id).join(', ') || 'none'}`);
@@ -400,7 +331,6 @@ export class AnalyzerService {
       if (st?.status === 'downloading' || st?.status === 'verifying') return fail(`${shortModelName(def)} is still being installed; try again when Model Manager shows it as installed.`);
       return fail(`Install ${shortModelName(def)} in Model Manager first.`);
     }
-    // A second request for the same clip while one runs (double click, UI + agent) shares it: stems are added once.
     return this.once(`stems-op:${clipId}:${def.id}`, () => this.separateResolved(String(clipId), def, modelDir, apply, run));
   }
 
@@ -414,7 +344,6 @@ export class AnalyzerService {
     if (!sep.ok || !sep.data) return fail(sep.message ?? 'Separation failed');
     const { result, cached, seconds } = sep.data;
 
-    // Order: the model's declared stems first, then anything else it produced.
     const order = (def.stems ?? []) as string[];
     const stems = [...result.stems].sort((a, b) => (order.indexOf(a.name) + 1 || 99) - (order.indexOf(b.name) + 1 || 99));
     let info: { frames?: number; sampleRate?: number; channels?: number } = {};
@@ -446,7 +375,6 @@ export class AnalyzerService {
     };
   }
 
-  /** Cached stems, or run the analyzer into a temp folder and rename it into place. */
   private async stemsFor(t: ResolvedTarget, model: string, modelDir: string, outDir: string, run: RunOptions): Promise<ActionResult<{ result: StemsResult; cached: boolean; seconds: number }>> {
     const manifest = path.join(outDir, 'stems.json');
     const cached = await readJson<{ v: number; result: StemsResult }>(manifest);
@@ -482,9 +410,6 @@ export class AnalyzerService {
     }
   }
 
-  // ── transcription (shared by toPattern and transcribe) ─────────────
-
-  /** The analyzer's notes / hits for a resolved target: cached per file + mode (+ key range), one run per key at a time. */
   private transcription(t: ResolvedTarget, mode: TranscribeMode, modelDir: string | undefined, run: RunOptions, range: { minKey?: number; maxKey?: number } = {}): Promise<ActionResult<TranscriptionResult>> {
     const r = `${range.minKey !== undefined ? `-k${range.minKey}` : ''}${range.maxKey !== undefined ? `-K${range.maxKey}` : ''}`;
     const cacheFile = path.join(this.analysisDir, `${t.key}-notes-${mode}${r}.json`);
@@ -500,10 +425,6 @@ export class AnalyzerService {
     });
   }
 
-  /**
-   * Notes of one melodic line (mode mono, no model needed) or drum hits, WITHOUT changing the project: the vocals
-   * service reads a vocal's key from its notes when the chroma key reading is weak. Cached like toPattern's.
-   */
   async transcribe(target: AudioTarget, mode: 'mono' | 'drums' = 'mono', run: RunOptions = {}): Promise<ActionResult<TranscriptionResult>> {
     if (mode !== 'mono' && mode !== 'drums') return fail('mode must be mono or drums');
     const r = await this.resolve(target);
@@ -511,12 +432,6 @@ export class AnalyzerService {
     return this.transcription(r.data, mode, undefined, run);
   }
 
-  /**
-   * Drum hits from the DRUM STEM of a target, WITHOUT changing the project (study_reference: sharper drums than the
-   * full mix's onsets). Separates with the default installed stem model (cached per file, the same cache as
-   * separate_stems) and transcribes the drum stem (cached). data null when no stem model is installed, or with
-   * `cachedOnly` when the stems aren't cached yet (get_playbook / review_song never start a separation).
-   */
   async drumStemHits(target: AudioTarget, opts: { cachedOnly?: boolean } = {}, run: RunOptions = {}): Promise<ActionResult<{ hits: TranscriptionResult['hits']; model: string; cached: boolean; seconds: number } | null>> {
     const def = this.deps.models.defaultFor('stems');
     const modelDir = def ? this.deps.models.dirFor(def.id) : null;
@@ -536,13 +451,6 @@ export class AnalyzerService {
     return { ok: true, data: { hits: tr.data.hits, model: def.id, cached: sep.data.cached, seconds: sep.data.seconds } };
   }
 
-  // ── Audio → project (Wave 8a, electron/audioProject) ───────────────
-
-  /**
-   * The stem files of a target (a file, clip or channel), separated with the default installed stem model and cached
-   * per file (the same cache as separate_stems). Never changes the project. data null when no stem model is installed
-   * (or, with `cachedOnly`, when the stems aren't cached yet).
-   */
   async stemFiles(target: AudioTarget, opts: { cachedOnly?: boolean } = {}, run: RunOptions = {}): Promise<ActionResult<StemFiles | null>> {
     const def = this.deps.models.defaultFor('stems');
     const modelDir = def ? this.deps.models.dirFor(def.id) : null;
@@ -559,10 +467,6 @@ export class AnalyzerService {
     return { ok: true, data: { stems, model: def.id, modelName: shortModelName(def), device: sep.data.result.device, cached: sep.data.cached, seconds: sep.data.seconds } };
   }
 
-  /**
-   * Notes (poly / mono) or drum hits of any audio file (e.g. a cached stem) WITHOUT changing the project. Cached per
-   * file + mode + key range. poly needs the installed transcription model (fails with a sentence otherwise).
-   */
   async transcribeFile(absPath: string, mode: TranscribeMode, opts: { minKey?: number; maxKey?: number; name?: string } = {}, run: RunOptions = {}): Promise<ActionResult<TranscriptionResult>> {
     if (mode !== 'poly' && mode !== 'mono' && mode !== 'drums') return fail('mode must be poly, mono or drums');
     const r = await this.resolve({ path: absPath });
@@ -581,10 +485,6 @@ export class AnalyzerService {
     return this.transcription(t, mode, modelDir, run, range);
   }
 
-  /**
-   * Timbre fingerprints (shared/sound-match/types.ts) of an audio file, whole or per segment (seconds), from the
-   * analyzer's `fingerprint` cmd. Cached per file + segments. An analyzer built before Wave 8a fails with a sentence.
-   */
   async fingerprint(absPath: string, segments?: Array<{ startSec: number; endSec: number }>, opts: { pitch?: boolean; highpassHz?: number | null } = {}, run: RunOptions = {}): Promise<ActionResult<FingerprintResult>> {
     const r = await this.resolve({ path: absPath });
     if (!r.ok || !r.data) return fail(r.message ?? 'Nothing to measure');
@@ -604,9 +504,6 @@ export class AnalyzerService {
     });
   }
 
-  // ── Instruments from the source audio ────────────────────────────
-
-  /** A WAV copy of the target's audio in userData/instruments/<key>/ (cached), for SFZ regions to point at. */
   private sourceCopy(t: ResolvedTarget, run: RunOptions): Promise<ActionResult<{ dir: string; sampleRate: number; frames: number }>> {
     const dir = path.join(this.instrumentsDir, t.key);
     const meta = path.join(dir, 'source.json');
@@ -621,10 +518,6 @@ export class AnalyzerService {
     });
   }
 
-  /**
-   * Timbre per event (6 band levels, dB) for keys with more than 127 events, so the shared regions are picked by
-   * sound (fromSource.shareRegions). Undefined when no key needs it or the measuring fails (velocity bands then).
-   */
   private async sliceFeatures(t: ResolvedTarget, events: SourceEvent[], run: RunOptions): Promise<Array<number[] | null> | undefined> {
     const perKey = new Map<number, number>();
     for (const e of events) perKey.set(e.key, (perKey.get(e.key) ?? 0) + 1);
@@ -643,8 +536,6 @@ export class AnalyzerService {
     }
     return out;
   }
-
-  // ── toPattern ──────────────────────────────────────────────────────
 
   async toPattern(target: AudioTarget, opts: ToPatternOptions, apply: Apply = userApply(this.deps.doc), run: RunOptions = {}): Promise<ActionResult<ToPatternOutcome>> {
     const mode = opts?.mode;
@@ -668,20 +559,16 @@ export class AnalyzerService {
     if (!tr.ok || !tr.data) return fail(tr.message ?? 'Transcription failed');
     const result = tr.data;
 
-    // Convert against the CURRENT project (the user may have edited meanwhile).
     const p = this.deps.doc.project;
     const clip = t.clip ? p.playlist.clips[t.clip.id] ?? null : null;
     if (t.clip && !clip) return fail('The clip was deleted while it was being transcribed');
     const channel = t.channel ? p.channels[t.channel.id] ?? null : null;
     const eff = effectiveBpm(p, this.deps.doc.catalog, channel);
-    // Where and at what pitch the clip plays its file: warp markers, stretch, pitch shift, reverse.
     const play = clipPlayback(p, this.deps.doc.catalog, channel, t.sample);
     const grid = Math.max(0, Math.round(opts.quantize ?? 0));
     const baseName = t.name.slice(0, 48);
     const name = (opts.name?.trim() || `${baseName} ${mode === 'drums' ? 'drums' : 'notes'}`).slice(0, 64);
 
-    // What plays the notes: the audio itself (each note its own recording) unless asked otherwise, or poly, or a
-    // reversed clip (regions play forwards). A failed copy falls back to the synth and says so.
     let sound: 'source' | 'synth' = opts.sound ?? (mode === 'poly' ? 'synth' : 'source');
     let soundNote = '';
     if (mode === 'poly' || play.reverseSec) sound = 'synth';
@@ -704,8 +591,6 @@ export class AnalyzerService {
     const lanes: Array<Record<string, unknown>> = [];
     let count = 0;
     if (mode === 'drums' && src) {
-      // Every hit plays its own slice up to the next hit (hits at the same instant merged into the loudest), on
-      // one channel per drum role: the drum lane re-creates the source.
       const kept = drumEvents(result.hits, fileSec);
       for (const d of DRUM_ROLES) {
         const mine = kept.filter((k) => k.role === d.role);
@@ -734,10 +619,8 @@ export class AnalyzerService {
       }
     } else {
       const role = instrumentRole(mode, t);
-      // "Loop Bass"; a source already named for its role (a "Song · Bass" stem) gets "Song · Bass notes", never its own name.
       const chName = (new RegExp(`\\b${role}$`, 'i').test(baseName) ? `${baseName} notes` : `${baseName} ${role}`).slice(0, 64);
       if (src) {
-        // One region per note; each note written with the velocity that picks its own region.
         const events = monoEvents(result.notes, fileSec);
         const inst = sourceInstrument(events, { sampleRate: src.sampleRate, frames: src.frames, name: t.name, features: await this.sliceFeatures(t, events, run) });
         const notes = notesToTicks(result.notes.map((n, i) => ({ ...n, vel: inst.vel[i] })), play, grid);
@@ -773,7 +656,6 @@ export class AnalyzerService {
   }
 }
 
-/** Which synth role a transcription gets: bass stems / bass-named sources → bass; mono → lead; poly → keys. */
 function instrumentRole(mode: TranscribeMode, t: ResolvedTarget): string {
   const hint = `${t.sample?.origin?.stem ?? ''} ${t.name}`.toLowerCase();
   if (/(bass|808|sub)/.test(hint)) return 'Bass';
@@ -781,7 +663,6 @@ function instrumentRole(mode: TranscribeMode, t: ResolvedTarget): string {
   return 'Keys';
 }
 
-/** "128 bpm (confidence 0.82), F#m, 12.4 s" — the one-line summary used in messages. */
 export function describeAnalysis(a: AudioAnalysis): string {
   const parts: string[] = [];
   if (a.tempo) parts.push(`~${Math.round(a.tempo.bpm * 10) / 10} bpm`);

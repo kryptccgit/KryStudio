@@ -1,6 +1,3 @@
-// Third-party (VST3 / CLAP) plugins on the TS side: catalog registration,
-// commands accepting installed plugins, plugin state storage, the engine
-// projection and the MCP discovery tools.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER, SYSTEM } from '@shared/doc/DocHost';
@@ -55,7 +52,6 @@ test('registerExternalPlugins mutates CATALOG in place, additively', () => {
   assert.equal(pluginById(SINE.id)?.name, 'Krypt Test Sine');
   assert.ok(catalogVersion() > v0);
   assert.equal(notified, 1);
-  // Idempotent; stock ids and junk are ignored; INSTRUMENTS/EFFECTS stay stock.
   assert.equal(registerExternalPlugins([SINE, GAIN]), 0);
   assert.equal(registerExternalPlugins([{ ...SINE, id: 'krypt.triosc' }, { ...SINE, id: 'nope' } as PluginDescriptor]), 0);
   assert.equal(INSTRUMENTS.length, instrumentsBefore);
@@ -64,7 +60,6 @@ test('registerExternalPlugins mutates CATALOG in place, additively', () => {
     externalPlugins('instrument').map((d) => d.id),
     [SINE.id],
   );
-  // A rescan with a changed descriptor replaces it in place.
   assert.equal(registerExternalPlugins([{ ...SINE, name: 'Krypt Test Sine 2' }]), 1);
   assert.equal(pluginById(SINE.id)?.name, 'Krypt Test Sine 2');
   registerExternalPlugins([SINE]);
@@ -83,12 +78,11 @@ test('channels.add / mixer.addSlot accept installed plugins; kinds are checked',
   const ch = host.project.channels[r.data!.id];
   assert.equal(ch.generator.type, SINE.id);
   assert.equal(ch.generator.params['1'], 1, 'clamped to the plugin range');
-  assert.equal(ch.name, 'Test Sine'); // channels.add drops a leading "Krypt "
+  assert.equal(ch.name, 'Test Sine');
   const fx = host.exec<{ id: string }>('mixer.addSlot', { insertId: r.data!.insertId, type: GAIN.id, params: { '0': 0.5 } }, { actor: USER });
   assert.equal(fx.ok, true, fx.message);
   assert.equal(host.exec('mixer.addSlot', { insertId: r.data!.insertId, type: SINE.id }, { actor: USER }).ok, false);
   assert.equal(host.exec('channels.add', { type: GAIN.id }, { actor: USER }).ok, false);
-  // ParamRefs resolve against the installed descriptor (the surface MCP agents use).
   const ref = `channel/${ch.id}/gen/2`;
   assert.equal(paramSpecFor(host.project, CATALOG, ref)?.options?.[2], 'Saw');
   assert.equal(host.exec('params.set', { ref, value: 2 }, { actor: USER }).ok, true);
@@ -110,14 +104,12 @@ test('plugins.setStates stores blobs without history; the engine projection carr
   assert.equal(host.project.channels[r.data!.id].generator.state, 'S1NJTg==');
   assert.equal(host.project.mixer.inserts[r.data!.insertId].slots[fx.data!.id].state, 'S1YzUw==');
   assert.equal(host.getHistory().length, histBefore, 'not an undo step');
-  // Same states again: no change at all.
   const v = host.version;
   host.exec('plugins.setStates', { states: { [r.data!.id]: 'S1NJTg==' } }, { actor: SYSTEM });
   assert.equal(host.version, v);
   const diff = projectPatches(host.project, patches as never, (s) => s);
   const ch = diff.upserts.find((u) => u.kind === 'channel');
   assert.equal((ch?.value as { generator: { state?: string } }).generator.state, 'S1NJTg==');
-  // Replacing the instrument drops the stale blob.
   host.exec('channels.setGenerator', { id: r.data!.id, type: 'krypt.triosc' }, { actor: USER });
   assert.equal(host.project.channels[r.data!.id].generator.state, undefined);
 });

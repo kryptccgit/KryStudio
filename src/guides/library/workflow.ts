@@ -1,4 +1,3 @@
-// Song building in Krypt Studio: arrangement, transitions, sound packs, sampling, workflow tips (guides-content-2). See research/14-sounds-and-guides.md §3 for the markup and the rules.
 import type { GuideArticle } from '../articles';
 
 export const WORKFLOW: GuideArticle[] = [

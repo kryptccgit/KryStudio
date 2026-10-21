@@ -1,13 +1,3 @@
-//! The plugin-host process: spawn, NDJSON control channel, watchdog and
-//! crash handling. One host process (the "shared sandbox") serves every
-//! third-party instance of this engine process; a crash or hang takes down
-//! only the host, never the engine.
-//!
-//! Control channel = the host's stdin/stdout (one JSON object per line):
-//!   request  {"id":7,"cmd":"load",...}   response {"id":7,"ok":true,"data":{...}}
-//!   event    {"event":"param","inst":3,"id":12,"value":0.5}   (no id)
-//! Audio never crosses this channel (see shm.rs).
-
 use crate::shm::{self, Channel};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
@@ -26,8 +16,6 @@ enum Waiter {
     Chan(mpsc::Sender<Result<Value, String>>),
     Cb(Reply),
 }
-
-// ── Global state ─────────────────────────────────────────────────────────
 
 struct Globals {
     host_exe: Mutex<Option<PathBuf>>,
@@ -62,7 +50,6 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Queue an event for the engine to forward to Electron main.
 pub fn push_event(v: Value) {
     let mut q = lock(&g().events);
     if q.len() < 4096 {
@@ -118,12 +105,8 @@ fn resolve_host_exe() -> Result<PathBuf, String> {
     Err(format!("The plugin host ({HOST_EXE}) was not found next to the engine. Rebuild the engine (npm run engine:build:debug)."))
 }
 
-// ── Instances ────────────────────────────────────────────────────────────
-
-/// One hosted plugin instance, shared by its proxy and the manager.
 pub struct Inst {
     pub id: u64,
-    /// Entity key: channel id, or "insertId/slotId".
     pub key: String,
     pub plugin_id: String,
     pub name: String,
@@ -131,7 +114,6 @@ pub struct Inst {
     pub chan: Channel,
     pub realtime: bool,
     pub dead: AtomicBool,
-    /// Set by the proxy when the host stopped answering process() calls.
     pub hung: AtomicBool,
     pub has_editor: AtomicBool,
     load: Mutex<Option<Result<Value, String>>>,
@@ -139,7 +121,6 @@ pub struct Inst {
 }
 
 impl Inst {
-    /// Mark silent forever (host gone / plugin failed).
     pub fn kill(&self) {
         self.dead.store(true, SeqCst);
         self.chan.map.block().state.store(shm::state::DEAD, SeqCst);
@@ -149,7 +130,6 @@ impl Inst {
         self.dead.load(Acquire)
     }
 
-    /// Block until the host answered `load` (offline renders only).
     pub fn wait_loaded(&self, timeout: Duration) -> Result<(), String> {
         let t0 = Instant::now();
         let mut st = lock(&self.load);
@@ -179,7 +159,6 @@ impl Inst {
 
 impl Drop for Inst {
     fn drop(&mut self) {
-        // Stop the host-side audio thread promptly, then free the instance.
         let b = self.chan.map.block();
         b.quit.store(1, SeqCst);
         self.chan.req.set();
@@ -198,7 +177,6 @@ impl Drop for Inst {
     }
 }
 
-/// Live (real-time engine) instance for an entity key.
 pub fn live_instance(key: &str) -> Option<Arc<Inst>> {
     lock(&g().live).get(key).and_then(|w| w.upgrade())
 }
@@ -220,8 +198,6 @@ pub struct LoadSpec<'a> {
     pub realtime: bool,
 }
 
-/// Create the shared memory for a new instance and ask the host to load
-/// it. Never blocks on the plugin (the proxy stays silent until READY).
 pub fn start_instance(spec: LoadSpec) -> Result<Arc<Inst>, String> {
     let conn = ensure_conn()?;
     let id = g().next_inst.fetch_add(1, Relaxed);
@@ -289,8 +265,6 @@ pub fn start_instance(spec: LoadSpec) -> Result<Arc<Inst>, String> {
     Ok(inst)
 }
 
-// ── Host connection ──────────────────────────────────────────────────────
-
 pub struct Conn {
     pub gen: u64,
     pub pid: u32,
@@ -298,7 +272,6 @@ pub struct Conn {
     pending: Mutex<HashMap<u64, Waiter>>,
     next_id: AtomicU64,
     pub alive: AtomicBool,
-    /// Why we killed it ("reload", "hang", ...), if we did.
     killed: Mutex<Option<String>>,
     insts: Mutex<HashMap<u64, Weak<Inst>>>,
     loading: AtomicU32,
@@ -313,7 +286,6 @@ impl Conn {
         w.write_all(s.as_bytes()).and_then(|_| w.flush()).map_err(|e| format!("Plugin host pipe: {e}"))
     }
 
-    /// Fire a request; `reply` (if any) runs on the reader thread.
     pub fn send_async(&self, cmd: &str, args: Value, reply: Option<Reply>) {
         let id = self.next_id.fetch_add(1, Relaxed);
         let mut msg = args;
@@ -336,7 +308,6 @@ impl Conn {
         }
     }
 
-    /// Blocking request (never call on the audio thread).
     pub fn request(&self, cmd: &str, args: Value, timeout: Duration) -> Result<Value, String> {
         if !self.alive.load(Acquire) {
             return Err("The plugin host is not running".into());
@@ -382,7 +353,6 @@ impl Conn {
             eprintln!("[pluginhost:stdout] {}", line.chars().take(300).collect::<String>());
             return;
         };
-        // Responses carry "id"; events carry "event" (and may have their own fields).
         if let Some(id) = v.get("id").and_then(|x| x.as_u64()).filter(|_| v.get("event").is_none()) {
             let r = if v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false) {
                 Ok(v.get("data").cloned().unwrap_or(Value::Null))
@@ -471,7 +441,6 @@ impl Conn {
         match killed.as_deref() {
             Some("reload") | Some("shutdown") => {}
             Some(reason) => {
-                // Hang: kill + reload automatically (once a minute at most).
                 let auto = {
                     let mut last = lock(&g().last_auto_reload);
                     let ok = last.map(|t| t.elapsed() > Duration::from_secs(60)).unwrap_or(true);
@@ -511,7 +480,6 @@ impl Conn {
 fn terminate_pid(pid: u32) {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
-    // SAFETY: plain Win32 calls with a checked handle.
     unsafe {
         let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
         if !h.is_null() {
@@ -524,7 +492,6 @@ fn terminate_pid(pid: u32) {
 #[cfg(not(windows))]
 fn terminate_pid(_pid: u32) {}
 
-/// The running host, or a freshly spawned one.
 fn ensure_conn() -> Result<Arc<Conn>, String> {
     let mut slot = lock(&g().conn);
     if let Some(c) = slot.as_ref() {
@@ -573,7 +540,6 @@ fn spawn(exe: &std::path::Path) -> Result<Arc<Conn>, String> {
     });
     eprintln!("[plugins] started plugin host pid {} ({})", conn.pid, exe.display());
 
-    // stdout reader → responses + events.
     {
         let c = conn.clone();
         let _ = std::thread::Builder::new().name("pluginhost-out".into()).spawn(move || {
@@ -590,7 +556,6 @@ fn spawn(exe: &std::path::Path) -> Result<Arc<Conn>, String> {
             }
         });
     }
-    // stderr → our stderr (Electron logs it at debug level).
     if let Some(err) = stderr {
         let _ = std::thread::Builder::new().name("pluginhost-err".into()).spawn(move || {
             for line in BufReader::new(err).lines().map_while(Result::ok) {
@@ -598,7 +563,6 @@ fn spawn(exe: &std::path::Path) -> Result<Arc<Conn>, String> {
             }
         });
     }
-    // Exit monitor.
     {
         let c = conn.clone();
         let _ = std::thread::Builder::new().name("pluginhost-wait".into()).spawn(move || {
@@ -606,8 +570,6 @@ fn spawn(exe: &std::path::Path) -> Result<Arc<Conn>, String> {
             c.on_exit(code);
         });
     }
-    // Watchdog: the host UI thread must answer pings; a hung audio thread
-    // is flagged by the proxies. Either way: kill → crash path → reload.
     {
         let c = conn.clone();
         let _ = std::thread::Builder::new().name("pluginhost-watchdog".into()).spawn(move || {
@@ -623,7 +585,6 @@ fn spawn(exe: &std::path::Path) -> Result<Arc<Conn>, String> {
                     c.kill("stopped processing audio (a plugin hung)");
                     break;
                 }
-                // Plugins may legitimately block the UI thread while loading.
                 let timeout = if c.loading.load(SeqCst) > 0 { Duration::from_secs(60) } else { Duration::from_secs(3) };
                 match c.request("ping", json!({}), timeout) {
                     Ok(_) => misses = 0,
@@ -643,13 +604,10 @@ fn spawn(exe: &std::path::Path) -> Result<Arc<Conn>, String> {
     Ok(conn)
 }
 
-/// Kill the host on purpose (Reload plugins / shutdown). Instances die
-/// silently; the caller re-creates them.
 pub fn kill_host(reason: &str) {
     let c = lock(&g().conn).clone();
     if let Some(c) = c {
         c.kill(reason);
-        // Wait briefly so the next spawn doesn't race the old process.
         let t0 = Instant::now();
         while c.alive.load(Acquire) && t0.elapsed() < Duration::from_secs(2) {
             std::thread::sleep(Duration::from_millis(10));

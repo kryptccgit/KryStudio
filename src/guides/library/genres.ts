@@ -1,7 +1,3 @@
-// Genre walkthroughs (guides-content-1). See research/14-sounds-and-guides.md §3 for the markup and the rules.
-// The {{playbook:…}} cards are built live from shared/playbooks (src/guides/facts.ts): tempo, swing, keys, drums,
-// structure, loudness and the first three mistakes. The text here adds the feel, the why, more pitfalls and a
-// build walkthrough with real controls; it doesn't restate the card's numbers.
 import type { GuideArticle } from '../articles';
 
 export const GENRES: GuideArticle[] = [

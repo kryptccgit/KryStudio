@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The project tab strip in the title bar (research/19-project-tabs.md):
-// one tab per open project with its title, a dirty dot, a busy spinner and
-// a close ×; middle-click closes, drag reorders, right-click for more; a +
-// for a new tab (its chevron / right-click: templates, open, reopen).
-// The title bar is an Electron drag region: tabs and buttons are no-drag,
-// and the space after them (pr-12 at least) stays draggable.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { ChevronDown, Copy, FileMusic, FolderOpen, LayoutTemplate, Loader2, Plus, RotateCcw, Save, X, XSquare } from 'lucide-react';
 import type { ProjectTab } from '@shared/types';
@@ -20,7 +11,6 @@ import { describeTemplate } from '@shared/templates';
 import { dropIndex, tabHint, tabLayout } from './logic';
 import { closeOtherTabs, closeTab, copyTabPath, moveTabTo, newTab, openInTab, reopenClosedTab, revealTab, saveTab, switchTab, useTabs } from './store';
 
-/** Width kept for the + and chevron buttons, and the drag gap after them. */
 const PLUS_W = 46;
 const DRAG_GAP = 48;
 
@@ -91,7 +81,6 @@ export function TabStrip() {
   const drag = useRef<DragState | null>(null);
   const [dragView, setDragView] = useState<{ id: string; dx: number; to: number } | null>(null);
 
-  // Before the first tabs state (or without main), show the one open project as a single tab.
   const tabs: ProjectTab[] = state?.tabs.length ? state.tabs : [{ id: '__current', title: statusName || metaName || 'Untitled', path: null, dirty: liveDirty }];
   const activeId = state?.tabs.length ? state.activeId : '__current';
   const real = !!state?.tabs.length;
@@ -108,7 +97,6 @@ export function TabStrip() {
 
   const { width, scroll } = tabLayout(tabs.length, avail);
 
-  // Keep the active tab in view when it changes (or the strip starts scrolling).
   useEffect(() => {
     const sc = scrollerRef.current;
     const el = sc?.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(activeId)}"]`);
@@ -120,7 +108,6 @@ export function TabStrip() {
     if (!sc) return [];
     return [...sc.querySelectorAll<HTMLElement>('[data-tab-id]')].map((el) => {
       const r = el.getBoundingClientRect();
-      // Undo the drag transform so the math works on the resting layout.
       const shift = Number(el.dataset.shift ?? 0);
       return r.left - shift + r.width / 2;
     });
@@ -132,7 +119,6 @@ export function TabStrip() {
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
-      /* capture is a nicety */
     }
   };
 
@@ -160,7 +146,6 @@ export function TabStrip() {
     if (real && view && view.to !== d.from) void moveTabTo(d.id, view.to);
   };
 
-  /** Where a non-dragged tab slides to make room for the dragged one. */
   const shiftOf = (i: number, id: string): number => {
     if (!dragView) return 0;
     if (id === dragView.id) return dragView.dx;
@@ -213,7 +198,7 @@ export function TabStrip() {
               onPointerUp={(e) => endDrag(e)}
               onPointerCancel={(e) => endDrag(e, true)}
               onMouseDown={(e) => {
-                if (e.button === 1) e.preventDefault(); // no autoscroll cursor
+                if (e.button === 1) e.preventDefault();
               }}
               onAuxClick={(e) => {
                 if (e.button === 1 && real) {

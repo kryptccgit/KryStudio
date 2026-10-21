@@ -1,10 +1,3 @@
-//! krypt-studio-engine — the Krypt Studio audio engine sidecar.
-//! Spec: docs/ENGINE_PROTOCOL.md. JSON shapes: shared/engine/protocol.ts.
-//!
-//! Threads: control (NDJSON stdin/stdout), device (cpal stream / null
-//! driver), audio callback (RT), telemetry (WebSocket), sample loader,
-//! workers, render. The audio thread only touches lock-free queues/atomics.
-
 pub mod audio;
 pub mod automation;
 pub mod clock;
@@ -39,8 +32,6 @@ pub mod watchdog;
 #[cfg(test)]
 mod tests;
 
-/// Debug builds: report any allocation inside `rt::no_alloc` scopes (the
-/// audio callback). Release builds use the system allocator untouched.
 #[cfg(debug_assertions)]
 #[global_allocator]
 static ALLOC_GUARD: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;

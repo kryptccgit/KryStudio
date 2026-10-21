@@ -1,5 +1,3 @@
-// Session / discovery tools (all read-only).
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
@@ -300,8 +298,6 @@ export const getMixer = defineTool({
   },
 });
 
-// ── find_samples (sounds-core) ───────────────────────────────────────
-
 function walk(dir: string, depth: number, out: string[], budget: { n: number }): void {
   if (depth < 0 || budget.n <= 0) return;
   let entries: fs.Dirent[];
@@ -318,15 +314,12 @@ function walk(dir: string, depth: number, out: string[], budget: { n: number }):
   }
 }
 
-/** Kinds find_samples filters by: the factory sample kinds plus two groups. */
 const FIND_KINDS = [...SAMPLE_KINDS, 'fx', 'loop'] as const;
 type FindKind = (typeof FIND_KINDS)[number];
 export type UserSampleKind = SampleKind | 'fx' | 'loop';
 
-/** Transition / ear-candy kinds ('fx' = any of them). */
 const FX_KINDS: ReadonlySet<string> = new Set(['riser', 'downlifter', 'impact', 'sweep-up', 'sweep-down', 'reverse-cymbal', 'sub-drop', 'noise', 'whoosh', 'tape-stop', 'swell']);
 
-/** "HardKick_01" → " hard kick 01 ": the words a file name or folder is made of. */
 function sampleWords(s: string): string {
   const w = s
     .replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -338,7 +331,6 @@ function sampleWords(s: string): string {
   return ` ${w} `;
 }
 
-/** Ordered: the first rule that matches a name wins ("Reverse Crash" is a reverse cymbal, "808 Kick" an 808). */
 const KIND_RULES: Array<[RegExp, UserSampleKind]> = [
   [/ (reverse|rev) (cymbal|cym|crash) | revcym /, 'reverse-cymbal'],
   [/ (tape ?stops?|vinyl ?stops?|tapestop|record ?stops?|power ?downs?|slow ?downs?) /, 'tape-stop'],
@@ -376,7 +368,6 @@ const KIND_RULES: Array<[RegExp, UserSampleKind]> = [
   [/ (fx|sfx|effects) /, 'fx'],
 ];
 
-/** The kind of a user sample from its file name, then its folders (closest first). Loops are 'loop'. */
 export function classifyUserSample(relPath: string): UserSampleKind | null {
   const parts = relPath.split(/[\\/]/).filter(Boolean);
   const file = sampleWords((parts.pop() ?? '').replace(/\.[a-z0-9]+$/i, ''));
@@ -390,14 +381,12 @@ export function classifyUserSample(relPath: string): UserSampleKind | null {
   return null;
 }
 
-/** "4 bar", "4bars", "8-bar" in a user file name. */
 function barsFromName(name: string): number | undefined {
   const m = / (\d{1,2}) ?bars? /.exec(sampleWords(name.replace(/\.[a-z0-9]+$/i, '')));
   const n = m ? Number(m[1]) : NaN;
   return n > 0 && n <= 64 ? n : undefined;
 }
 
-/** A factory sample (from the index) matches a kind filter, groups included. */
 function factoryKindOk(x: FactorySample, kind: FindKind | undefined): boolean {
   if (!kind) return true;
   if (kind === 'fx') return FX_KINDS.has(x.kind);
@@ -414,7 +403,6 @@ function userKindOk(k: UserSampleKind | null, kind: FindKind | undefined): boole
 interface FoundSample {
   path: string;
   name: string;
-  /** 'pack' = an installed sound pack's sample ('pack:<id>/…'). */
   source: 'factory' | 'pack' | 'user';
   kind?: UserSampleKind;
   tags?: string[];
@@ -438,7 +426,6 @@ function foundLine(s: FoundSample): string {
 
 const ANY_GENRE = /^(any|none|all)$/i;
 
-/** find_samples {like}: the closest samples by timbre (same kind first; `kind` picks another kind). */
 async function likeSamples(deps: MainDeps, caller: ToolCaller, a: { like: string; kind?: FindKind; limit: number; query?: string; genre?: string; bars?: number }, ctx?: RunCtx): Promise<ToolResult> {
   const r = await similarForAgent(deps, caller, ctx, a.like, { scope: a.kind ? 'any' : 'same', want: 'samples', limit: a.kind ? 100 : a.limit }, classifyUserSample);
   const items = r.items
@@ -497,13 +484,11 @@ export const findSamples = defineTool({
     if (index) {
       const single = a.kind && a.kind !== 'fx' && a.kind !== 'loop' ? (a.kind as SampleKind) : undefined;
       let ranked = rankSamples(index.samples, { text: a.query, kind: single, genre: genre ?? undefined, bars: a.bars }, 2000).filter((x) => factoryKindOk(x, a.kind));
-      // bars: exactly that length when the library has it, else the closest lengths first.
       if (a.bars !== undefined && ranked.some((x) => x.bars === a.bars)) ranked = ranked.filter((x) => x.bars === a.bars);
       for (const x of ranked) {
         factory.push({ path: x.path, name: x.name, source: x.path.startsWith('pack:') ? 'pack' : 'factory', kind: x.kind, tags: x.tags, genres: x.genres, rootNote: x.rootNote, bars: x.bars, bpm: x.bpm, lengthSec: x.lengthSec });
       }
     }
-    // No factory index (a kit from before the sample library; sound packs alone don't count): file names only.
     if (froot && !index?.samples.some((x) => x.path.startsWith('factory:'))) {
       const files: string[] = [];
       walk(froot, 4, files, { n: 4000 });
@@ -534,9 +519,7 @@ export const findSamples = defineTool({
         user.push({ path: f, name: path.basename(f), source: 'user', kind: kind ?? undefined, bars, genres: g ? [g] : undefined });
       }
     }
-    // The genre's own folders first among the user's files (stable otherwise).
     if (genre) user.sort((x, y) => Number(!!y.genres?.includes(genre)) - Number(!!x.genres?.includes(genre)));
-    // Both sources share the limit, so a big factory library never hides the user's own files.
     let nf = Math.min(factory.length, user.length ? Math.ceil(a.limit * 0.6) : a.limit);
     const nu = Math.min(user.length, a.limit - nf);
     nf = Math.min(factory.length, a.limit - nu);

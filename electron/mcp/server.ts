@@ -1,8 +1,3 @@
-// The MCP server definition: one factory builds a fresh McpServer per
-// connection (and per era), registering the shared tool registry, the
-// resources and the prompts. serveStdio() over our pipe transport picks the
-// protocol era per connection (2026-07-28 server/discover or 2025 initialize).
-
 import { z } from 'zod';
 import {
   CLIENT_CAPABILITIES_META_KEY,
@@ -26,55 +21,35 @@ import { choiceFromElicitResult, CONSENT_TIMEOUT_MS, consentElicitation, consent
 export const SERVER_NAME = 'krypt-studio';
 
 export interface ServerHooks {
-  /** The caller for this connection (identity resolved lazily from clientInfo). */
   caller(): ToolCaller;
-  /** Refusal message when MCP is turned off, else null. */
   gate(): string | null;
-  /** Count a tool call for status(). */
   counted?(): void;
-  /** The client's raw name (clientInfo, else the shim's --client), for client-specific prompt arguments. */
   client?(): string | null;
-  /**
-   * File-access questions handed to the client as `input_required` (protocol 2026-07-28) and not answered yet:
-   * key → expiry. One map per connection (the modern era may build a server per request).
-   */
   pendingConsent?: Map<string, number>;
 }
 
-/** The parts of the SDK's per-request context a tool call uses (progress, cancellation, elicitation). */
 interface ToolExtra {
   mcpReq?: {
     id?: string | number;
     _meta?: { progressToken?: string | number } & Record<string, unknown>;
     signal?: AbortSignal;
     notify?: (n: { method: string; params?: Record<string, unknown> }) => Promise<void>;
-    /** The per-request `_meta` envelope (protocol 2026-07-28 only). */
     envelope?: Record<string, unknown>;
-    /** Answers to our input requests, on a retried 2026-07-28 request. */
     inputResponses?: Record<string, unknown>;
   };
 }
 
-/** Claude Code splits slash-command words over the declared prompt arguments: give it room for a sentence. */
 export function isClaudeCode(client: string | null | undefined): boolean {
   return (client ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') === 'claude-code';
 }
 
-/** Extra one-word argument slots for Claude Code ("more1" …), so a whole sentence and a path with spaces arrive. */
 export const BEAT_EXTRA_SLOTS = 34;
 export const LIKE_EXTRA_SLOTS = 28;
 const moreNames = (n: number): string[] => Array.from({ length: n }, (_, i) => `more${i + 1}`);
 const moreSchema = (names: string[]) => Object.fromEntries(names.map((k) => [k, z.string().optional().describe('More words of the request (Claude Code passes one word per argument).')]));
 
-/** How long after the question was handed to the client its retry may still answer it. */
 const PENDING_CONSENT_MS = 30 * 60_000;
 
-/**
- * Asks the user in the client when it declared MCP elicitation (form mode): on protocol 2026-07-28 by handing
- * the question back as `input_required` (the client asks and retries the call with the answer); on 2025-era
- * connections with an `elicitation/create` request while the call waits. Undefined = the client can't ask, so
- * Krypt Studio shows its own dialog.
- */
 function clientAsker(server: McpServer, deps: MainDeps, hooks: ServerHooks, extra: ToolExtra | undefined): ConsentAsker | undefined {
   const req = extra?.mcpReq;
   const env = req?.envelope;
@@ -86,7 +61,6 @@ function clientAsker(server: McpServer, deps: MainDeps, hooks: ServerHooks, extr
     caps = undefined;
   }
   const el = caps?.elicitation;
-  // Form mode: declared, or a bare `elicitation: {}` (its meaning before modes existed).
   if (!el || typeof el !== 'object' || (!('form' in el) && 'url' in el)) return undefined;
   const where = hooks.caller().actor.name;
   if (modern) {
@@ -98,7 +72,6 @@ function clientAsker(server: McpServer, deps: MainDeps, hooks: ServerHooks, extr
         const key = consentKey(r);
         const view = inputResponse(req?.inputResponses, key);
         const issued = pending.get(key);
-        // Only an answer to a question we asked (and recently): an unsolicited "accept" is ignored.
         if (view.kind === 'elicit' && issued !== undefined && issued > Date.now()) {
           pending.delete(key);
           return choiceFromElicitResult({ action: view.action, content: view.content });
@@ -120,11 +93,6 @@ function clientAsker(server: McpServer, deps: MainDeps, hooks: ServerHooks, extr
   };
 }
 
-/**
- * notifications/progress for a call that carried a progressToken (throttled to
- * 4/s; failures ignored). Analyzer stages each run 0..1, so `progress` is a
- * monotonic counter and the stage + percentage go in `message`.
- */
 function progressSender(extra: ToolExtra | undefined): ((fraction: number, message: string) => void) | undefined {
   const token = extra?.mcpReq?._meta?.progressToken;
   const notify = extra?.mcpReq?.notify;
@@ -163,7 +131,6 @@ export function buildServer(deps: MainDeps, version: string, hooks: ServerHooks)
         const consent = def.paths ? clientAsker(server, deps, hooks, extra) : undefined;
         const r = await callTool(deps, caller, def.name, args, { gate: hooks.gate, onProgress: progressSender(extra), signal: extra?.mcpReq?.signal, consent });
         if (r.pending && hooks.pendingConsent) {
-          // Protocol 2026-07-28: the client asks the user and retries this call with the answer.
           hooks.pendingConsent.set(r.pending.key, Date.now() + PENDING_CONSENT_MS);
           deps.log('info', `[agent] ${caller.actor.name} ${def.name}: asking the user in ${caller.actor.name} about ${r.pending.request.path}`);
           return inputRequired({ inputRequests: { [r.pending.key]: inputRequired.elicit(consentElicitation(r.pending.request) as never) } });
@@ -232,9 +199,6 @@ export function buildServer(deps: MainDeps, version: string, hooks: ServerHooks)
     },
   );
 
-  // Claude Code fills arguments one word each, in order, and drops words past the last one: on its connections
-  // the prompts declare extra word slots so a whole sentence (and a path with spaces) arrives. Other clients show
-  // one form field per argument, so they get only the named ones.
   const cc = isClaudeCode(hooks.client?.());
   const beatMore = cc ? moreNames(BEAT_EXTRA_SLOTS) : [];
   const likeMore = cc ? moreNames(LIKE_EXTRA_SLOTS) : [];
@@ -244,7 +208,6 @@ export function buildServer(deps: MainDeps, version: string, hooks: ServerHooks)
       title: 'Make a beat',
       description:
         'One prompt → a finished song: a plain-language idea becomes a complete, arranged and mixed track (genre playbook with resolved sounds → patterns per section → groove → arrangement → transitions → mix → review_song and fixes), with no questions along the way; your next prompt edits it. Every argument is optional (leave them empty and Claude picks). Positional (trap 140 F#m 4 dark …) or plain words; a song file path anywhere in the words becomes a reference to make something like (originally).',
-      // Positional in Claude Code (/krypt-studio:beat trap 140 Fm), so the free-text idea goes last.
       argsSchema: z.object({
         genre: z.string().optional().describe('e.g. trap, house, lofi, drill, dnb, boom-bap, edm'),
         bpm: z.string().optional(),
@@ -332,7 +295,6 @@ export function buildServer(deps: MainDeps, version: string, hooks: ServerHooks)
   return server;
 }
 
-/** The focus prompt's text: the profile + workflow, or what to do when there is no focus / library. */
 async function focusPromptText(deps: MainDeps, args: { collection?: string; idea?: string }): Promise<string> {
   const lib = deps.library;
   if (!lib) return 'I wanted to compose in the style of my reference library, but it is not available in this Krypt Studio session. Tell me so, then offer to make something with the beat prompt instead.';
@@ -347,15 +309,8 @@ async function focusPromptText(deps: MainDeps, args: { collection?: string; idea
   return focusPrompt({ name: safeName(r.data.collection.name, 60), profile: r.data.text, brief: isFocus ? focus?.brief : undefined, idea: args.idea, isFocus });
 }
 
-// ── Offline manifest (served by the shim while the app is closed) ───────
-
 export const MODERN_VERSION = '2026-07-28';
 
-/**
- * Capture the exact discovery answers of both protocol eras by talking to a
- * real server instance over an in-memory pair. The shim replays them from
- * mcp-manifest.json when Krypt Studio isn't running.
- */
 export async function captureManifest(deps: MainDeps, version: string): Promise<Record<string, unknown>> {
   const hooks: ServerHooks = { caller: () => ({ actor: { kind: 'agent', clientId: 'manifest', name: 'manifest' }, session: { group: null }, via: 'mcp' }), gate: () => 'offline' };
   const ask = async (msgs: JSONRPCMessage[]): Promise<Map<number, unknown>> => {
@@ -395,7 +350,6 @@ export async function captureManifest(deps: MainDeps, version: string): Promise<
   ] as JSONRPCMessage[]);
   const pick = (m: Map<number, unknown>, names: string[]) => Object.fromEntries(names.map((n, i) => [n, m.get(i + 1) ?? null]));
   const legacyAnswers = pick(legacy, ['initialize', 'tools/list', 'prompts/list', 'resources/list', 'resources/templates/list']);
-  // The modern era can only be captured if the SDK accepted our envelope; fall back to the legacy lists.
   const modernAnswers = pick(modern, ['server/discover', 'tools/list', 'prompts/list', 'resources/list', 'resources/templates/list']);
   for (const k of ['tools/list', 'prompts/list', 'resources/list', 'resources/templates/list']) {
     const v = modernAnswers[k] as { error?: unknown } | null;
@@ -409,7 +363,6 @@ export async function captureManifest(deps: MainDeps, version: string): Promise<
     modernVersion: MODERN_VERSION,
     legacy: legacyAnswers,
     modern: modernAnswers,
-    // Plain list for humans / other tooling.
     tools: TOOLS.map((t) => ({ name: t.name, title: t.title, kind: t.kind })),
   };
 }

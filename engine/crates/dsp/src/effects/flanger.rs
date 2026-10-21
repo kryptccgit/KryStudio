@@ -1,10 +1,3 @@
-//! krypt.flanger — short modulated delay with feedback. The sweep is
-//! exponential around the Delay setting (depth 1 = ±2.5 octaves of notch
-//! movement), so the comb moves evenly in pitch. The LFO free-runs or locks
-//! to the bar grid. Through-zero mode delays the dry path by a fixed 3 ms
-//! (reported as latency) and sweeps the wet tap through it, giving the
-//! tape-flange "jet" cancellation at the zero point.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::delay::DelayLine;
 use crate::blocks::lfo::{shape, TempoPhase};
@@ -44,7 +37,6 @@ pub fn descriptor() -> PluginDescriptor {
 
 const MAX_DELAY_S: f32 = 0.075;
 const TZ_MS: f32 = 3.0;
-/// Exponential sweep range at depth 1 (octaves either side of Delay).
 const SWEEP_OCT: f32 = 2.5;
 
 pub struct Flanger {
@@ -146,7 +138,6 @@ impl Effect for Flanger {
     fn set_param(&mut self, index: usize, value: f32) {
         self.pb.set(index, value);
         if self.pb.take_dirty() {
-            // through-zero changes latency: apply before the engine asks
             self.update();
         }
     }
@@ -183,7 +174,6 @@ impl Effect for Flanger {
                 let x = crate::blocks::finite(buf[ch][i]);
                 let (d, dry) = if self.tz {
                     self.dry[ch].push(x);
-                    // wet sweeps through the delayed dry point
                     ((tzl * (1.0 + depth * lfo)).clamp(0.0, max_d), self.dry[ch].read(self.tz_len))
                 } else {
                     ((base * (SWEEP_OCT * depth * lfo).exp2()).clamp(1.0, max_d), x)

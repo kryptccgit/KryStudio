@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Master an album (research/23 §2) through window.krypt.automix.
-// masterAlbum / exportAlbum (electron/automix/album.ts). Entry points:
-// Home (action id masterAlbum) and Tools ▸ Master an album…. The songs
-// land in a NEW project tab; the mastering is ONE history entry (A/B =
-// doc.toggleEntry, Undo = toggle it off). Every outcome ends in a toast.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { ActionResult } from '@shared/types';
 import type { AlbumExportOutcome, AlbumOutcome } from '@shared/automix/types';
 import { AUDIO_EXTENSIONS } from '@shared/audio/formats';
@@ -22,9 +14,6 @@ import { loadPresets } from './actions';
 import { locateSim, transport } from '../live/playState';
 import { openAlbumDialog } from './AlbumDialog';
 
-// ── Opening ───────────────────────────────────────────────────────────
-
-/** Home ▸ Master an album / Tools ▸ Master an album…: the form, the running job, or the result. */
 export function openMasterAlbum(doc?: Document | null): void {
   void loadPresets();
   if (getAlbum().visible) return;
@@ -32,8 +21,6 @@ export function openMasterAlbum(doc?: Document | null): void {
 }
 
 const busyWhy = (): string | null => (albumBusy() ? 'The album is being mastered or exported: wait for it, or cancel it' : null);
-
-// ── Songs ─────────────────────────────────────────────────────────────
 
 function add(paths: string[]): void {
   if (busyWhy()) {
@@ -57,7 +44,7 @@ export async function pickSongs(): Promise<void> {
     toast.error(`Couldn't open the file dialog: ${failureMessage(err)}`);
     return;
   }
-  if (!paths?.length) return; // closed: the list stays as it was, which is visible
+  if (!paths?.length) return;
   add(paths);
 }
 
@@ -81,15 +68,12 @@ export function clearAlbumSongs(): void {
   updateAlbumForm({ type: 'setSongs', songs: [] });
 }
 
-/** Step ③'s reference row: never one of the album's own songs (the row says so). */
 export const albumReference = referenceController({
   get: () => getAlbum().reference,
   set: (reference) => useAlbum.setState({ reference }),
   locked: busyWhy,
   guard: (p) => referenceClash(p, getAlbum().form.songs, true),
 });
-
-// ── Run ───────────────────────────────────────────────────────────────
 
 export async function startAlbum(): Promise<void> {
   if (albumBusy()) {
@@ -109,7 +93,6 @@ export async function startAlbum(): Promise<void> {
       if (getAlbum().phase === 'running' || getAlbum().phase === 'cancelling') useAlbum.setState({ progress: p });
     });
   } catch {
-    /* no progress feed: the bar stays indeterminate */
   }
   let r: ActionResult<AlbumOutcome>;
   try {
@@ -133,7 +116,7 @@ export async function startAlbum(): Promise<void> {
   }
   useAlbum.setState({ phase: 'done', outcome: r.data, progress: null, ab: 'after', verdict: 'open' });
   void refreshProjectStatus();
-  onProjectPicked(); // Home steps aside: the album tab is behind the result
+  onProjectPicked();
   toast.success(r.message || 'Album mastered', { ...(show ?? {}), durationMs: 10000 });
 }
 
@@ -154,8 +137,6 @@ export async function cancelAlbum(): Promise<void> {
   }
 }
 
-// ── The result: A/B, play a song, Keep, Undo ──────────────────────────
-
 export async function stopAlbumReference(): Promise<void> {
   await stopRef();
 }
@@ -166,7 +147,6 @@ async function stopRef(): Promise<void> {
   await stopReference();
 }
 
-/** Before (the album's mastering off) or After (on). Checks the real history first, so it never inverts. */
 export async function setAlbumAB(want: 'after' | 'before'): Promise<boolean> {
   await stopRef();
   const s = getAlbum();
@@ -201,7 +181,6 @@ export async function setAlbumAB(want: 'after' | 'before'): Promise<boolean> {
   }
 }
 
-/** ▶ on a song row: jump to its start in the album tab and play (switch Before / After while it plays). */
 export async function playAlbumSong(index: number): Promise<void> {
   await stopRef();
   const o = getAlbum().outcome;
@@ -258,8 +237,6 @@ export async function undoAlbum(): Promise<void> {
   toast.info('Undone: the songs are back as they were. Edit ▸ History can bring the mastering back.');
 }
 
-// ── Export all ────────────────────────────────────────────────────────
-
 export function setExportFormat(format: AlbumExportFormat): void {
   useAlbum.setState({ exportFormat: format });
 }
@@ -282,7 +259,6 @@ export async function exportAlbum(): Promise<void> {
       if (getAlbum().exporting !== 'idle') useAlbum.setState({ exportProgress: p });
     });
   } catch {
-    /* indeterminate */
   }
   let r: ActionResult<AlbumExportOutcome>;
   try {
@@ -299,13 +275,10 @@ export async function exportAlbum(): Promise<void> {
   else toast.error(r.message || 'Export all failed');
 }
 
-// ── The dialog's life ─────────────────────────────────────────────────
-
 export function onAlbumDialogOpened(): void {
   useAlbum.setState({ visible: true });
 }
 
-/** Closed: a running job carries on (and says so); an undecided result counts as kept (and says so). */
 export function onAlbumDialogClosed(): void {
   const s = getAlbum();
   useAlbum.setState({ visible: false });

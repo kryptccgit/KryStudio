@@ -1,8 +1,3 @@
-// The agent's ears (research/04 §6.5): offline render + analysis, plus exact
-// symbolic stats from the notes; the comparison with a reference song (the
-// render's analysis against the analyzer's reading of the reference). And
-// transport play/stop.
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
@@ -25,7 +20,6 @@ import { dynamicsLine, dynamicsReport } from './dynamics';
 const MAX_RENDER_BARS = 64;
 const KEEP_PREVIEWS = 20;
 
-/** Notes heard in [start, end) of the song, by channel (pattern clips only; positions relative to start). */
 export function songNotes(p: Project, start: number, end: number): SymbolicChannel[] {
   const by = new Map<string, SymbolicChannel>();
   const soloTracks = p.playlist.trackOrder.filter((t) => p.playlist.tracks[t].solo);
@@ -107,14 +101,12 @@ export function compactAnalysis(a: Analysis): CompactAnalysis {
   };
 }
 
-/** An engine build without analysis returns a zero-filled struct; never read that as "0 LUFS". */
 export function isEmptyAnalysis(a: Analysis | undefined | null): boolean {
   if (!a) return true;
   const bands = Object.values(a.bands ?? {});
   return a.lufsIntegrated === 0 && a.truePeakDb === 0 && a.peakDb === 0 && a.crestDb === 0 && bands.every((b) => b === 0);
 }
 
-/** Minimal WAV measurement (peak, RMS, crest, stereo correlation) when the engine gives no analysis. */
 export function wavStats(file: string): { durationSec: number; peakDb: number | null; rmsDb: number | null; crestDb: number | null; correlation: number | null } | null {
   let b: Buffer;
   try {
@@ -171,7 +163,6 @@ export function wavStats(file: string): { durationSec: number; peakDb: number | 
   };
 }
 
-/** Rule-based findings the model can act on (research/04 §6.5 "issues list"). */
 export function findIssues(a: CompactAnalysis | null, s: SymbolicStats | null, bpm: number): string[] {
   const out: string[] = [];
   if (a) {
@@ -210,7 +201,6 @@ function prunePreviews(dir: string): void {
       .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
       .sort((a, b) => b.t - a.t);
     for (const x of files.slice(KEEP_PREVIEWS)) fs.rmSync(path.join(dir, x.f), { force: true });
-    // Stem renders (review_song / match_mix with stems) are folders: keep the last few.
     const dirs = fs
       .readdirSync(dir)
       .filter((f) => /^(review|mixmatch)-\d+.*-stems$/.test(f))
@@ -218,7 +208,6 @@ function prunePreviews(dir: string): void {
       .sort((a, b) => b.t - a.t);
     for (const x of dirs.slice(KEEP_STEM_RENDERS)) fs.rmSync(path.join(dir, x.f), { recursive: true, force: true });
   } catch {
-    /* best effort */
   }
 }
 
@@ -238,11 +227,9 @@ export interface RenderPlan {
   symbolic: SymbolicStats;
   label: string;
   lengthTicks: number;
-  /** Song ticks [start, end) of a song / bars render (null for a pattern). */
   range: { start: number; end: number } | null;
 }
 
-/** Where the audible song ends: muted clips, tracks and channels (a muted reference track) don't count. */
 export function audibleSongEnd(p: Project): number {
   const solo = p.playlist.trackOrder.filter((t) => p.playlist.tracks[t]?.solo);
   let end = 0;
@@ -255,10 +242,6 @@ export function audibleSongEnd(p: Project): number {
   return end;
 }
 
-/**
- * What to render (scope, pattern, bar range) and the exact symbolic stats of its notes. `audibleSong`: a song
- * render stops at the last audible clip (compare_to_reference, review_song: a long muted reference adds no silence).
- */
 export function planRender(deps: MainDeps, a: RenderArgs, maxBars: number, opts: { audibleSong?: boolean } = {}): RenderPlan {
   const p = deps.doc.project;
   const ts = p.transport.timeSig;
@@ -309,15 +292,12 @@ export function planRender(deps: MainDeps, a: RenderArgs, maxBars: number, opts:
   };
 }
 
-/** Offline render (post-FX, with the engine's analysis) into userData/renders; keeps the last 20. */
 async function renderPlan(deps: MainDeps, plan: RenderPlan, loops = 1, prefix: RenderPrefix = 'preview', stems = false) {
   const dir = deps.project.renderDir();
   try {
     fs.mkdirSync(dir, { recursive: true });
   } catch {
-    /* the engine reports a better error */
   }
-  // A stems render writes one file per insert (plus "Master") into a folder.
   const file = path.join(dir, `${prefix}-${Date.now()}-${plan.scope}${stems ? '-stems' : '.wav'}`);
   const res = await deps.engine.render({ path: file, scope: plan.rs, format: 'wav16', tailSec: 1, analyze: true, loops: plan.scope === 'pattern' ? loops : undefined, ...(stems ? { stems: true } : {}) });
   prunePreviews(dir);
@@ -326,7 +306,6 @@ async function renderPlan(deps: MainDeps, plan: RenderPlan, loops = 1, prefix: R
 
 type RenderPrefix = 'preview' | 'compare' | 'review' | 'mixmatch';
 
-/** One insert's file of a stems render, with its analysis (null: the engine returned none). */
 export interface StemRender {
   insertId: string;
   name: string;
@@ -334,36 +313,21 @@ export interface StemRender {
   analysis: Analysis | null;
 }
 
-/** A render with its analysis and the rule-based issues (render_preview, review_song). */
 export interface RenderOutcome {
   plan: RenderPlan;
-  /** The engine wrote a file. */
   ok: boolean;
-  /** Why the render failed (ok false). */
   error?: string;
   file: string | null;
-  /** The engine's full analysis (energy curve per second …), or null when this engine build returned none. */
   raw: Analysis | null;
   analysis: CompactAnalysis | null;
-  /** Peak / RMS / correlation measured from the WAV when the engine returned no analysis. */
   measured: ReturnType<typeof wavStats>;
   issues: string[];
-  /** Length of the rendered range at the project tempo. */
   seconds: number;
-  /** With `stems`: one entry per insert (Master excluded); null when stems weren't asked for or this engine can't render them. */
   stems?: StemRender[] | null;
-  /** Why a stems render fell back to a plain mix render. */
   stemsProblem?: string;
-  /** Meters (§15): measured gain reduction per dynamics slot (absent from older engines). */
   gainReduction?: SlotGainReduction[];
 }
 
-/**
- * Plan, render (post-FX, full mixer) and analyse: the path render_preview and review_song share. Throws a
- * ToolFailure when the request can't be planned (empty playlist, over maxBars); a failed render comes back
- * as ok:false with the symbolic issues still computed. `stems`: the same single pass also writes every insert
- * (review_song / match_mix); an engine that refuses stems falls back to the plain render (stemsProblem says why).
- */
 export async function renderAndAnalyse(deps: MainDeps, a: RenderArgs, opts: { maxBars: number; audibleSong?: boolean; prefix?: RenderPrefix; stems?: boolean }): Promise<RenderOutcome> {
   const p = deps.doc.project;
   const plan = planRender(deps, a, opts.maxBars, { audibleSong: opts.audibleSong });
@@ -451,9 +415,6 @@ export const renderPreview = defineTool({
   },
 });
 
-// ── compare_to_reference ────────────────────────────────────────────────
-
-/** compare_to_reference renders whole songs: about 5 minutes at 128 bpm. */
 const MAX_COMPARE_BARS = 160;
 const BAND_KEYS = ['sub', 'low', 'lowMid', 'mid', 'highMid', 'high'] as const;
 type BandKey = (typeof BAND_KEYS)[number];
@@ -464,7 +425,6 @@ const BAND_GROUPS: Array<{ name: string; bands: BandKey[]; more: string; less: s
   { name: 'highs', bands: ['highMid', 'high'], more: 'brighten hats, leads and the master top (EQ shelf above ~6 kHz), or add air with reverb', less: 'tame hats and bright synths (EQ shelf or low-pass above ~8 kHz) or lower the hats' },
 ];
 
-/** Band levels relative to the track's own total (dB): the tonal balance, independent of loudness. */
 export function bandBalance(bands: Partial<Record<string, number>> | undefined): Record<BandKey, number> | null {
   if (!bands) return null;
   const vals = BAND_KEYS.map((k) => bands[k]);
@@ -474,7 +434,6 @@ export function bandBalance(bands: Partial<Record<string, number>> | undefined):
   return Object.fromEntries(BAND_KEYS.map((k) => [k, round((bands[k] as number) - total, 1)])) as Record<BandKey, number>;
 }
 
-/** A loudness curve resampled to n points over its own length (silence floored at -60 LUFS). */
 function resampleCurve(curve: number[], n: number): number[] | null {
   const v = curve.map((x) => (Number.isFinite(x) ? Math.max(-60, x) : -60));
   if (v.length < 2) return null;
@@ -488,7 +447,6 @@ function resampleCurve(curve: number[], n: number): number[] | null {
   return out;
 }
 
-/** Pearson correlation of two equally long series; null when either is flat. */
 export function correlation(a: number[], b: number[]): number | null {
   const n = Math.min(a.length, b.length);
   if (n < 3) return null;
@@ -523,20 +481,16 @@ function spread(curve: number[]): number | null {
   return round(v[Math.floor(v.length * 0.9)] - v[Math.floor(v.length * 0.1)], 1);
 }
 
-/** The numbers of a render (engine Analysis) against a reference (analyzer AudioAnalysis), with plain-language suggestions. */
 export function compareAnalyses(proj: Analysis, ref: AudioAnalysis, ctx: { bpm: number; key: string | null; keySource: 'given' | 'notes' | null; renderSec: number }): ReferenceComparison {
   const r1n = (x: number | null | undefined) => (typeof x === 'number' && Number.isFinite(x) ? round(x, 1) : null);
   const s: string[] = [];
-  // Tempo: the analyzer's reading nearest the project tempo (half / double time are the same pulse).
   const reading = ref.tempo ? syncBpm(ref.tempo, ctx.bpm) : null;
   const tDiff = reading !== null ? round(ctx.bpm - reading, 1) : null;
   if (tDiff !== null && Math.abs(tDiff) >= 2) s.push(`Tempo: the project runs at ${ctx.bpm} bpm, the reference at about ${reading} bpm. set_tempo ${reading} if you want its feel.`);
-  // Key.
   const pk = toKeyRef(ctx.key);
   const rk = ref.key ? toKeyRef({ tonic: ref.key.tonic, mode: ref.key.mode }) : null;
   const shift = pk && rk ? keyShift(pk, rk) : null;
   if (shift?.relation === 'move') s.push(`Key: your notes read ${keyShortName(pk!)}, the reference ${keyShortName(rk!)} (${fmtSemitones(shift.semitones)} away). Transpose (transform_notes) only if you want the same key; a different key is fine for an original.`);
-  // Loudness and peaks.
   const pl = r1n(proj.lufsIntegrated);
   const rl = r1n(ref.levels?.lufsIntegrated);
   const lDiff = pl !== null && rl !== null ? round(pl - rl, 1) : null;
@@ -544,7 +498,6 @@ export function compareAnalyses(proj: Analysis, ref: AudioAnalysis, ctx: { bpm: 
   if (lDiff !== null && lDiff >= 2) s.push(`Loudness: ${lDiff} dB louder than the reference (${pl} vs ${rl} LUFS): ease off the master limiter or the loudest inserts.`);
   const ptp = r1n(proj.truePeakDb);
   if (ptp !== null && ptp > -1) s.push(`True peak ${ptp} dBTP: set the master limiter ceiling to -1 dB.`);
-  // Tonal balance.
   const pb = bandBalance(proj.bands);
   const rb = bandBalance(ref.levels?.bands);
   let diff: Record<BandKey, number> | null = null;
@@ -564,13 +517,11 @@ export function compareAnalyses(proj: Analysis, ref: AudioAnalysis, ctx: { bpm: 
     const worst = BAND_KEYS.map((k) => ({ k, d: diff![k] })).sort((x, y) => Math.abs(y.d) - Math.abs(x.d))[0];
     if (!parts.length && Math.abs(worst.d) >= 3) s.push(`Balance: the ${BAND_WORDS[worst.k]} band is ${Math.abs(worst.d)} dB ${worst.d < 0 ? 'under' : 'over'} the reference.`);
   }
-  // Width.
   const pw = typeof proj.stereoWidth === 'number' ? round(proj.stereoWidth, 2) : null;
   const rw = typeof ref.stereo?.width === 'number' ? round(ref.stereo.width, 2) : typeof ref.levels?.stereoWidth === 'number' ? round(ref.levels.stereoWidth, 2) : null;
   const wDiff = pw !== null && rw !== null ? round(pw - rw, 2) : null;
   if (wDiff !== null && wDiff <= -0.1) s.push(`Stereo: narrower than the reference (width ${pw} vs ${rw}): widen pads, leads and effects (stereo separation, chorus, reverb), keep kick and bass in the centre.`);
   if (wDiff !== null && wDiff >= 0.1) s.push(`Stereo: wider than the reference (width ${pw} vs ${rw}): check it in mono; narrow the widest parts a little.`);
-  // Energy shape over time.
   const pc = resampleCurve(proj.energyCurve ?? [], 32);
   const rc = resampleCurve(ref.energy?.lufs ?? [], 32);
   const corr = pc && rc ? correlation(pc, rc) : null;
@@ -614,7 +565,6 @@ export const compareToReference = defineTool({
     const { target, label: refLabel } = resolveTarget(deps, a.reference, true, caller);
     const plan = planRender(deps, a, MAX_COMPARE_BARS, { audibleSong: true });
     const warnings: string[] = [];
-    // A reference that plays in the render would compare the mix with itself.
     const refClipIds = 'clipId' in target ? [target.clipId] : 'channelId' in target ? Object.values(p.playlist.clips).filter((c) => c.kind === 'audio' && c.channelId === target.channelId).map((c) => c.id) : [];
     const audible = refClipIds
       .map((id) => p.playlist.clips[id])
@@ -631,7 +581,6 @@ export const compareToReference = defineTool({
     if (!res.ok || !res.data) fail(`Render of ${plan.label} failed: ${res.message ?? 'the audio engine returned no result'}.`);
     let mine: Analysis | null = res.data.analysis && !isEmptyAnalysis(res.data.analysis) ? res.data.analysis : null;
     if (!mine) {
-      // An engine build without render analysis: the analyzer measures the rendered file the same way it measured the reference.
       const back = await deps.analyzer.analyze({ path: res.data.path }, opts);
       if (back.ok && back.data?.levels) mine = { ...back.data.levels, energyCurve: back.data.energy?.lufs ?? back.data.levels.energyCurve, stereoWidth: back.data.stereo?.width ?? back.data.levels.stereoWidth };
     }

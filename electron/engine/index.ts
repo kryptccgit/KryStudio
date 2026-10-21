@@ -1,7 +1,3 @@
-// Engine wiring: binary resolution (dev shadow copy so `cargo build` can
-// overwrite the original while the app runs), supervisor + bridge, and a
-// dev-only watcher that restarts the engine when a new build lands.
-
 import { app } from 'electron';
 import path from 'node:path';
 import type { DocHost } from '@shared/doc/DocHost';
@@ -19,16 +15,13 @@ export interface EngineDeps {
   audioSettings(): { deviceId: string | null; bufferFrames: number; sampleRate: number };
   resolveSamplePath(p: string): string;
   log(level: LogLevel | 'debug', m: string): void;
-  /** userData/packs: passed to the engine as --packs-dir (sound packs). */
   packsDir?: string;
-  /** Runs before every loadProject (each engine start): third-party plugin registration. */
   beforeLoad?(): Promise<void>;
 }
 
 const MISSING_DEV = 'Audio engine not built yet. Run "npm run engine:build:debug"; it starts automatically when the build finishes.';
 const MISSING_PACKAGED = `The audio engine (${ENGINE_EXE}) is missing from this install. Reinstall Krypt Studio.`;
 
-/** Dev: run a copy from %TEMP% so the original stays writable for cargo. */
 function launchable(src: string): string {
   if (app.isPackaged) return src;
   const dir = path.join(app.getPath('temp'), 'krypt-studio-engine-shadow');
@@ -60,8 +53,6 @@ export function createEngine(deps: EngineDeps): { engine: EngineSupervisor; brid
 
   if (!app.isPackaged) {
     engine.watchForBinary();
-    // Restart on a fresh `cargo build` (newest of release/debug changed and
-    // stayed unchanged for one poll, so we never copy a half-written exe).
     const key = (): string => {
       const p = findBinary(ENGINE_EXE);
       return p ? `${p}|${mtimeMs(p)}` : '';

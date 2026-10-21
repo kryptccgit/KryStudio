@@ -1,14 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Transport-bar recording controls: the record arm button (red glow when
-// armed, pulsing while recording, count-in beats), the record options
-// dropdown (MIDI / audio / both, quantize, count-in, monitoring), the
-// "waiting for a controller" pill of MIDI-learn, and the MIDI activity LED.
-// Arming for audio opens the Vocal Booth (src/booth); MIDI-only arming stays
-// the plain FL-style toggle.
-// Live state (count-in, recording, MIDI activity, input level) comes from
-// telemetry inside the frame loop; arm + settings come from main.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Circle, KeyboardMusic, X } from 'lucide-react';
 import type { RecordMode } from '@shared/types';
@@ -24,7 +13,6 @@ import { cls } from '../utils/format';
 import { closeBooth, openBooth } from '../booth/actions';
 import { useBooth } from '../booth/store';
 
-/** The record button: audio arming goes through the Vocal Booth; MIDI-only arming is the plain toggle. */
 function recordButtonClick(mode: RecordMode): void {
   const armed = useLiveInput.getState().record.armed;
   if (useBooth.getState().open) void closeBooth();
@@ -34,7 +22,6 @@ function recordButtonClick(mode: RecordMode): void {
 
 type LiveRec = { rec: 'countIn' | 'recording' | null; beats: number };
 
-/** Count-in / recording state from telemetry, re-rendering only on change. */
 function useLiveRec(): LiveRec {
   const [s, set] = useState<LiveRec>({ rec: null, beats: 0 });
   useEffect(() => {
@@ -55,10 +42,6 @@ function useLiveRec(): LiveRec {
 
 const MODE_LABEL: Record<RecordMode, string> = { midi: 'MIDI notes', audio: 'Audio', both: 'MIDI + audio' };
 
-/**
- * Why input monitoring can't run, or null. The engine only monitors when the
- * input and output run at the same sample rate (it doesn't resample live input).
- */
 export function monitorProblem(monitor: boolean, inputOpen: boolean, inputRate: number | undefined, outputRate: number | undefined): string | null {
   if (!monitor || !inputOpen || !inputRate || !outputRate || Math.abs(inputRate - outputRate) < 1) return null;
   return `Input monitoring is paused: the input runs at ${inputRate} Hz and the output at ${outputRate} Hz. Set both devices to the same rate in Windows sound settings.`;
@@ -115,7 +98,6 @@ function recordMenu(): MenuItem[] {
   ];
 }
 
-/** Toast once whenever monitoring is on but can't run (the engine only logs it). */
 function useMonitorWarning(): void {
   const input = useLiveInput((s) => s.record.input);
   const monitor = useSettings((s) => audioInputSettings(s.settings).monitor);
@@ -185,7 +167,6 @@ export function RecordButton() {
   );
 }
 
-/** "Move a controller…" while MIDI-learn waits for a CC. */
 export function LearnPill() {
   const learn = useLiveInput((s) => s.learn);
   if (!learn.paramRef) return null;
@@ -200,7 +181,6 @@ export function LearnPill() {
   );
 }
 
-/** MIDI activity LED (flashes on incoming MIDI) + audio input level while an input is open. */
 export function MidiLed() {
   const dot = useRef<HTMLSpanElement>(null);
   const meter = useRef<HTMLSpanElement>(null);

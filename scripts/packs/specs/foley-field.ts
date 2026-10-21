@@ -1,12 +1,3 @@
-// Foley & Field Recordings: recorded objects for percussion layers and ear candy (cards, chips, dice, books, paper,
-// keys, switches, clicks, glass, metal, tape deck) and field recordings for intros, outros and lo-fi beds (rain,
-// thunder, a busy road, a morning garden, a hall full of applause, fridge-hum room tone, a fireplace).
-// Every source is CC0; research/14 §5 has the licence quotes, URLs and the date each was read.
-//   Kenney (kenney.nl): Casino Audio, RPG Audio, Impact Sounds, UI Audio. ZIPs with a CC0 License.txt inside.
-//   OpenGameArt (opengameart.org, CC0-only entries, each the uploader's own recording): see the per-source notes.
-// Left out after measuring: files whose decoded peak clips (several RPG / UI / book-flip takes), the Impact Sounds
-// sets that are low-passed below ~7 kHz (wood, soft, "generic light", light/medium glass), byte-identical duplicates
-// (two carpet steps), and an 8 kHz radio-noise recording.
 import type { GenreId } from '@shared/sounds/genres';
 import { sample, type SampleDef, type SamplePackSpec } from '../lib';
 
@@ -18,7 +9,6 @@ type Kind = SampleDef['kind'];
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const pad3 = (n: number) => String(n).padStart(3, '0');
 
-/** A numbered set from one ZIP: files[i] → "<name> <i+1>". */
 const set = (folder: string, from: string, files: string[], name: string, kind: Kind, tags: string[], genres: GenreId[] = PERC) =>
   files.map((f, i) => sample(folder, from, f, files.length > 1 ? `${name} ${i + 1}` : name, kind, tags, genres));
 const one = (folder: string, from: string, ext: string, name: string, kind: Kind, tags: string[], genres: GenreId[] = PERC) => sample(folder, from, undefined, name, kind, tags, genres, { ext });
@@ -33,7 +23,6 @@ export const FOLEY_FIELD: SamplePackSpec = {
     rpg: { type: 'zip', url: 'https://kenney.nl/media/pages/assets/rpg-audio/8e99002d76-1677590336/kenney_rpg-audio.zip', path: 'downloads/rpg-audio.zip' },
     impact: { type: 'zip', url: 'https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-1677589768/kenney_impact-sounds.zip', path: 'downloads/impact-sounds.zip' },
     ui: { type: 'zip', url: 'https://kenney.nl/media/pages/assets/ui-audio/490d233f68-1677590494/kenney_ui-audio.zip', path: 'downloads/ui-audio.zip' },
-    // OpenGameArt ZIPs
     keyboard: { type: 'zip', url: `${OGA}unicae_games_keyboard_soundpack_1_0.zip`, path: 'downloads/keyboard.zip' },
     clicks: { type: 'zip', url: `${OGA}Click_Clips.zip`, path: 'downloads/clicks.zip' },
     paper: { type: 'zip', url: `${OGA}sounds_6.zip`, path: 'downloads/paper.zip' },
@@ -41,7 +30,6 @@ export const FOLEY_FIELD: SamplePackSpec = {
     ticks: { type: 'zip', url: `${OGA}ticks.zip`, path: 'downloads/clock-ticks.zip' },
     rainloops: { type: 'zip', url: `${OGA}Rain%20OGG.zip`, path: 'downloads/rain-loops.zip' },
     shop: { type: 'zip', url: `${OGA}legit_audio_-_the_shop_free_sfx_wav.zip`, path: 'downloads/room-tone.zip' },
-    // OpenGameArt single files
     tapeOpen: { type: 'url', url: `${OGA}tape_recorder_opening.wav` },
     tapeClose: { type: 'url', url: `${OGA}tape_recorder_closing.wav` },
     bing: { type: 'url', url: `${OGA}bing1.wav` },
@@ -63,7 +51,6 @@ export const FOLEY_FIELD: SamplePackSpec = {
     road: { type: 'url', url: `${OGA}gatve%20Varniu_2.ogg` },
   },
   samples: [
-    // ── Kenney Casino Audio: cards, chips and dice (great shaker / snap / tick layers)
     ...set('cards', 'casino', ['Audio/card-fan-1.ogg', 'Audio/card-fan-2.ogg'], 'Card Fan', 'foley', ['cards', 'paper', 'short']),
     ...set('cards', 'casino', range(1, 4).map((n) => `Audio/card-place-${n}.ogg`), 'Card Place', 'foley', ['cards', 'paper', 'short']),
     ...set('cards', 'casino', range(1, 4).map((n) => `Audio/card-shove-${n}.ogg`), 'Card Shove', 'foley', ['cards', 'paper', 'short']),
@@ -78,7 +65,6 @@ export const FOLEY_FIELD: SamplePackSpec = {
     ...set('dice', 'casino', range(1, 3).map((n) => `Audio/dice-throw-${n}.ogg`), 'Dice Roll', 'foley', ['rattle']),
     ...set('dice', 'casino', range(1, 4).map((n) => `Audio/die-throw-${n}.ogg`), 'Single Die Roll', 'foley', ['rattle']),
 
-    // ── Kenney RPG Audio (48 kHz): books, cloth, doors, leather, metal
     ...set('books', 'rpg', ['Audio/bookOpen.ogg'], 'Book Open', 'foley', ['paper', 'short']),
     ...set('books', 'rpg', ['Audio/bookClose.ogg'], 'Book Close', 'foley', ['paper', 'short', 'punchy']),
     ...set('books', 'rpg', ['Audio/bookPlace1.ogg'], 'Book Set Down', 'foley', ['paper', 'short', 'punchy']),
@@ -97,7 +83,6 @@ export const FOLEY_FIELD: SamplePackSpec = {
     ...set('metal', 'rpg', ['Audio/drawKnife3.ogg'], 'Blade Draw', 'foley', ['metallic', 'short']),
     ...set('wood', 'rpg', ['Audio/chop.ogg'], 'Wood Chop', 'foley', ['wood', 'punchy', 'short']),
 
-    // ── Kenney Impact Sounds: the full-bandwidth sets only
     ...set('glass', 'impact', range(0, 4).map((n) => `Audio/impactGlass_heavy_${pad3(n)}.ogg`), 'Glass Knock', 'foley', ['glass', 'short', 'bright']),
     ...set('plates', 'impact', range(0, 4).map((n) => `Audio/impactPlate_heavy_${pad3(n)}.ogg`), 'Plate Hit Hard', 'foley', ['ceramic', 'short', 'bright']),
     ...set('plates', 'impact', range(0, 4).map((n) => `Audio/impactPlate_medium_${pad3(n)}.ogg`), 'Plate Hit', 'foley', ['ceramic', 'short']),
@@ -110,10 +95,8 @@ export const FOLEY_FIELD: SamplePackSpec = {
     ...set('steps', 'impact', range(1, 4).map((n) => `Audio/footstep_concrete_${pad3(n)}.ogg`), 'Concrete Step', 'foley', ['short']),
     ...set('steps', 'impact', [0, 1, 3].map((n) => `Audio/footstep_carpet_${pad3(n)}.ogg`), 'Carpet Step', 'foley', ['soft', 'short']),
 
-    // ── Kenney UI Audio: recorded switch clicks (no clipped takes)
     ...set('switches', 'ui', [2, 4, 6, 7, 8, 10, 11, 19, 20, 21, 24, 29, 33, 34, 36, 38].map((n) => `Audio/switch${n}.ogg`), 'Switch Click', 'foley', ['click', 'short']),
 
-    // ── OpenGameArt: keys, clicks, paper, books, clock
     ...set('keys', 'keyboard', range(1, 16).map((n) => `Single Keys/keypress-${pad3(n)}.wav`), 'Key Press', 'foley', ['click', 'short', 'keyboard']),
     ...set('keys', 'keyboard', range(1, 4).map((n) => `Human Typing/human_vel-${pad3(n)}.wav`), 'Keyboard Typing', 'foley', ['click', 'keyboard', 'long'], LOFI),
     ...set('clicks', 'clicks', [1, 5, 6, 7, 8, 9, 10, 13, 15, 23, 34, 35, 41, 44, 57, 62, 67, 68, 69, 70, 71, 72, 73, 74, 76].map((n) => `click${n}.wav`), 'Clicky', 'foley', ['click', 'short']),
@@ -135,7 +118,6 @@ export const FOLEY_FIELD: SamplePackSpec = {
     one('paper', 'paperRustle', '.wav', 'Paper Rustle', 'foley', ['paper', 'texture']),
     one('cloth', 'fabric', '.ogg', 'Fabric Rustles', 'foley', ['cloth', 'soft', 'long']),
 
-    // ── field recordings and room tone
     one('ambience', 'rain', '.ogg', 'Steady Rain Long', 'ambience', ['rain', 'long', 'organic'], AMB),
     ...set('ambience', 'rainloops', range(1, 4).map((n) => `${n}.ogg`), 'Rain At The Window', 'ambience', ['rain', 'loop', 'organic'], AMB),
     one('ambience', 'thunder', '.ogg', 'Rain And Thunder', 'ambience', ['rain', 'thunder', 'dark'], [...AMB, 'trap', 'drill']),

@@ -1,7 +1,3 @@
-//! Real-music regression on the bundled demo "Neon Fog" (140 BPM, F minor),
-//! rendered and HT-Demucs-separated. Gated: set KRYPT_TEST_NEONFOG to a
-//! directory holding neonfog.wav and stems/{drums,bass,other,vocals}.wav.
-
 use std::path::PathBuf;
 
 use krypt_studio_analyzer::analyze::{analyze_channels, Options};
@@ -84,17 +80,13 @@ fn neon_fog_beats_and_swing() {
         let t = t.unwrap();
         let readings: Vec<f32> = std::iter::once(t.bpm).chain(t.alternatives.iter().copied()).collect();
         assert!(readings.iter().any(|r| (r - 140.0).abs() <= 1.0), "{readings:?}");
-        // The arrangement is 32 bars (54.86 s; the rest of the 57 s file is
-        // tail): 128 beats at 140 BPM, 64 at a half-time reading.
         let full = (t.bpm - 140.0).abs() <= 1.0;
         let expect = if full { 128.0 } else { 64.0 };
         assert!((n as f32 - expect).abs() <= expect * 0.05, "{n} beats, expected ≈ {expect}");
         assert_eq!(gaps, 0, "gaps in the beat grid");
         if full {
-            // Transport swing 0.08 (odd 16ths 4 ms late): measurable to ±0.05.
             let s = swing.expect("swing");
             assert!((s - 0.08).abs() <= 0.05, "swing {s}");
-            // Downbeats on the bar grid (bar = 1.714 s from 0) within 30 ms.
             for d in downbeats {
                 let k = (d / (240.0 / 140.0)).round();
                 assert!((d - k * 240.0 / 140.0).abs() < 0.03, "downbeat {d}");
@@ -103,9 +95,6 @@ fn neon_fog_beats_and_swing() {
     }
 }
 
-/// Chords on the demo: one chord per bar from bar 1, looping Fm9 – Dbmaj7 –
-/// Ebmaj9 – Cm7 over the 32-bar arrangement (54.86 s). Roots are the goal;
-/// 7th qualities (m7 / maj7 / maj7 / m7) are a bonus.
 #[test]
 fn neon_fog_chords() {
     let Some(d) = dir() else {
@@ -152,11 +141,6 @@ fn neon_fog_chords() {
     }
 }
 
-/// Keys through the full `analyze` path (profile fit, re-ranked by the
-/// chords when keys nearly tie) on the demo, its +5 transposition `up5.wav`
-/// (Bb minor, 142 BPM: Bbm9 – Gbmaj7 – Abmaj9 – Fm7 from bar 1, 808 on the
-/// roots; its fixed-pitch kick biases the pitch profile towards F minor)
-/// and the stems.
 #[test]
 fn neon_fog_keys_through_analyze() {
     let Some(d) = dir() else {
@@ -177,7 +161,6 @@ fn neon_fog_keys_through_analyze() {
         let key = a.key.as_ref().map(|k| (k.name.clone(), k.confidence));
         eprintln!("{f:18} key {key:?} sources {:?}", a.sources.iter().filter(|s| s.starts_with("key")).collect::<Vec<_>>());
         if f == "up5.wav" {
-            // Chords one per bar from 0 at 142 BPM: Bbm, Gb, Ab, Fm.
             let bar = 240.0 / 142.0;
             let truth = [10u8, 6, 8, 5];
             let (mut n, mut ok) = (0, 0);
@@ -208,6 +191,5 @@ fn neon_fog_keys_through_analyze() {
     for f in ["stems/other.wav", "stems/bass.wav"] {
         assert!(name(f) == "Fm" || name(f) == "Ab", "{f}: {}", name(f));
     }
-    // The drum stem (pitched kick, tuned rolls) has neither key nor chords.
     assert!(keys.iter().any(|k| k.0 == "stems/drums.wav" && k.2 == 0), "chords on the drum stem");
 }

@@ -1,9 +1,3 @@
-// One requestAnimationFrame loop per window. Canvas painters, the playhead
-// and meters subscribe here instead of running their own rAF loops, so a
-// frame does all drawing in one pass (research/06 §1.3).
-//
-//   const off = onFrame((dt, now) => { if (dirty) draw(); });  // dt in seconds
-
 type FrameFn = (dtSec: number, now: number) => void;
 
 const subs = new Set<FrameFn>();
@@ -38,7 +32,6 @@ export function onFrame(fn: FrameFn): () => void {
   };
 }
 
-/** Size a canvas for HiDPI and return its 2D context scaled to CSS pixels. */
 export function setupCanvas(canvas: HTMLCanvasElement, cssW: number, cssH: number): CanvasRenderingContext2D {
   const dpr = window.devicePixelRatio || 1;
   const w = Math.max(1, Math.round(cssW * dpr));

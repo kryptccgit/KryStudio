@@ -1,8 +1,3 @@
-// Small music-theory toolkit shared by the piano roll (scale highlighting,
-// chord stamps), KPN (note/chord parsing) and MCP tools.
-// MIDI 60 = C4 here (scientific pitch). FL labels MIDI 60 "C5"; the UI can
-// show either via noteName(key, 'fl').
-
 export const NOTE_NAMES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const NOTE_NAMES_FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 
@@ -14,7 +9,6 @@ export function noteName(key: number, style: 'scientific' | 'fl' = 'scientific',
 
 const PC: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
-/** Parse a pitch class like "F#", "Bb", "c" → 0..11, or null. */
 export function parsePitchClass(s: string): number | null {
   const m = /^([A-Ga-g])([#b]{0,2})$/.exec(s.trim());
   if (!m) return null;
@@ -23,7 +17,6 @@ export function parsePitchClass(s: string): number | null {
   return ((pc % 12) + 12) % 12;
 }
 
-/** Parse "C4", "F#2", "Bb-1" (scientific) → MIDI, or null. */
 export function parseNoteName(s: string): number | null {
   const m = /^([A-Ga-g][#b]{0,2})(-?\d+)$/.exec(s.trim());
   if (!m) return null;
@@ -50,11 +43,10 @@ export const SCALES: Record<string, number[]> = {
 };
 
 export interface Key {
-  root: number; // pitch class 0..11
+  root: number;
   scale: keyof typeof SCALES | string;
 }
 
-/** Parse "F#m", "C", "Am", "D dorian", "Eb minor" → Key. */
 export function parseKey(s: string): Key | null {
   const m = /^\s*([A-Ga-g][#b]?)\s*(m|min|minor|maj|major|[a-zA-Z]+)?\s*$/.exec(s);
   if (!m) return null;
@@ -71,7 +63,6 @@ export function inScale(key: number, k: Key): boolean {
   return steps.includes((((key - k.root) % 12) + 12) % 12);
 }
 
-/** Scale degree (1-based, may be fractional-free) → MIDI note, with octave. */
 export function degreeToMidi(degree: number, k: Key, octave: number, accidental = 0): number {
   const steps = SCALES[k.scale] ?? SCALES.major;
   const d = degree - 1;
@@ -108,7 +99,6 @@ export const CHORD_QUALITIES: Record<string, number[]> = {
   '13': [0, 4, 7, 10, 14, 21],
 };
 
-/** Parse a chord symbol ("Am7", "Fmaj7", "G/B", "C#m9") at an octave → MIDI notes (bass first). */
 export function parseChord(symbol: string, octave = 3): number[] | null {
   const m = /^([A-G][#b]?)([a-z0-9]*)(?:\/([A-G][#b]?))?$/.exec(symbol.trim());
   if (!m) return null;

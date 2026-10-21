@@ -1,5 +1,3 @@
-//! The engine-facing API (re-exported at the crate root).
-
 use crate::{manager, registry, remote, shm};
 use crate::registry::is_external_id;
 use crate::remote::{RemoteEffect, RemoteInstrument};
@@ -10,40 +8,30 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Descriptor of a registered third-party plugin (None for stock ids).
 pub fn descriptor(id: &str) -> Option<Arc<PluginDescriptor>> {
     registry::descriptor(id)
 }
 
-/// Register descriptors from a scan-cache file (`--plugins` for CLI renders).
 pub fn register_file(path: &std::path::Path) -> Result<usize, String> {
     registry::register_file(path)
 }
 
-/// Engine events to forward to Electron main (crashes, editor closed,
-/// GUI param edits, load failures). Drained by the control loop.
 pub fn drain_events() -> Vec<Value> {
     manager::drain_events()
 }
 
-/// True once after the host was restarted (or `plugins.reload`): the engine
-/// should drop and re-create every third-party instance.
 pub fn take_reload_request() -> bool {
     manager::take_reload_request()
 }
 
-/// True once after new descriptors were registered: the engine should retry
-/// entities whose plugin was unknown so far.
 pub fn take_retry_request() -> bool {
     manager::take_retry_request()
 }
 
-/// Latency reported by the live effect for an entity key ("insertId/slotId").
 pub fn effect_latency(key: &str) -> Option<usize> {
     manager::live_instance(key).map(|i| i.latency())
 }
 
-/// Latency reported by the live instrument of a channel (entity key = the channel id).
 pub fn instrument_latency(key: &str) -> Option<usize> {
     manager::live_instance(key).map(|i| i.latency())
 }
@@ -92,7 +80,6 @@ fn start(id: &str, key: &str, state: Option<&str>, params: &BTreeMap<String, f64
         }
     };
     if !realtime {
-        // Offline renders wait for the plugin so the first bars aren't silent.
         if let Err(e) = inst.wait_loaded(Duration::from_secs(60)) {
             eprintln!("[plugins] {}: {e}", entry.desc.name);
         }
@@ -101,11 +88,6 @@ fn start(id: &str, key: &str, state: Option<&str>, params: &BTreeMap<String, f64
     Some(remote::Core::new(inst, entry.param_ids.clone(), &init, sr, realtime))
 }
 
-/// Hook for `create_instrument` returning None: a remote proxy for a
-/// registered `vst3:` / `clap:` instrument. `key` is the channel id;
-/// `state` the base64 blob from `generator.state`; `params` the sparse doc
-/// params (the plugin keeps its own values for the rest). `realtime` is
-/// false for offline renders (which then wait for the plugin to load).
 pub fn create_instrument(id: &str, key: &str, state: Option<&str>, params: &BTreeMap<String, f64>, sr: f32, realtime: bool) -> Option<Box<dyn Instrument>> {
     if !is_external_id(id) {
         return None;
@@ -114,7 +96,6 @@ pub fn create_instrument(id: &str, key: &str, state: Option<&str>, params: &BTre
     Some(Box::new(RemoteInstrument::new(core)))
 }
 
-/// Same for effects; `key` is "insertId/slotId".
 pub fn create_effect(id: &str, key: &str, state: Option<&str>, params: &BTreeMap<String, f64>, sr: f32, realtime: bool) -> Option<Box<dyn Effect>> {
     if !is_external_id(id) {
         return None;
@@ -129,15 +110,6 @@ fn on_worker(f: impl FnOnce() + Send + 'static) {
     let _ = std::thread::Builder::new().name("plugins-cmd".into()).spawn(f);
 }
 
-/// `plugins.*` protocol commands. `reply` may run on another thread.
-///
-///   plugins.configure {hostExe?, ownerHwnd?}
-///   plugins.register  {plugins:[descriptor…]}         → {registered, errors}
-///   plugins.editor    {key, open, title?, ownerHwnd?}
-///   plugins.states    {keys?}                          → {states:{key: base64}}
-///   plugins.state     {key}                            → {state}
-///   plugins.reload    {}                               (kills the host; the engine re-creates instances)
-///   plugins.status    {}                               → {hostPid, instances:[…]}
 pub fn handle_command(cmd: &str, v: &Value, reply: Reply) {
     match cmd {
         "plugins.configure" => {
@@ -151,7 +123,6 @@ pub fn handle_command(cmd: &str, v: &Value, reply: Reply) {
         }
         "plugins.register" => {
             let (n, errs) = registry::register_json(v.get("plugins").unwrap_or(&Value::Null));
-            // Channels whose plugin just became known must be (re)built.
             manager::request_retry();
             reply(Ok(json!({ "registered": n, "errors": errs })));
         }

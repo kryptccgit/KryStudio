@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The Vocal Booth session: open it (Vocals track + chain, audio mode, Song
-// mode, armed), record from the playhead, stop, find the take, and the
-// review verbs (Listen, Redo, Record more, Tune). Space works too: the panel
-// follows the engine's record state from telemetry (watchTransport). Every
-// step ends in visible feedback: the panel's line or a toast.
-// ──────────────────────────────────────────────────────────────────────
-
 import { factoryChainPresets } from '@shared/sounds/factory';
 import { recordingInsert, recordingSettings } from '@shared/live/recording';
 import type { TuneStyle } from '@shared/music/keymatch';
@@ -23,7 +15,6 @@ import { useBooth } from './store';
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 const set = useBooth.setState;
 
-/** Audio clips before this take, and the last take report: how the new take is found after Stop. */
 let before = new Set<string>();
 let lastTakeId: number | null = null;
 let listenTimer: ReturnType<typeof setTimeout> | null = null;
@@ -61,7 +52,6 @@ async function setArmed(on: boolean): Promise<boolean> {
   }
 }
 
-/** Open the booth: a Vocals track with a vocal chain, audio recording, Song mode, armed. */
 export async function openBooth(): Promise<void> {
   set({ open: true, phase: 'ready', take: null, error: null, listening: false });
   showStudio();
@@ -78,7 +68,6 @@ export async function openBooth(): Promise<void> {
   await setArmed(true);
 }
 
-/** Done: stop anything running, disarm, close. */
 export async function closeBooth(): Promise<void> {
   const { phase, kept, take } = useBooth.getState();
   if (phase === 'recording' || phase === 'countIn' || phase === 'starting') await boothStop();
@@ -90,7 +79,6 @@ export async function closeBooth(): Promise<void> {
   else toast.info('Vocal Booth closed: recording disarmed');
 }
 
-/** The big record button: arm if needed, then play (the engine records from the playhead). */
 export async function boothRecord(): Promise<void> {
   await stopListening();
   if (!useLiveInput.getState().record.armed && !(await setArmed(true))) return;
@@ -116,7 +104,6 @@ export async function boothStop(): Promise<void> {
   await collectTake();
 }
 
-/** After Stop: wait for main's take report, find the new clip, disarm (so Listen doesn't record) and review it. */
 export async function collectTake(): Promise<void> {
   set({ phase: 'saving' });
   let message = '';
@@ -147,7 +134,6 @@ async function stopListening(): Promise<void> {
   await window.krypt.engine.transport('stop').catch(() => undefined);
 }
 
-/** Play the take back with the beat (disarmed, so nothing records). */
 export async function boothListen(): Promise<void> {
   const take = useBooth.getState().take;
   if (!take) return;
@@ -160,7 +146,6 @@ export async function boothListen(): Promise<void> {
   listenTimer = setTimeout(() => void stopListening(), ((take.seconds ?? 8) + 0.6) * 1000);
 }
 
-/** Throw the take away and record that spot again. */
 export async function boothRedo(): Promise<void> {
   const take = useBooth.getState().take;
   if (!take) return;
@@ -172,7 +157,6 @@ export async function boothRedo(): Promise<void> {
   await boothRecord();
 }
 
-/** Keep the take; the playhead moves to the next bar after it, ready for the next part. */
 export async function boothMore(): Promise<void> {
   const take = useBooth.getState().take;
   await stopListening();
@@ -181,7 +165,6 @@ export async function boothMore(): Promise<void> {
   await setArmed(true);
 }
 
-/** Krypt Tune on the Vocals insert (every take through it), key detected from this take. */
 export async function boothTune(style: TuneStyle): Promise<void> {
   const take = useBooth.getState().take;
   if (!take || useBooth.getState().tuning) return;
@@ -190,7 +173,6 @@ export async function boothTune(style: TuneStyle): Promise<void> {
   set((s) => ({ tuning: false, tuned: ok ? style : s.tuned }));
 }
 
-/** Repeat the beat over the first bars so there's something to sing to. */
 export async function boothLoopBeat(): Promise<void> {
   const p = getProject();
   const steps = loopBeatSteps(p);
@@ -206,7 +188,6 @@ export async function boothLoopBeat(): Promise<void> {
   }
 }
 
-/** Space / the transport bar started or stopped recording: follow it (called by the panel from telemetry). */
 export function followRecordState(prev: 'countIn' | 'recording' | null, rec: 'countIn' | 'recording' | null): void {
   const phase = useBooth.getState().phase;
   if (!prev && rec) {

@@ -1,6 +1,3 @@
-// Krypt Gate/Time custom steps (shared/plugins/gateSteps.ts): the step text
-// parser / printer, the param mapping and the factory step presets, checked
-// against the generated catalog (the Rust gate.rs is the source of truth).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { pluginById } from '@shared/plugins/catalog';
@@ -81,7 +78,6 @@ test('params: switch to Custom steps, write all 16 steps, read back sparse param
   assert.equal(p.g16, 1);
   for (const [k, v] of Object.entries(p)) assert.equal(clampToSpec(spec(k), v), v, `${k} is inside its spec`);
   assert.equal(printGateSteps(readGateSteps(p)), '1/4 R4 . H');
-  // missing keys = catalog defaults: 16 Play steps of 1/16 at full level
   assert.equal(printGateSteps(readGateSteps({})), '1/16 ' + Array(16).fill('P').join(' '));
   assert.equal(readGateSteps({ stepCount: 99, s1: 42, g1: -3 }).steps.length, 16, 'out-of-range values are clamped');
 });

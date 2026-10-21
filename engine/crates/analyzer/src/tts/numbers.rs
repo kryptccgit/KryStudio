@@ -1,8 +1,3 @@
-//! Numbers → English words for the G2P front end ("1990" → "nineteen
-//! ninety", "3.5" → "three point five", "21st" → "twenty first").
-//! Words are space-separated (no hyphens) because the G2P looks words up one
-//! at a time. Krypt-original.
-
 const ONES: [&str; 20] = [
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
     "seventeen", "eighteen", "nineteen",
@@ -33,7 +28,6 @@ fn below_1000(n: u64, out: &mut Vec<String>) {
     }
 }
 
-/// "one hundred twenty three". Numbers ≥ 10^15 are read digit by digit.
 pub fn cardinal(n: u64) -> String {
     if n >= 1_000_000_000_000_000 {
         return digits(&n.to_string());
@@ -56,12 +50,10 @@ pub fn cardinal(n: u64) -> String {
     out.join(" ")
 }
 
-/// Each digit as a word ("3 1 4" → "three one four").
 pub fn digits(s: &str) -> String {
     s.chars().filter_map(|c| c.to_digit(10)).map(|d| ONES[d as usize]).collect::<Vec<_>>().join(" ")
 }
 
-/// "first", "twenty second", "one hundredth".
 pub fn ordinal(n: u64) -> String {
     let c = cardinal(n);
     let (head, last) = match c.rfind(' ') {
@@ -82,8 +74,6 @@ pub fn ordinal(n: u64) -> String {
     format!("{head}{last}")
 }
 
-/// Years as spoken: 1990 → "nineteen ninety", 1905 → "nineteen oh five",
-/// 2000 → "two thousand", 2007 → "two thousand seven", 2024 → "twenty twenty four".
 pub fn year(n: u64) -> String {
     if !(1000..=2999).contains(&n) {
         return cardinal(n);
@@ -105,7 +95,6 @@ pub fn year(n: u64) -> String {
     out.join(" ")
 }
 
-/// Plural of a number's last word for decades: "nineties", "twenties".
 pub fn plural(words: &str) -> String {
     if let Some(stem) = words.strip_suffix('y') {
         format!("{stem}ies")
@@ -116,9 +105,6 @@ pub fn plural(words: &str) -> String {
     }
 }
 
-/// Spoken form of one numeric token (digits with optional `,` grouping,
-/// a decimal part, an ordinal suffix, an `s` decade suffix or a `%`).
-/// None when the token is not a number this understands.
 pub fn spell_token(tok: &str) -> Option<String> {
     let t = tok.trim();
     if t.is_empty() || !t.chars().next()?.is_ascii_digit() {
@@ -153,12 +139,10 @@ pub fn spell_token(tok: &str) -> Option<String> {
     }
     let grouped = body.contains(',');
     let digits_only = body.replace(',', "");
-    // A leading zero ("007") reads digit by digit.
     if digits_only.len() > 1 && digits_only.starts_with('0') {
         return Some(tail(digits(&digits_only)));
     }
     let n: u64 = digits_only.parse().ok()?;
-    // Four-digit numbers without grouping that look like years read as years.
     if !grouped && !pct && digits_only.len() == 4 && (1100..=2099).contains(&n) {
         return Some(year(n));
     }

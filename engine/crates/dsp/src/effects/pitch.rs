@@ -1,24 +1,3 @@
-//! krypt.pitch — "Krypt Tune": real-time monophonic pitch correction.
-//!
-//! Detection: YIN (`blocks::pitch`) on a ~16 kHz copy of the mono sum,
-//! every ~4 ms. The detected pitch snaps to the nearest note of the chosen
-//! key/scale (with hysteresis, so a note does not flicker at the boundary).
-//! The correction in semitones glides to its target over Retune speed.
-//! Humanize lengthens the retune time the longer a note is held (up to
-//! +300 ms): note starts are still caught quickly, while on sustained notes
-//! only the average offset is corrected and the singer's vibrato passes.
-//!
-//! Shifting: a pitch-synchronous splice shifter (our own design in the
-//! spirit of WSOLA, W. Verhelst and M. Roelands, ICASSP 1993). A read head
-//! moves through a delay line at rate r = 2^(c/12). When it drifts half a
-//! period away from the nominal delay D it jumps by one detected period,
-//! refined by a cross-correlation search, and the old and new heads
-//! crossfade over one period. Periodic sound makes the splice seamless and
-//! the formants move by r only (≤ ~10% for in-scale corrections).
-//!
-//! Latency: the nominal delay D = 0.9 / 60 Hz + 8 samples (~15 ms), fixed.
-//! With no correction the output is the input delayed by exactly D.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::delay::DelayLine;
 use crate::blocks::pitch::Yin;
@@ -69,20 +48,14 @@ pub fn descriptor() -> PluginDescriptor {
 
 const FMIN: f32 = 60.0;
 const FMAX: f32 = 1000.0;
-/// Hysteresis (semitones) before switching to another target note; none
-/// for the first `FREE_S` after a change, so glides are followed closely.
 const HYST: f32 = 0.1;
 const FREE_S: f32 = 0.1;
 const MAX_CORR: f32 = 3.0;
-/// Pitch moves larger than this (semitones) count as a new note.
 const NOTE_JUMP: f32 = 0.8;
-/// Time constant of the pitch average used to pick the target note.
 const SELECT_S: f32 = 0.015;
-/// Humanize: extra retune time constant per second of held note, and its cap.
 const HUMANIZE_PER_S: f32 = 0.6;
 const HELD_CAP_S: f32 = 0.5;
 
-/// Pitch-class bitmask of a scale on a root.
 fn scale_mask(root: usize, scale: usize) -> u16 {
     let mut m = 0u16;
     for &s in SCALE_STEPS[scale.min(SCALE_STEPS.len() - 1)] {
@@ -91,7 +64,6 @@ fn scale_mask(root: usize, scale: usize) -> u16 {
     m
 }
 
-/// Nearest MIDI note to `p` whose pitch class is in `mask`.
 pub fn snap_to_scale(p: f32, mask: u16) -> i32 {
     let c = p.round() as i32;
     let mut best = c;
@@ -193,14 +165,11 @@ impl Pitch {
         self.set_retune();
     }
 
-    /// Correction smoothing: a one-pole reaching ~95% within the retune
-    /// time, lengthened by Humanize while a note is held.
     fn set_retune(&mut self) {
         let extra_s = self.humanize * HUMANIZE_PER_S * self.held_s.min(HELD_CAP_S);
         self.corr_coef = tc_coef(self.speed_ms / 3.0 + extra_s * 1000.0, self.sr);
     }
 
-    /// New YIN estimate → correction target.
     fn on_estimate(&mut self) {
         let f = self.yin.freq;
         if !(f > 0.0 && self.yin.aperiodicity < 0.25) {
@@ -212,7 +181,6 @@ impl Pitch {
         }
         let p = 69.0 + 12.0 * (f / 440.0).log2();
         if !self.voiced || (p - self.p_sel).abs() > NOTE_JUMP {
-            // first estimate or a jump to a new note
             self.voiced = true;
             self.p_sel = p;
         } else {
@@ -232,10 +200,6 @@ impl Pitch {
         self.period = (self.sr / f) as f64;
     }
 
-    /// Best splice target near `cand` (delay) for the head at `lag`:
-    /// maximizes the normalized correlation of what both would play next,
-    /// with a parabolic sub-sample refinement, and keeps the head's own
-    /// fractional position (the jump is applied as an offset).
     fn refine(&self, lag: f64, cand: f64, p: f64) -> f64 {
         let w = ((p * 0.5) as usize).clamp(16, 400).min((lag as usize).saturating_sub(2));
         let range = ((p * 0.125) as i64).clamp(2, 48);
@@ -327,7 +291,6 @@ impl Effect for Pitch {
             }
             let fading = self.xf < 1.0;
             let rate = if self.corr == 0.0 && !fading {
-                // no correction: drift back to the nominal delay (≤ 3.5 cents)
                 1.0 - ((d0 - self.lag) * 1e-4).clamp(-0.002, 0.002)
             } else {
                 ((self.corr / 12.0) as f64).exp2()
@@ -399,7 +362,6 @@ mod tests {
         assert_eq!(snap_to_scale(69.4, chrom), 69);
         assert_eq!(snap_to_scale(69.6, chrom), 70);
         let c_major = scale_mask(0, 1);
-        // A#4 + 0.3 → B (in C major), A# is not
         assert_eq!(snap_to_scale(70.3, c_major), 71);
         assert_eq!(snap_to_scale(70.0, scale_mask(9, 2)), 69, "A minor: A# → A (ties go down)");
         let e_blues = scale_mask(4, 8);

@@ -1,7 +1,3 @@
-// MIDI hardware runtime in main (electron/midi/hardware.ts) against a fake
-// engine: the open set / clock / sync pushes, grid LEDs (programmer mode on
-// connect, only changes afterwards, hand-back on disconnect), the external
-// tempo written on sync stop, engine restarts; and the midi_setup MCP tool.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -94,7 +90,6 @@ function rig(initial: Partial<Settings> = {}) {
   const emit = (e: EngineEvent) => {
     for (const fn of eventFns) fn(e);
   };
-  /** Let debounced LED updates and queued pushes finish. */
   const settle = async () => {
     for (let i = 0; i < 3; i++) {
       await new Promise((r) => setTimeout(r, 25));
@@ -111,7 +106,6 @@ function rig(initial: Partial<Settings> = {}) {
   return { doc, hw, ex, requests, sent, broadcasts, logs, setStatus, emit, settle, setGrid, settings: () => settings, enabled: () => enabled };
 }
 
-/** Two scenes with a clip on track 1 (scene 1). */
 function session(r: ReturnType<typeof rig>) {
   const p = r.doc.project;
   const pat = p.transport.activePatternId!;
@@ -158,24 +152,20 @@ test('grid LEDs: the paired port opens, programmer mode + the full map, then onl
   assert.ok(first.messages.some((m: number[]) => m[0] === 0x90 && m[1] === 81 && m[2] === 21), 'the green clip on pad 81');
   assert.deepEqual(first.atClose.at(-1), LPX_LIVE, 'back to Live mode when the port closes');
   const count = r.sent('midiSend').length;
-  // the clip starts playing: only the changed controls
   r.emit({ event: 'launcherState', playing: { [g.t[0]]: g.c1 }, queued: {}, overridden: [g.t[0]], recording: false });
   await r.settle();
   assert.equal(r.sent('midiSend').length, count + 1);
   const upd = r.sent('midiSend').at(-1);
   assert.deepEqual(upd.messages, [[0x92, 81, 21], [0xb0, 89, 21], [0xb0, 98, 5]], 'pad pulses, its scene and stop-all light');
   assert.equal(upd.atClose, undefined);
-  // the same state again and an unrelated edit: nothing sent
   r.emit({ event: 'launcherState', playing: { [g.t[0]]: g.c1 }, queued: {}, overridden: [g.t[0]], recording: false });
   r.ex('transport.set', { bpm: 99 });
   await r.settle();
   assert.equal(r.sent('midiSend').length, count + 1);
-  // a doc edit that moves the grid (a new clip) updates its pad
   r.ex('session.setClip', { trackId: g.t[1], sceneId: r.doc.project.session!.sceneOrder[0], patternId: r.doc.project.transport.activePatternId });
   await r.settle();
   assert.equal(r.sent('midiSend').length, count + 2);
   assert.ok(r.sent('midiSend').at(-1).messages.some((m: number[]) => m[1] === 82));
-  // LEDs off: the old port is cleared and handed back to Live mode, then closed
   r.setGrid({ ledOutput: null });
   await r.settle();
   const bye = r.sent('midiSend').at(-1);

@@ -1,10 +1,3 @@
-// warp_clip (Wave 12.2, research/16 §2.2): warp an audio clip to the grid.
-// Auto-warp beat-tracks the sample with the analyzer (electron/warp) and
-// writes the markers through audio.autoWarp; hand-placed markers, the mode
-// and its options go through the other audio.*Warp* commands. Everything is
-// one undo step (the call's group); the warp map is on the clip's Audio Clip
-// channel, so every clip of that channel follows.
-
 import { z } from 'zod';
 import type { Channel } from '@shared/schema/project';
 import { WARP_MODES, type WarpMap } from '@shared/schema/warp';
@@ -20,7 +13,6 @@ function runOpts(ctx: RunCtx) {
   return { onProgress: ctx.progress ? (stage: string, fraction: number) => ctx.progress!(fraction, stage || 'working') : undefined, signal: ctx.signal };
 }
 
-/** "tones mode, 17 markers (beat 0 @ 0.12 s … beat 64 @ 30.1 s)". */
 export function describeWarp(w: WarpMap | undefined): string {
   if (!w) return 'not warped (Stretch params only)';
   const m = w.markers;

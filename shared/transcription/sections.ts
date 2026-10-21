@@ -1,10 +1,3 @@
-// The song's sections on the bar grid: the analyzer's sections (repeated-
-// material segmentation) at the chosen tempo reading, snapped to whole bars
-// (lengths within a bar of a 4-bar phrase take the phrase), with energy and
-// display names from the SectionKind heuristics the reference brief uses
-// (energy + position: Intro, Verse, Build, Drop / Chorus, Break, Outro;
-// numbered when a kind repeats), and `sameAs` pattern reuse. Pure.
-
 import type { AudioAnalysis, DrumHit } from '../analyzer/protocol';
 import type { Playbook, PlaybookSection, SectionKind } from '../playbooks/types';
 import { planKinds, referenceSections } from '../reference/brief';
@@ -13,11 +6,8 @@ import { PPQ } from '../schema/time';
 import type { GridChord, GridNote, TranscribedPart, TranscribedSection } from './types';
 import type { TranscriptionGrid } from './grid';
 
-/** Phrase length sections prefer (bars). */
 export const PHRASE = 4;
-/** sameAs needs at least this drum + chord similarity with the earlier section. */
 export const SAME_AS_MIN = 0.85;
-/** A section this close to the loudest one (LU) is a peak. */
 const PEAK_LU = 1.8;
 const BREAKS: SectionKind[] = ['break', 'breakdown', 'bridge'];
 
@@ -45,11 +35,6 @@ function meanLufs(items: Array<{ lufs: number; w: number }>): number {
   return r1(10 * Math.log10(Math.max(1e-7, p)));
 }
 
-/**
- * Bar lengths with the phrase preference: walking forward, a section whose length is within one bar of a multiple of
- * 4 (and at least 3 bars) moves its end boundary onto the phrase, when the next section keeps at least one bar.
- * The song's last bar never moves. `starts` are 0-based bar indices, ascending, starts[0] = 0.
- */
 export function snapPhrases(starts: number[], totalBars: number): number[] {
   const s = starts.slice();
   for (let i = 0; i + 1 < s.length; i++) {
@@ -63,7 +48,6 @@ export function snapPhrases(starts: number[], totalBars: number): number[] {
   return s;
 }
 
-/** A synthetic arrangement for planKinds when no genre playbook is known. */
 function genericArrangement(peak: SectionKind): PlaybookSection[] {
   const sec = (kind: SectionKind, energy: number): PlaybookSection => ({ kind, label: KIND_LABEL[kind], bars: 8, energy, parts: [] });
   return [sec('intro', 0.4), sec('verse', 0.6), sec('build', 0.7), sec(peak, 1), sec('break', 0.4), sec('outro', 0.35)];
@@ -72,11 +56,8 @@ function genericArrangement(peak: SectionKind): PlaybookSection[] {
 export interface SectionInput {
   analysis: AudioAnalysis;
   grid: TranscriptionGrid;
-  /** Drum hits (kick rate per section lowers the energy of kick-less sections). */
   hits: readonly DrumHit[];
-  /** The genre playbook whose section vocabulary names the sections (null: a generic one). */
   playbook: Pick<Playbook, 'arrangement'> | null;
-  /** The generic vocabulary's peak: 'chorus' for songs with vocals, else 'drop'. */
   peak: SectionKind;
 }
 
@@ -85,7 +66,6 @@ export interface SectionsResult {
   kinds: SectionKind[];
 }
 
-/** Sections on the bar grid (sameAs left null; see linkSameAs). One section spanning the song without analysis sections. */
 export function songSections(inp: SectionInput): SectionsResult {
   const g = inp.grid;
   const total = g.totalBars;
@@ -130,7 +110,6 @@ export function songSections(inp: SectionInput): SectionsResult {
   }
   const planned: PlannedSection[] = live.map((p) => ({ label: p.label, startBar: p.startBar, bars: p.bars, lufs: p.lufs, energy: p.energy }));
   const kinds: SectionKind[] = planned.length === 1 ? ['verse'] : planKinds(planned, inp.playbook ?? { arrangement: genericArrangement(inp.peak) });
-  // A quiet section before the first peak is part of the way in, not a breakdown (nothing has dropped yet).
   const firstPeak = planned.findIndex((p) => p.energy >= 1 - PEAK_LU / 10);
   for (let i = 1; i < (firstPeak < 0 ? 0 : firstPeak); i++) if (BREAKS.includes(kinds[i])) kinds[i] = kinds.slice(0, i).every((k) => k === 'intro') && planned[i].energy <= 0.35 ? 'intro' : 'verse';
   const count = new Map<SectionKind, number>();
@@ -144,8 +123,6 @@ export function songSections(inp: SectionInput): SectionsResult {
   });
   return { sections, kinds };
 }
-
-// ── sameAs ──────────────────────────────────────────────────────────────
 
 function cosine(a: Map<number, number>, b: Map<number, number>): number {
   let ab = 0;
@@ -161,7 +138,6 @@ function cosine(a: Map<number, number>, b: Map<number, number>): number {
   return ab / Math.sqrt(aa * bb);
 }
 
-/** A part's notes in one section as 16th cells (relative) → velocity (pitched parts: cell × key). */
 function cells(notes: readonly GridNote[], from: number, to: number, pitched: boolean): Map<number, number> {
   const m = new Map<number, number>();
   const step = PPQ / 4;
@@ -174,7 +150,6 @@ function cells(notes: readonly GridNote[], from: number, to: number, pitched: bo
   return m;
 }
 
-/** Similarity of two equally long sections over some parts: cosine of their 16th-cell grids, weighted by note count. */
 function partsSimilarity(parts: readonly TranscribedPart[], a: [number, number], b: [number, number], pitched: boolean): number | null {
   let w = 0;
   let s = 0;
@@ -189,7 +164,6 @@ function partsSimilarity(parts: readonly TranscribedPart[], a: [number, number],
   return w ? s / w : null;
 }
 
-/** Chord agreement beat by beat (share of beats with the same chord or both silent); null without chords in either. */
 function chordSimilarity(chords: readonly GridChord[], a: [number, number], b: [number, number]): number | null {
   const at = (t: number) => {
     const c = chords.find((x) => x.tick <= t && t < x.tick + x.dur);
@@ -209,15 +183,9 @@ function chordSimilarity(chords: readonly GridChord[], a: [number, number], b: [
 }
 
 export interface SameAsOptions {
-  /** Also require the pitched parts (bass, lead) to match (exact transcriptions must not lose notes). */
   pitched: boolean;
 }
 
-/**
- * Sets `sameAs` on sections that repeat an earlier one: the same label, the same length, and drum + chord
- * similarity (their mean) ≥ 0.85 (with `pitched`, the bass / lead too). Points at the first section of the chain.
- * Returns the similarity of each linked pair for reporting.
- */
 export function linkSameAs(sections: TranscribedSection[], parts: readonly TranscribedPart[], chords: readonly GridChord[], ticksPerBar: number, opts: SameAsOptions): number[] {
   const drums = parts.filter((p) => p.kind === 'drum');
   const pitchedParts = parts.filter((p) => p.kind === 'bass' || p.kind === 'lead');

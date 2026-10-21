@@ -1,19 +1,9 @@
-// ZIP members for sound packs (research/14 §2.3): some CC0 sources (Kenney, OpenGameArt) only publish ZIP archives.
-// After the archive's own SHA-256 checked out (service.ts), only the catalog's listed members are extracted, each
-// streamed through fflate's Inflate (MIT) into a temp file, hashed on the way, and renamed into place only when its
-// size and SHA-256 match. Nothing else in the archive is ever written. The central directory is read from the end of
-// the file (so data-descriptor entries and ZIP64 archives work) and each member is read straight from its offset, so
-// memory stays at one chunk, never the whole archive.
-//
-// Every failure is an Error whose message is a sentence; a cancel is DownloadCancelled. Node-only.
-
 import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import { Inflate, strFromU8 } from 'fflate';
 import { writeFileAtomicWith } from '../system/files';
 import { DownloadCancelled } from '../system/download';
 
-/** One entry of the archive's central directory. */
 export interface ZipEntry {
   name: string;
   flags: number;
@@ -23,7 +13,6 @@ export interface ZipEntry {
   localOffset: number;
 }
 
-/** A member to extract: its exact entry name, where it goes and what it must be. */
 export interface ZipExtract {
   from: string;
   dest: string;
@@ -37,7 +26,6 @@ const SIG_LOC64 = 0x07064b50;
 const SIG_CEN = 0x02014b50;
 const SIG_LOC = 0x04034b50;
 const CHUNK = 1 << 20;
-/** A central directory bigger than this isn't a sound pack. */
 const MAX_DIRECTORY = 64 * 1024 * 1024;
 
 const u16 = (b: Uint8Array, o: number) => b[o] | (b[o + 1] << 8);
@@ -55,12 +43,10 @@ async function readAt(fh: fsp.FileHandle, pos: number, len: number): Promise<Uin
   return buf;
 }
 
-/** Entry names are UTF-8 when the flag says so; otherwise plain ASCII (any other byte is read as Latin-1). */
 function entryName(bytes: Uint8Array, flags: number): string {
   return flags & 0x800 ? strFromU8(bytes) : strFromU8(bytes, true);
 }
 
-/** The central directory: entry name → entry (the first of duplicate names wins). */
 export async function readZipDirectory(fh: fsp.FileHandle): Promise<Map<string, ZipEntry>> {
   const size = (await fh.stat()).size;
   if (size < 22) throw new Error("it isn't a ZIP archive (too small)");
@@ -79,7 +65,6 @@ export async function readZipDirectory(fh: fsp.FileHandle): Promise<Map<string, 
   let dirSize = u32(tail, at + 12);
   let dirOffset = u32(tail, at + 16);
   if (count === 0xffff || dirSize === 0xffffffff || dirOffset === 0xffffffff) {
-    // ZIP64: the locator sits right before the classic record.
     const locAt = size - tailLen + at - 20;
     if (locAt < 0) throw new Error('its ZIP64 directory locator is missing');
     const loc = await readAt(fh, locAt, 20);
@@ -105,7 +90,6 @@ export async function readZipDirectory(fh: fsp.FileHandle): Promise<Map<string, 
     const commentLen = u16(dir, p + 32);
     let localOffset = u32(dir, p + 42);
     const name = entryName(dir.subarray(p + 46, p + 46 + nameLen), flags);
-    // ZIP64 extra field: the 64-bit values, in order, for the fields that were 0xFFFFFFFF.
     let e = p + 46 + nameLen;
     const extraEnd = e + extraLen;
     while (e + 4 <= extraEnd) {
@@ -132,10 +116,6 @@ export async function readZipDirectory(fh: fsp.FileHandle): Promise<Map<string, 
   return out;
 }
 
-/**
- * Stream one member into `dest` (temp file + rename), checking size and SHA-256 on the way. Throws a sentence on any
- * mismatch or damage (the destination is left untouched), DownloadCancelled when `signal` aborts.
- */
 async function extractOne(fh: fsp.FileHandle, entry: ZipEntry, want: ZipExtract, signal?: AbortSignal): Promise<void> {
   if (entry.flags & 0x1) throw new Error(`${want.from} is encrypted`);
   if (entry.method !== 0 && entry.method !== 8) throw new Error(`${want.from} uses a compression method Krypt Studio can't read (method ${entry.method})`);
@@ -151,7 +131,6 @@ async function extractOne(fh: fsp.FileHandle, entry: ZipEntry, want: ZipExtract,
     let pending: Uint8Array[] = [];
     const take = (data: Uint8Array): void => {
       written += data.length;
-      // Never write more than the catalog says (a damaged or hostile archive can't fill the disk).
       if (written > want.bytes) throw new Error(`${want.from} is bigger than the catalog says (more than ${want.bytes} bytes)`);
       hash.update(data);
       pending.push(data);
@@ -180,11 +159,6 @@ async function extractOne(fh: fsp.FileHandle, entry: ZipEntry, want: ZipExtract,
   });
 }
 
-/**
- * Extract exactly `members` from the ZIP at `zipPath`. Every listed name must be in the archive (checked before
- * anything is written). `done(m)` lets the caller skip members already in place (resume). Unlisted entries are never
- * read. Throws a sentence, or DownloadCancelled.
- */
 export async function extractZipMembers(zipPath: string, members: readonly ZipExtract[], opts: { signal?: AbortSignal; done?(m: ZipExtract): Promise<boolean> } = {}): Promise<void> {
   let fh: fsp.FileHandle;
   try {

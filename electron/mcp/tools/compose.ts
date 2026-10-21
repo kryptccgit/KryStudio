@@ -1,6 +1,3 @@
-// Composition tools: KPN write/read, precise note edits, pattern management,
-// deterministic note transforms.
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import type { Channel, Note, Pattern, Project } from '@shared/schema/project';
@@ -42,7 +39,6 @@ function displayName(trackName: string): string {
   return /^[a-z]/.test(n) ? n[0].toUpperCase() + n.slice(1) : n;
 }
 
-/** Unique KPN track names for channels (ids for duplicate names). */
 function trackNames(p: Project, ids: string[]): Map<string, string> {
   const counts = new Map<string, number>();
   for (const id of p.channelOrder) {
@@ -61,7 +57,6 @@ function patternBars(p: Project, patId: string): number {
   return Math.max(1, Math.ceil(patternLength(p.patterns[patId], p.transport.timeSig) / ticksPerBar(p.transport.timeSig)));
 }
 
-/** Canonical KPN for (some) channels of a pattern. */
 export function patternKpn(deps: MainDeps, patId: string, channelIds?: string[], key?: string | null): { text: string; warnings: string[]; notes: number; channels: number } {
   const p = deps.doc.project;
   const pat = p.patterns[patId];
@@ -143,7 +138,6 @@ export const writePattern = defineTool({
     }
     if (!parsed.tracks.length) fail('The KPN has no channel lines (write e.g. `kick: x... x... x... x...`).');
 
-    // Map tracks → channels before touching anything.
     const plan: Array<{ track: KpnTrack; channelId?: string; create?: InstrumentChoice }> = [];
     const used = new Map<string, string>();
     const missing: string[] = [];
@@ -168,7 +162,6 @@ export const writePattern = defineTool({
       if (!item.create) continue;
       const c = item.create;
       if (c.preset) {
-        // A finished sound for the name's role + the project genre (instrument, params, sample, FX chain).
         item.channelId = ctx.exec<{ channelId: string }>('presets.addChannel', { preset: c.preset, name: displayName(item.track.name), withFx: true }).channelId;
         created.push(`"${displayName(item.track.name)}" → ${c.label}`);
         continue;
@@ -229,7 +222,6 @@ export const writePattern = defineTool({
       parts.push(`${chName} ${now} note${now === 1 ? '' : 's'} (+${added}/−${removed})`);
     }
 
-    // Pattern length from the header (never silently truncating other channels).
     const warnings: string[] = parsed.warnings.map((w) => w.message);
     const curLen = patternLength(pat(), ts);
     let lengthNote = '';
@@ -258,7 +250,6 @@ export const writePattern = defineTool({
     }
     if (parsed.header.swing !== null) warnings.push(`swing=${parsed.header.swing} in the header is not applied (swing is global): call set_swing`);
 
-    // Musical warnings the model can act on without hearing.
     const key = parsed.header.key ? parseKey(parsed.header.key) : null;
     if (key) {
       const outs: string[] = [];
@@ -444,8 +435,6 @@ export const selectPattern = defineTool({
   },
 });
 
-// ── transform_notes ─────────────────────────────────────────────────────
-
 const zOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('transpose'), semitones: z.number().int().min(-48).max(48).optional(), degrees: z.number().int().min(-21).max(21).optional(), key: z.string().max(16).optional().describe('Key for degree transposition, e.g. "Am".') }),
   z.object({ op: z.literal('shift'), steps: z.number().min(-1024).max(1024).describe('16th steps; negative = earlier.') }),
@@ -480,7 +469,6 @@ function mulberry(seed: number): () => number {
 
 export const zNoteSelect = z.object({ bars: z.string().optional().describe('"1-4"'), pitch: z.string().optional().describe('"C3-C5"') });
 
-/** One channel's notes in a pattern, narrowed by an optional bars / pitch selection. */
 export function selectNotes(p: Project, pat: Pattern, ch: Channel, select?: z.infer<typeof zNoteSelect>): Note[] {
   const ts = p.transport.timeSig;
   let sel = Object.values(pat.notes[ch.id] ?? {}) as Note[];
@@ -691,8 +679,6 @@ export const transformNotes = defineTool({
   },
 });
 
-// ── delete_objects ──────────────────────────────────────────────────────
-
 export const deleteObjects = defineTool({
   name: 'delete_objects',
   title: 'Delete channels, patterns, effects…',
@@ -759,7 +745,6 @@ export const deleteObjects = defineTool({
       ctx.exec('scripts.remove', { id: s.id });
       done.push(`script "${safeName(s.name)}"`);
     }
-    // Samples last: deleting a channel above frees its sample.
     if (a.samples?.length) {
       const unused = a.samples.some((r) => norm(r) === 'unused');
       const ids = new Set<string>();

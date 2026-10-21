@@ -1,4 +1,3 @@
-// Start here (step by step) · 1: opening Krypt Studio and starting a beat.
 import type { GuideArticle } from '../articles';
 
 export const START: GuideArticle = {

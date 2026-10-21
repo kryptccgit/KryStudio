@@ -1,6 +1,3 @@
-// window.krypt.scripts in the browser mock (npm run dev:web). Scripts only ever run in the desktop app's main
-// process (the QuickJS sandbox), never in a page, so the mock lists them and checks headers but can't run them.
-
 import type { DocHost } from '@shared/doc/DocHost';
 import type { KryptApi } from '@shared/types';
 import { FACTORY_SCRIPTS } from '@shared/scripts/factory';

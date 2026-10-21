@@ -1,13 +1,7 @@
-//! Tonal one-shots: 808s (rendered by krypt.kick808 at C2 = MIDI 36, then
-//! coloured with krypt.drive), bass one-shots and chord stabs played on the
-//! stock synths (TriOsc, Wave, FM). Every file is tuned to C; its true MIDI
-//! root goes into the index (`rootNote`) and the WAV `smpl` chunk.
-
 use super::library::{spec, Spec};
 use super::synth::*;
 use crate::instruments::kick808::{param_index, Kick808};
 
-/// The 808 root: C2 (65.41 Hz), the same pitch krypt.kick808 plays at MIDI 36.
 pub(crate) const ROOT_808: u8 = 36;
 
 #[derive(Clone, Copy)]
@@ -30,7 +24,6 @@ fn k808(p: K8) -> Vec<f32> {
     )
 }
 
-/// krypt.drive on a mono signal (mode: 0 Tape, 1 Tube, 2 Hard, 3 Fold, 4 Bitcrush).
 fn drv(x: &mut Vec<f32>, mode: f32, drive_db: f32, tone: f32) {
     normalize(x, 0.9);
     effect_mono("krypt.drive", &[("mode", mode), ("drive", drive_db), ("tone", tone), ("output", 0.0)], x, 0.0);
@@ -92,7 +85,6 @@ fn eights() -> Vec<Spec> {
     ]
 }
 
-/// MIDI notes of a chord on C4.
 const CM7: [f32; 4] = [60.0, 63.0, 67.0, 70.0];
 
 fn basses() -> Vec<Spec> {

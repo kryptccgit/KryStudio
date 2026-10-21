@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Live launcher state for the Session view, from TelemetryFrame.launcher.
-// Telemetry arrives ~60×/s; the discrete part (playing / queued /
-// overridden / recording) goes into a tiny zustand store only when it
-// CHANGES (liveSignature), so slots re-render on launches, not per frame.
-// Loop progress never touches React: slots register their progress bar and
-// one frame-loop subscriber writes the widths (like the mixer's MeterBank).
-// ──────────────────────────────────────────────────────────────────────
-
 import { create } from 'zustand';
 import type { LauncherTelemetry } from '@shared/engine/protocol';
 import { telemetry } from '../../live/telemetry';
@@ -18,7 +9,6 @@ export interface LauncherLive {
   queued: Record<string, string>;
   overridden: Record<string, true>;
   anyOverridden: boolean;
-  /** Engine-reported launch recording (the toolbar button also follows session.onRecordState). */
   recording: boolean;
 }
 
@@ -41,8 +31,6 @@ function ingest(l: LauncherTelemetry | undefined | null): void {
   useLauncherLive.setState({ playing: { ...l.playing }, queued: { ...l.queued }, overridden, anyOverridden: l.overridden.length > 0, recording: !!l.recording }, true);
 }
 
-// ── Progress bars (imperative) ───────────────────────────────────────
-
 const bars = new Map<HTMLElement, string>();
 let users = 0;
 let offTelemetry: (() => void) | null = null;
@@ -64,7 +52,6 @@ function drawProgress(): void {
   }
 }
 
-/** Register a slot's progress element (transform-origin left; scaled 0..1). Returns the unregister function. */
 export function trackProgress(el: HTMLElement, clipId: string): () => void {
   bars.set(el, clipId);
   lastWidth.delete(el);
@@ -73,14 +60,12 @@ export function trackProgress(el: HTMLElement, clipId: string): () => void {
   };
 }
 
-/** Start following telemetry while at least one Session view is mounted (ref-counted). */
 export function retainLauncherLive(): () => void {
   users++;
   if (users === 1) {
     lastSig = '\u0000';
     ingest(telemetry.connected ? telemetry.frame?.launcher : undefined);
     offTelemetry = telemetry.subscribe((f) => ingest(f.launcher));
-    // A dropped connection sends no frame: clear stale "playing" lights from the frame loop too.
     offFrame = onFrame(() => {
       if (!telemetry.connected && lastSig !== '') ingest(undefined);
       drawProgress();

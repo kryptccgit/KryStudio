@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The Browser's Presets section: role folders → presets, then "Effect
-// chains" → chain roles → chains. Your presets carry a marker. Double-click
-// or drag onto the Channel Rack to add an instrument preset as a new
-// channel (dataTransfer PRESET_MIME, see ./logic.ts); drag onto a plugin
-// editor's preset bar to load it there. Chains: double-click loads onto the
-// selected mixer insert, or drag onto an insert's effect list. Right-click
-// for everything else (rename / delete for your own presets).
-// ──────────────────────────────────────────────────────────────────────
-
 import { useMemo, useState } from 'react';
 import { ChevronRight, Download, Folder, FolderOpen, Layers, ScanSearch, SwatchBook, UserRound } from 'lucide-react';
 import { pluginById } from '@shared/plugins/catalog';
@@ -64,7 +54,6 @@ function presetMenu(p: PresetSummary, pack: { id: string; name: string } | null)
   return items;
 }
 
-/** One preset row (Browser look: 22px, indented). */
 export function PresetRow({ p, depth, selected, onSelect, showRole }: { p: PresetSummary; depth: number; selected: boolean; onSelect: (key: string) => void; showRole?: boolean }) {
   const Icon = p.kind === 'chain' ? Layers : SwatchBook;
   const plugin = p.kind === 'instrument' ? (pluginById(p.plugin ?? '')?.name ?? p.plugin ?? '') : '';
@@ -122,7 +111,6 @@ function FolderRow({ label, count, open, depth, onToggle, hint }: { label: strin
   );
 }
 
-/** The tree under the Browser's PRESETS header. */
 export function PresetTree({ depth, selected, onSelect }: { depth: number; selected: string | null; onSelect: (key: string) => void }) {
   const state = useSounds((s) => s.state);
   const error = useSounds((s) => s.error);
@@ -164,7 +152,6 @@ export function PresetTree({ depth, selected, onSelect }: { depth: number; selec
   );
 }
 
-/** Flat search results for the Browser's search box (instrument presets first, then chains). */
 export function usePresetMatches(query: string): PresetSummary[] {
   const state = useSounds((s) => s.state);
   const all = presetList(state);

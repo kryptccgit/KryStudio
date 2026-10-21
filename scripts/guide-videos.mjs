@@ -1,11 +1,3 @@
-// Tutorial videos: check resources/guides/videos against the manifest (shared/guides/videos.ts) and fill in each
-// video's durationSec from its mp4 (the movie header), which is what makes it show up in the app.
-//
-//   node scripts/guide-videos.mjs           report: every manifest id, its files, mp4 length, manifest duration
-//   node scripts/guide-videos.mjs --write   also write the measured durations into shared/guides/videos.ts
-//
-// A video needs all three files: <id>.mp4 (H.264/AAC), <id>.vtt (captions), <id>.jpg (poster). Ids with
-// missing files are left at (or set back to) durationSec: null, so the app shows them as "Coming soon".
 import { closeSync, existsSync, openSync, readFileSync, readSync, fstatSync, writeFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
@@ -14,7 +6,6 @@ const dir = path.join(root, 'resources', 'guides', 'videos');
 const manifestPath = path.join(root, 'shared', 'guides', 'videos.ts');
 const write = process.argv.includes('--write');
 
-/** Seconds from the mp4's moov/mvhd box, or null when it can't be read. */
 function mp4Duration(file) {
   const fd = openSync(file, 'r');
   try {
@@ -24,7 +15,6 @@ function mp4Duration(file) {
       readSync(fd, b, 0, len, pos);
       return b;
     };
-    /** Find a child box of `type` between start and end; returns { body, end } or null. */
     const find = (type, start, end) => {
       let pos = start;
       while (pos + 8 <= end) {

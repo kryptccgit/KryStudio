@@ -1,8 +1,3 @@
-// auto_mix (research/20 §9, research/23): Auto Mix / Auto Master in ONE call and one undo step, the same service
-// as the Mixer's Auto Mix panel (electron/automix). dry_run = measure + plan only (nothing is edited).
-// reference = a song file to match (tone, loudness, width; only measured). files = master audio FILES in a new
-// project tab instead of the open project: one file = Master a song, 2-20 = an album (one chain per song).
-
 import { z } from 'zod';
 import type { AlbumOutcome, AutoMixOutcome, AutoMixRequest } from '@shared/automix/types';
 import { AUTO_MIX_PRESETS, presetById } from '@shared/automix/presets';
@@ -69,7 +64,6 @@ export const autoMix = defineTool({
   }),
   summarize: (a) => (a.files?.length ? `${a.files.length === 1 ? 'master a file' : `album of ${a.files.length}`}${a.preset ? ` ${safeName(a.preset, 20)}` : ''}` : `${a.mode ?? 'full'}${a.preset ? ` ${safeName(a.preset, 20)}` : ''}${a.reference ? ' + reference' : ''}${a.dry_run ? ' (plan)' : ''}`),
   paths: (a) => [...(a.reference ? [{ value: a.reference, kind: 'audio' as const }] : []), ...(a.files ?? []).map((f) => ({ value: f, kind: 'audio' as const }))],
-  // dry_run edits nothing; a run that changes nothing fails with "No change:" itself.
   readsWhenUnchanged: true,
   async run(deps, caller, a, ctx): Promise<ToolResult> {
     if (a.preset && a.preset !== 'auto' && !presetById(a.preset)) fail(`No preset "${safeName(a.preset, 40)}". Presets: ${AUTO_MIX_PRESETS.map((p) => p.id).join(', ')}, or auto.`);
@@ -106,7 +100,6 @@ export const autoMix = defineTool({
       ...(a.vocal_inserts?.length ? { vocalInserts: a.vocal_inserts } : {}),
       ...(reference ? { reference } : {}),
       keepUserFx: a.keep_user_fx,
-      // The calling agent already understands the user; never spend the built-in agent's key on its prompt.
       useAi: 'never',
     };
     const r = await svc.run(req, { actor: caller.actor, ctx }, run, { dryRun: a.dry_run });

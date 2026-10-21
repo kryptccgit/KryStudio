@@ -1,4 +1,3 @@
-// EDM (big room / progressive / electro house): breakdown – build – drop structure with a big lead hook.
 import type { Playbook } from './types';
 
 export const EDM: Playbook = {

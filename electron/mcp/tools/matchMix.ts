@@ -1,21 +1,3 @@
-// match_mix (research/15 §3.5, owned by review-mix): bring the mix toward the
-// studied reference in a few measured rounds, as ONE undo group.
-//
-// Each round renders the loudest section (and one quiet one) with `stems`
-// (one pass, a file per insert), then:
-//   1. per-part balance: our inserts grouped like the reference stems
-//      (drums / bass / other / vocals, from channel names and roles) against
-//      the reference stems' loudness over its loudest (and quietest) section
-//      → insert volumes;
-//   2. tonal balance: the master's bands relative to the mids against the
-//      reference's → a dedicated "Match EQ" on the master (a Krypt EQ whose
-//      five bands sit at the match frequencies; re-runs find and update it;
-//      gains capped at ±6 dB);
-//   3. width → a Krypt Imager on the master (mid / high width);
-//   4. loudness → the master limiter's input gain.
-// A final render reports before → after per dimension. Without engine stems
-// (an older engine) or cached reference stems, step 1 is skipped and said so.
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import type { FxSlot, MixerInsert, Project } from '@shared/schema/project';
@@ -35,10 +17,7 @@ const r1 = (n: number): number => Math.round(n * 10) / 10;
 const sgn = (n: number | null | undefined): string => (typeof n === 'number' && Number.isFinite(n) ? `${n > 0 ? '+' : ''}${r1(n)}` : '?');
 const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 
-// ── The Match EQ ────────────────────────────────────────────────────────
-
 export const MATCH_EQ_CAP_DB = 6;
-/** The five analysis bands (relative to the mids) and the Krypt EQ band that moves each: low shelf, three bells, high shelf. */
 export const MATCH_EQ_BANDS = [
   { band: 'sub', p: 'b2', hz: 55, q: 0.7 },
   { band: 'low', p: 'b3', hz: 130, q: 0.9 },
@@ -48,13 +27,11 @@ export const MATCH_EQ_BANDS = [
 ] as const;
 type MatchBand = (typeof MATCH_EQ_BANDS)[number]['band'];
 
-/** The Match EQ's identity: a Krypt EQ with its five bands exactly at the match frequencies (no slot names exist). */
 export function isMatchEq(slot: FxSlot | undefined): boolean {
   if (!slot || slot.type !== 'krypt.eq') return false;
   return MATCH_EQ_BANDS.every((b) => Math.abs((slot.params[`${b.p}Freq`] ?? -1) - b.hz) < 0.5);
 }
 
-/** The Match EQ's starting params (cuts off, all five bands on at 0 dB). */
 export function matchEqParams(gains: Partial<Record<MatchBand, number>> = {}): Record<string, number> {
   const out: Record<string, number> = { b1On: 0, b7On: 0, output: 0 };
   for (const b of MATCH_EQ_BANDS) {
@@ -68,11 +45,6 @@ export function matchEqParams(gains: Partial<Record<MatchBand, number>> = {}): R
 
 const clampEq = (g: number): number => Math.round(Math.max(-MATCH_EQ_CAP_DB, Math.min(MATCH_EQ_CAP_DB, g)) * 10) / 10;
 
-/**
- * New Match EQ gains from the measured band differences (ours − reference, dB, each relative to its mids): move each
- * band against its difference (damped 0.8 so overlapping shelves / bells don't overshoot), capped at ±6 dB. Bands
- * within 0.5 dB stay.
- */
 export function nextEqGains(current: Partial<Record<MatchBand, number>>, diff: Partial<Record<string, number>>): Record<MatchBand, number> {
   const out = {} as Record<MatchBand, number>;
   for (const b of MATCH_EQ_BANDS) {
@@ -83,11 +55,8 @@ export function nextEqGains(current: Partial<Record<MatchBand, number>>, diff: P
   return out;
 }
 
-// ── Reference stems ─────────────────────────────────────────────────────
-
 const STEM_GROUP: Record<StemName, PartGroup> = { drums: 'drums', bass: 'bass', vocals: 'vocals', other: 'other', guitar: 'other', piano: 'other' };
 
-/** Power-sum stem levels into the four groups; a stem below -60 dB counts as silent (an instrumental's vocal stem). */
 export function stemGroupLevels(levels: Partial<Record<StemName, number | null>>): GroupLevels {
   const acc: Partial<Record<PartGroup, number>> = {};
   for (const [name, db] of Object.entries(levels) as Array<[StemName, number | null]>) {
@@ -98,7 +67,6 @@ export function stemGroupLevels(levels: Partial<Record<StemName, number | null>>
   return Object.fromEntries(Object.entries(acc).map(([g, p]) => [g, r1(10 * Math.log10(p!))])) as GroupLevels;
 }
 
-/** Power mean of a short-term loudness curve over [t0, t1) seconds (silence below -70 skipped); null when silent. */
 export function curveLevel(curve: readonly number[], hop: number, t0: number, t1: number): number | null {
   let sum = 0;
   let n = 0;
@@ -111,7 +79,6 @@ export function curveLevel(curve: readonly number[], hop: number, t0: number, t1
   return n ? r1(10 * Math.log10(sum / n)) : null;
 }
 
-/** The reference's cached stem files (never starts a separation). */
 async function referenceStemFiles(deps: MainDeps, ref: StudiedReference): Promise<{ stems: Partial<Record<StemName, { path: string; rmsDb: number }>> } | { problem: string }> {
   const an = deps.analyzer;
   if (!an?.stemFiles) return { problem: "this build can't read the reference's stems" };
@@ -125,10 +92,6 @@ async function referenceStemFiles(deps: MainDeps, ref: StudiedReference): Promis
   }
 }
 
-/**
- * review_song: per-part loudness of the stems render (RMS per insert, grouped) against the reference stems (RMS of the
- * whole files). levels null with a note when either side is missing.
- */
 export async function referenceBalance(deps: MainDeps, ref: StudiedReference, stems: StemRender[] | null, stemsProblem?: string): Promise<{ levels: { project: GroupLevels; reference: GroupLevels } | null; note?: string }> {
   if (!stems?.length) return { levels: null, note: `per-part balance not measured: ${stemsProblem ?? 'the render has no stems'}` };
   const files = await referenceStemFiles(deps, ref);
@@ -142,19 +105,14 @@ export async function referenceBalance(deps: MainDeps, ref: StudiedReference, st
   return { levels: { project, reference } };
 }
 
-// ── Measuring a section ─────────────────────────────────────────────────
-
 export interface MixMeasure {
   lufs: number | null;
   width: number | null;
-  /** Bands relative to the mids (dB). */
   bands: Partial<Record<string, number>>;
-  /** Per-group loudness of the stems (LUFS), empty without stems. */
   groups: GroupLevels;
   stems: boolean;
 }
 
-/** What one render of a section measures (render analysis + stems). */
 export function measureOf(a: Analysis, stems: StemRender[] | null, groups: ReadonlyMap<string, PartGroup>): MixMeasure {
   const bands: Partial<Record<string, number>> = {};
   if (isNum(a.bands?.mid)) for (const b of MATCH_EQ_BANDS) if (isNum(a.bands[b.band])) bands[b.band] = r1(a.bands[b.band] - a.bands.mid);
@@ -168,16 +126,13 @@ export function measureOf(a: Analysis, stems: StemRender[] | null, groups: Reado
 }
 
 export interface MixTargets {
-  /** Loudness of the reference's loudest section (LUFS). */
   lufs: number | null;
   width: number | null;
   bands: Partial<Record<string, number>>;
-  /** Per-group loudness of the reference stems over its loudest section, and over its quietest one. */
   loudGroups: GroupLevels | null;
   quietGroups: GroupLevels | null;
 }
 
-/** The gaps (ours − reference) a round corrects: balance per group (loud section, 70 %; quiet section, 30 %), bands, width, LUFS. */
 export function mixGaps(loud: MixMeasure, quiet: MixMeasure | null, t: MixTargets): { balance: GroupLevels; bands: Partial<Record<string, number>>; width: number | null; lufs: number | null } {
   const lb = t.loudGroups ? balanceDiff(loud.groups, t.loudGroups) : {};
   const qb = quiet && t.quietGroups ? balanceDiff(quiet.groups, t.quietGroups) : {};
@@ -198,11 +153,8 @@ export function mixGaps(loud: MixMeasure, quiet: MixMeasure | null, t: MixTarget
   };
 }
 
-// ── Sections ────────────────────────────────────────────────────────────
-
 const MAX_SECTION_BARS = 16;
 
-/** The loudest-looking section (most parts playing) and the quietest one with something in it, at most 16 bars each. */
 export function pickSections(p: Project, section?: string): { loud: { label: string; bars: string }; quiet: { label: string; bars: string } | null } {
   const barTicks = ticksPerBar(p.transport.timeSig);
   const end = audibleSongEnd(p);
@@ -242,8 +194,6 @@ export function pickSections(p: Project, section?: string): { loud: { label: str
   return { loud, quiet };
 }
 
-// ── Applying a round ────────────────────────────────────────────────────
-
 function masterOf(deps: MainDeps): MixerInsert {
   const p = deps.doc.project;
   return p.mixer.inserts[p.mixer.masterId];
@@ -253,7 +203,6 @@ function slotIndex(ins: MixerInsert, type: string): number {
   return ins.slotOrder.findIndex((s) => ins.slots[s]?.type === type);
 }
 
-/** The Match EQ slot on the master (created before the limiter when missing). */
 function ensureMatchEq(deps: MainDeps, ctx: RunCtx): { id: string; created: boolean } {
   const m = masterOf(deps);
   const found = m.slotOrder.find((s) => isMatchEq(m.slots[s]));
@@ -281,10 +230,8 @@ interface RoundChanges {
   limiter: { from: number; to: number } | null;
 }
 
-/** Apply one round of corrections for the measured gaps. */
 function applyRound(deps: MainDeps, ctx: RunCtx, gaps: ReturnType<typeof mixGaps>, groups: ReadonlyMap<string, PartGroup>, created: Set<string>): RoundChanges {
   const ch: RoundChanges = { volumes: [], eq: null, width: null, limiter: null };
-  // 1. Per-part balance → insert volumes (each group against the rest).
   for (const g of PART_GROUPS) {
     const d = gaps.balance[g];
     if (!isNum(d) || Math.abs(d) < 0.75) continue;
@@ -300,7 +247,6 @@ function applyRound(deps: MainDeps, ctx: RunCtx, gaps: ReturnType<typeof mixGaps
       ch.volumes.push({ insert: ins.name, fromDb: r1(from), toDb: r1(to) });
     }
   }
-  // 2. Tonal balance → the Match EQ.
   if (Object.values(gaps.bands).some((d) => isNum(d) && Math.abs(d) >= 0.5)) {
     const eq = ensureMatchEq(deps, ctx);
     if (eq.created) created.add('Match EQ');
@@ -315,13 +261,11 @@ function applyRound(deps: MainDeps, ctx: RunCtx, gaps: ReturnType<typeof mixGaps
       ch.eq = next;
     }
   }
-  // 3. Width → the master imager (mid and high bands; the lows stay as they are).
   if (isNum(gaps.width) && Math.abs(gaps.width) >= 0.03) {
     const im = ensureMasterFx(deps, ctx, 'krypt.imager', {});
     if (im.created) created.add('Imager');
     const slot = masterOf(deps).slots[im.id];
     const cur = slot.params.midWidth ?? 1;
-    // Width is a side / mid ratio: scale the side by how far off it is (bounded so one round can't overdo it).
     const step = Math.max(-0.4, Math.min(0.4, -gaps.width * 1.5));
     const to = Math.round(Math.max(0.3, Math.min(1.8, cur + step)) * 100) / 100;
     if (Math.abs(to - cur) >= 0.01) {
@@ -329,7 +273,6 @@ function applyRound(deps: MainDeps, ctx: RunCtx, gaps: ReturnType<typeof mixGaps
       ch.width = { from: cur, to };
     }
   }
-  // 4. Loudness → the limiter's input gain.
   if (isNum(gaps.lufs) && Math.abs(gaps.lufs) >= 0.5) {
     const lim = ensureMasterFx(deps, ctx, 'krypt.limiter', { ceiling: -1 });
     if (lim.created) created.add('Limiter');
@@ -344,9 +287,6 @@ function applyRound(deps: MainDeps, ctx: RunCtx, gaps: ReturnType<typeof mixGaps
   return ch;
 }
 
-// ── The tool ────────────────────────────────────────────────────────────
-
-/** Mean |gap| of a record, null when empty. */
 function meanAbs(x: Partial<Record<string, number>>): number | null {
   const v = Object.values(x).filter(isNum);
   return v.length ? r1(v.reduce((s, d) => s + Math.abs(d), 0) / v.length) : null;
@@ -376,7 +316,6 @@ export const matchMix = defineTool({
     const picked = pickSections(deps.doc.project, a.section);
     const refAn = ref.analysis;
 
-    // Targets: the reference's loudest and quietest sections, its stems over them.
     const secs = (refAn.sections ?? []).filter((s) => s.endSec - s.startSec >= 4 && isNum(s.lufs));
     const loudRef = secs.length ? secs.reduce((x, y) => (y.lufs > x.lufs ? y : x)) : null;
     const quietRef = secs.length > 1 ? secs.filter((s) => s !== loudRef).reduce((x, y) => (y.lufs < x.lufs ? y : x)) : null;
@@ -445,7 +384,6 @@ export const matchMix = defineTool({
     history.push(final);
     const ms = Date.now() - t0;
 
-    // Report.
     const first = history[0];
     const L: string[] = [];
     L.push(`match_mix — ${rounds} round${rounds === 1 ? '' : 's'} on ${picked.loud.label}${picked.quiet && Object.keys(first.balance).length ? ` (+ ${picked.quiet.label} for the balance)` : ''} against "${safeName(ref.brief.name, 60)}"${loudRef ? ` (its loudest section ${r1(loudRef.startSec)}-${r1(loudRef.endSec)} s)` : ''}`);

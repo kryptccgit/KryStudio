@@ -1,14 +1,8 @@
-//! Wave 7b texture / noise loops (seamless, tempo-synced at 128 BPM): dusty
-//! vinyl, radio static, tape hum, brown noise, heavy rain, storm wind and
-//! the air of a big empty hall.
-
 use super::kit::*;
 use super::library::{spec, Spec};
 use super::synth::*;
 use super::textures::{crackle, looped, looped1};
 
-/// Mains hum (60 Hz: exactly 225 cycles per 2 bars, so it loops by itself)
-/// with soft odd/even harmonics.
 fn hum(n: usize, level: f32) -> Vec<f32> {
     let f = 60.0f64;
     (0..n)
@@ -23,7 +17,6 @@ fn vinyl_dusty() -> Chans {
     looped1(2, |tot, _| {
         let mut x = crackle(tot, 7001);
         add(&mut x, &crackle(tot, 7002), 0.6, 0);
-        // dust: dense tiny ticks
         let mut nz = Noise::new(7003);
         let mut dust = vec![0.0f32; tot];
         for v in dust.iter_mut() {
@@ -33,7 +26,6 @@ fn vinyl_dusty() -> Chans {
         }
         hp(&mut dust, 2000.0);
         add(&mut x, &dust, 1.0, 0);
-        // worn groove: low rumble and band-limited surface noise
         let mut s: Vec<f32> = (0..tot).map(|_| nz.pink()).collect();
         hp(&mut s, 300.0);
         lp(&mut s, 3500.0);
@@ -58,7 +50,6 @@ fn radio_static() -> Chans {
         let mut cr = crackle(tot, 7102);
         gain(&mut cr, 1.8);
         add(&mut x, &cr, 1.0, 0);
-        // a faint heterodyne whistle drifting around 1.1 kHz
         let drift = Wander::new(&mut nz, 0.05, 0.12);
         let mut ph = 0.0f64;
         let w: Vec<f32> = (0..tot)
@@ -84,7 +75,6 @@ fn tape_hum() -> Chans {
         x
     });
     let n = ch[0].len();
-    // added after the crossfade: it is exactly periodic over the loop
     let h = hum(n, 0.05);
     add(&mut ch[0], &h, 1.0, 0);
     ch
@@ -123,7 +113,6 @@ fn heavy_rain() -> Chans {
             }
         }
         hp(&mut drops, 800.0);
-        // low roar of rain on roofs and the street
         let mut roar: Vec<f32> = (0..tot).map(|_| nz.brown()).collect();
         lp(&mut roar, 400.0);
         hp(&mut roar, 50.0);
@@ -168,7 +157,6 @@ fn hall_air() -> Chans {
         let mut x: Vec<f32> = (0..tot).map(|_| 0.7 * nz.brown() + 0.3 * nz.pink()).collect();
         lp(&mut x, 700.0);
         hp(&mut x, 30.0);
-        // ventilation: a soft band of air around 250 Hz plus faint high hiss
         let mut v: Vec<f32> = (0..tot).map(|_| nz.white()).collect();
         filt(&mut v, BP, 260.0, 1.5);
         add(&mut x, &v, 0.12, 0);

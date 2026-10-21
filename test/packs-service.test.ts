@@ -1,6 +1,3 @@
-// PacksService against a local HTTP server and a fake PackDef: install (verify, SFZ + LICENSE.txt + pack.json, one
-// rename), hash mismatch naming the file, per-file resume, cancel mid-file, mirrors, the update status and an
-// update that reuses unchanged files, remove, disk-full / network / bad-catalog sentences, and start-up cleanup.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -16,7 +13,6 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'kstudio-packs-'));
 const sha = (b: Buffer | string) => crypto.createHash('sha256').update(b).digest('hex');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// ── Server ──────────────────────────────────────────────────────────────
 const BODY: Record<string, Buffer> = {
   a: crypto.randomBytes(120_000),
   b: crypto.randomBytes(80_000),
@@ -33,7 +29,6 @@ const server = http.createServer((req, res) => {
     res.writeHead(404, 'Not Found');
     return res.end();
   }
-  // 'bad/<key>': same length, different bytes (a damaged download).
   const out = mode === 'bad' ? Buffer.from(body.map((x) => x ^ 0xff)) : body;
   res.writeHead(200, { 'Content-Length': String(out.length), 'Content-Type': 'application/octet-stream' });
   if (mode === 'slow') {
@@ -53,7 +48,6 @@ const server = http.createServer((req, res) => {
 await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
 const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-// ── Catalog ─────────────────────────────────────────────────────────────
 const file = (p: string, key: string, url = `${BASE}/${key}`, mirrors?: string[]) => ({ path: p, url, mirrors, sha256: sha(BODY[key]), bytes: BODY[key].length });
 
 function packDef(over: Partial<PackDef> = {}): PackDef {
@@ -97,8 +91,6 @@ function rig(catalog: PackDef[], extra: Partial<ConstructorParameters<typeof Pac
 const entry = (svc: PacksService, id = 'test-piano') => svc.state().packs.find((p) => p.id === id)!;
 const exists = (p: string) => fs.existsSync(p);
 
-// ── Tests ───────────────────────────────────────────────────────────────
-
 test('install: every file verified, then the SFZ mappings, LICENSE.txt and pack.json, then one rename', async () => {
   const def = packDef();
   const { dir, svc, states, installed } = rig([def]);
@@ -123,13 +115,11 @@ test('install: every file verified, then the SFZ mappings, LICENSE.txt and pack.
   assert.equal(svc.isInstalled('test-piano'), true);
   assert.equal(svc.installedVersion('test-piano'), 1);
   assert.deepEqual(installed, ['test-piano']);
-  // Progress was broadcast while downloading, then the installed state.
   const dl = states.filter((s) => s.packs[0].status === 'downloading');
   assert.ok(dl.length >= 1);
   assert.ok(dl.some((s) => (s.packs[0].progress?.bytes ?? 0) > 0));
   assert.equal(dl[0].packs[0].progress?.total, def.bytes);
   assert.equal(states.at(-1)?.packs[0].status, 'installed');
-  // A second install is a no-op.
   const again = await svc.install('test-piano');
   assert.equal(again.ok, true);
   assert.match(again.message!, /already installed/);
@@ -148,7 +138,6 @@ test('a hash mismatch names the file, installs nothing and keeps the files that 
   assert.ok(!exists(path.join(dir, 'test-piano')), 'no installed folder');
   assert.equal(svc.isInstalled('test-piano'), false);
   assert.deepEqual(installed, []);
-  // The good file stays in staging for the next try; the bad one is gone.
   assert.ok(exists(path.join(dir, 'test-piano.partial', 'samples', 'a.flac')));
   assert.ok(!exists(path.join(dir, 'test-piano.partial', 'samples', 'b.flac')));
 });
@@ -158,7 +147,6 @@ test('resume: the next Download fetches only the files that are missing', async 
   const { dir, svc } = rig([def]);
   await svc.install('test-piano');
   const aHits = hits.a ?? 0;
-  // The server (catalog) now serves b correctly.
   def.files[1] = file('samples/b.flac', 'b');
   const r = await svc.install('test-piano');
   assert.equal(r.ok, true, r.message);
@@ -174,14 +162,13 @@ test('resume ignores a damaged kept file and a staging folder from another catal
   const staging = path.join(dir, 'test-piano.partial');
   fs.mkdirSync(path.join(staging, 'samples'), { recursive: true });
   fs.writeFileSync(path.join(staging, '.krypt-partial.json'), JSON.stringify({ id: 'test-piano', version: 1 }));
-  fs.writeFileSync(path.join(staging, 'samples', 'a.flac'), Buffer.alloc(BODY.a.length)); // right size, wrong bytes
-  fs.writeFileSync(path.join(staging, 'samples', 'b.flac'), BODY.b); // complete
+  fs.writeFileSync(path.join(staging, 'samples', 'a.flac'), Buffer.alloc(BODY.a.length));
+  fs.writeFileSync(path.join(staging, 'samples', 'b.flac'), BODY.b);
   const before = { a: hits.a ?? 0, b: hits.b ?? 0 };
   assert.equal((await svc.install('test-piano')).ok, true);
   assert.equal(hits.a, before.a + 1, 'the damaged a.flac was fetched again');
   assert.equal(hits.b ?? 0, before.b, 'the complete b.flac was kept');
 
-  // A staging folder written for another version is started over (a stray file in it never reaches the pack).
   const { dir: dir2, svc: svc2 } = rig([packDef({ version: 3 })]);
   const st2 = path.join(dir2, 'test-piano.partial');
   fs.mkdirSync(st2, { recursive: true });
@@ -196,7 +183,6 @@ test('cancel mid-file: nothing installed, finished files kept, the half file rem
   const { dir, svc } = rig([def]);
   const p = svc.install('test-piano');
   assert.equal(entry(svc).status, 'downloading');
-  // A second click while it runs is refused with a sentence.
   const dup = await svc.install('test-piano');
   assert.equal(dup.ok, false);
   assert.match(dup.message!, /already downloading/);
@@ -215,7 +201,6 @@ test('cancel mid-file: nothing installed, finished files kept, the half file rem
   assert.ok(!exists(path.join(dir, 'test-piano')));
   assert.ok(exists(path.join(dir, 'test-piano.partial', 'samples', 'a.flac')));
   assert.ok(!exists(path.join(dir, 'test-piano.partial', 'samples', 'slow.flac')));
-  // Cancel when nothing runs says so.
   const none = svc.cancel('test-piano');
   assert.equal(none.ok, false);
   assert.match(none.message!, /isn't downloading/);
@@ -238,7 +223,6 @@ test('mirrors are tried in order; when every source fails the message lists them
 });
 
 test('network failure and a full disk end in a sentence', async () => {
-  // A port nobody listens on.
   const closed = http.createServer();
   await new Promise<void>((r) => closed.listen(0, '127.0.0.1', () => r()));
   const port = (closed.address() as AddressInfo).port;
@@ -285,9 +269,7 @@ test('update: an older installed version shows "update"; Update reuses unchanged
   const v1 = packDef();
   const { dir, svc } = rig([v1]);
   assert.equal((await svc.install('test-piano')).ok, true);
-  // Catalog v2: a changed b, an extra file, a new mapping.
   const v2 = packDef({ version: 2, files: [file('samples/a.flac', 'a'), file('samples/b.flac', 'b2'), file('samples/c.flac', 'b')], sfz: [{ path: 'krypt/piano.sfz', text: '<region> sample=../samples/c.flac\n' }] });
-  // A newer catalog over the same folder (the next app version).
   const s2 = new PacksService({ dir, catalog: [v2], log: () => {}, freeBytes: async () => null });
   assert.equal(entry(s2).status, 'update');
   assert.equal(s2.isInstalled('test-piano'), true, 'an older version still plays');
@@ -323,7 +305,6 @@ test('remove deletes only that pack (and its unfinished download)', async () => 
   const again = await svc.remove('test-piano');
   assert.equal(again.ok, false);
   assert.match(again.message!, /isn't installed/);
-  // An unfinished download alone can be removed too.
   const partial = await svc.remove('other-pack');
   assert.equal(partial.ok, true);
   assert.match(partial.message!, /unfinished Other Pack download/);
@@ -343,7 +324,6 @@ test('start-up: an interrupted update swap is restored, unknown unfinished downl
   assert.ok(!exists(path.join(dir, 'gone-pack.partial')));
   assert.ok(exists(path.join(dir, 'test-piano.partial')));
   assert.equal(svc.isInstalled('test-piano'), true);
-  // A damaged pack.json counts as not installed (and says so in the log).
   fs.writeFileSync(path.join(dir, 'test-piano', 'pack.json'), '{nope');
   const logs: string[] = [];
   const s2 = new PacksService({ dir, catalog: [packDef()], log: (_l, m) => logs.push(m) });

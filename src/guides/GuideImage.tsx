@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// {{image:<file>|<caption>}} in a guide: an annotated screenshot from
-// resources/guides/images (served read-only from app://bundle/guide-images/,
-// shared/guides/images.ts). The caption is the alt text; a click enlarges
-// it (Esc, the × or a click outside closes); a file that can't be loaded
-// becomes a visible "picture missing" note, never a broken image.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ImageOff, Maximize2, X } from 'lucide-react';
@@ -20,7 +12,6 @@ function Lightbox({ src, caption, doc, onClose }: { src: string; caption: string
     closeRef.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return;
-      // preventDefault: Home's Esc ("one level back") skips handled keys.
       e.preventDefault();
       e.stopPropagation();
       onClose();

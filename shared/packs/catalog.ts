@@ -1,14 +1,3 @@
-// The sound-pack catalog (research/12-real-instruments.md §3): optional, user-downloaded packs of real recorded
-// instruments from CC0 / public-domain libraries. Every file is pinned by URL (a commit-pinned GitHub raw URL, with
-// a byte-identical jsDelivr mirror) + SHA-256 + size, in the generated shared/packs/data/<id>.gen.ts, written by
-// scripts/packs/build.ts from scripts/packs/specs/<id>.ts together with our own SFZ mappings (only the opcodes
-// krypt.multisampler plays). test/packs-catalog.test.ts validates all of it; scripts/gen-notices.mjs credits each
-// pack in THIRD-PARTY-NOTICES.md.
-//
-// Licences were read on the primary source at the pinned revision (2026-10-12): the CC0 1.0 LICENSE file in each
-// repository at the commit the URLs use, and for the Salamander piano the author's own page (archived) because the
-// public-domain dedication is an informal statement.
-
 import type { PackDef, PackFile, PackLicence, PackSample, PackSfz } from './types';
 import * as GRAND from './data/grand-piano.gen';
 import * as UPRIGHT from './data/upright-piano.gen';
@@ -26,12 +15,10 @@ interface Generated {
   RAM_MB: Record<string, number>;
 }
 
-/** Wave 7b sample packs: no SFZ mappings, a list of one-shots / loops / FX instead (ramMb 0). */
 function samplePack(def: Omit<PackDef, 'files' | 'sfz' | 'bytes' | 'ramMb' | 'samples'>, gen: Generated & { SAMPLES: PackSample[] }): PackDef {
   return { ...pack(def, gen), samples: gen.SAMPLES };
 }
 
-/** Download size and RAM come from the generated data, so they can't drift from the files and mappings. */
 function pack(def: Omit<PackDef, 'files' | 'sfz' | 'bytes' | 'ramMb'>, gen: Generated): PackDef {
   return {
     ...def,
@@ -85,8 +72,6 @@ const VSCO_TERMS = [
   'Homepage: http://vis.versilstudios.net/vsco-community.html',
 ];
 
-// ── Wave 7b sample packs: licence evidence per source (read 2026-10-14; research/14 §5) ──
-
 const VCSL_COMMIT = 'c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e';
 const READ = '2026-10-14';
 
@@ -96,7 +81,6 @@ const VCSL_TERMS = [
   '  README: "This collection is under a Creative Commons 0 license."',
 ].join('\n');
 
-/** A Kenney asset: the page states CC0 and the License.txt inside the ZIP says "Creative Commons Zero, CC0". */
 function kenneyTerms(title: string, slug: string, header: string): string {
   return [
     `- "${title}" by Kenney (www.kenney.nl).`,
@@ -105,7 +89,6 @@ function kenneyTerms(title: string, slug: string, header: string): string {
   ].join('\n');
 }
 
-/** An OpenGameArt entry licensed CC0 only (no other licence offered on the page). */
 function ogaTerms(title: string, author: string, slug: string): string {
   return `- "${title}" by ${author}. Page: https://opengameart.org/content/${slug} (read ${READ}): "License(s): CC0".`;
 }
@@ -224,7 +207,6 @@ export const PACKS: readonly PackDef[] = [
     },
     ORCH,
   ),
-  // ── Wave 7b sample packs (research/14 §2.2, §5): recorded one-shots, loops and FX ──
   samplePack(
     {
       id: 'perc-extras',

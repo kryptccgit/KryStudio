@@ -1,11 +1,3 @@
-// Channel settings for audio: a "Detect tempo & key" button for sample
-// channels, and the Audio Clip's "Stretch & pitch" section: follow the
-// project tempo (source BPM + detect), stretch mode, pitch and formants,
-// with a one-line readout of what the clip is doing. The section draws the
-// krypt.audioclip catalog params by id (tempo_sync, src_bpm, stretch,
-// pitch, formant) and shows only the ones the catalog has; the generic
-// param groups skip them (STRETCH_PARAM_IDS).
-
 import { AudioWaveform, Timer, TimerOff } from 'lucide-react';
 import { pluginById } from '@shared/plugins/catalog';
 import { formatParam } from '@shared/plugins/types';
@@ -19,7 +11,6 @@ import { openAnalysisDialog } from './AnalysisDialog';
 import { audioClipCanFollowTempo } from './actions';
 import { fmtBpm } from './logic';
 
-/** Audio Clip params drawn by the Stretch & pitch section instead of the generic groups. */
 export const STRETCH_PARAM_IDS = ['tempo_sync', 'src_bpm', 'stretch', 'pitch', 'formant'];
 
 export function DetectTempoButton({ channelId, label = 'Detect tempo & key' }: { channelId: string; label?: string }) {
@@ -90,7 +81,6 @@ function SourceBpm({ paramRef }: { paramRef: string }) {
   );
 }
 
-/** An enum param as a dropdown (any option length fits); anything else falls back to the generic control. */
 function ModeControl({ paramRef, label }: { paramRef: string; label: string }) {
   const p = useParam(paramRef);
   if (!p.spec) return null;
@@ -140,7 +130,6 @@ function Status({ channelId }: { channelId: string }) {
   );
 }
 
-/** The Audio Clip's Stretch & pitch section (renders whatever of its params the catalog has). */
 export function AudioClipStretchSection({ channelId }: { channelId: string }) {
   const desc = pluginById('krypt.audioclip');
   const has = (id: string): boolean => !!desc?.params.some((p) => p.id === id);

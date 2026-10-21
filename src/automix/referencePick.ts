@@ -1,9 +1,3 @@
-// The reference row's actions ("Sound like a song you love", optional), shared by Auto Mix / Master a song and Master an album: pick a
-// file (system dialog), drop one from Explorer, clear it. Picking reads it right away through
-// window.krypt.automix.analyzeReference (one light pass in main, cached), so the row shows its summary
-// ("−9.2 LUFS · bright · wide") before Run. A newer pick wins over an older answer still on its way.
-// Also: play the reference loudness-matched (A/B) and stop it.
-
 import { AUDIO_EXTENSIONS, AUDIO_FILE_RE } from '@shared/audio/formats';
 import type { ActionResult } from '@shared/types';
 import type { ReferenceSound } from '@shared/automix/types';
@@ -14,9 +8,7 @@ import { NO_REFERENCE, failureMessage, fileLabel, type ReferenceState } from './
 export interface ReferenceSlot {
   get(): ReferenceState;
   set(r: ReferenceState): void;
-  /** A job runs: the reference can't change now (null = it can). */
   locked?(): string | null;
-  /** Why this file can't be the reference (it is the song being mastered), or null. Said in the row and a toast. */
   guard?(path: string): string | null;
 }
 
@@ -43,7 +35,6 @@ export function referenceController(slot: ReferenceSlot): ReferenceController {
     const mine = ++seq;
     const clash = slot.guard?.(path) ?? null;
     if (clash) {
-      // Not used: the row keeps the file and says why, so the user knows to pick another one.
       slot.set({ status: 'failed', path, sound: null, error: clash });
       toast.warn(clash);
       return;
@@ -55,7 +46,7 @@ export function referenceController(slot: ReferenceSlot): ReferenceController {
     } catch (err) {
       r = { ok: false, message: failureMessage(err, "Couldn't read the reference") };
     }
-    if (mine !== seq) return; // a newer pick (or Clear) won
+    if (mine !== seq) return;
     if (!r.ok || !r.data) {
       const error = failureMessage(r.message ?? '', "Couldn't read the reference");
       slot.set({ status: 'failed', path, sound: null, error });
@@ -76,7 +67,7 @@ export function referenceController(slot: ReferenceSlot): ReferenceController {
         toast.error(`Couldn't open the file dialog: ${failureMessage(err)}`);
         return;
       }
-      if (!paths?.length) return; // closed: the row stays as it was, which is visible
+      if (!paths?.length) return;
       await use(paths[0]);
     },
     drop(dt) {
@@ -99,7 +90,6 @@ export function referenceController(slot: ReferenceSlot): ReferenceController {
   };
 }
 
-/** Play the reference from its start, turned to `matchLufs`. Toasts what happened; true when it plays. */
 export async function playReference(path: string, matchLufs: number | null): Promise<boolean> {
   try {
     await window.krypt.engine.transport('stop').catch(() => undefined);
@@ -120,6 +110,5 @@ export async function stopReference(): Promise<void> {
   try {
     await window.krypt.engine.stopPreview();
   } catch {
-    /* nothing was playing */
   }
 }

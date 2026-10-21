@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// A collection's style profile: exactly what the AI leans on when this
-// collection is the focus. Tempo & feel, keys, the drum grid heatmap,
-// bass / 808, harmony, structure, mix targets and the sampled KPN
-// examples, with caveats up top. Sections the data can't support yet say
-// why (e.g. bass needs deep analysis) instead of showing nothing.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   AudioLines,
@@ -45,7 +37,6 @@ import { addFolder, chooseFocus, copyProfileText, copyText, loadProfile, setDeep
 import { C, Card, EmptyNote, Estimated, SmallButton, Stat } from './ui';
 import { Columns, DrumHeatmap, EnergyShape, FormRow, HBars, ModeSplit, RangeRow, TempoHistogram, type Hover } from './charts';
 
-/** A card with its own hover readout line. */
 function HoverCard({ idle, children, ...rest }: Omit<Parameters<typeof Card>[0], 'readout' | 'children'> & { idle: string; children: (onHover: Hover) => ReactNode }) {
   const [text, setText] = useState<string | null>(null);
   return (
@@ -67,7 +58,6 @@ export function ProfileView({ collection, doc }: { collection: Collection; doc: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collection.id]);
 
-  // keep "updated 3 min ago" honest
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 30000);
     return () => clearInterval(t);
@@ -97,7 +87,6 @@ export function ProfileView({ collection, doc }: { collection: Collection; doc: 
 
   return (
     <div className="h-full overflow-y-auto px-3 pb-4 pt-1">
-      {/* header */}
       <div className="mb-2.5 flex flex-wrap items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-[13px] font-semibold text-white">
@@ -187,8 +176,6 @@ export function ProfileView({ collection, doc }: { collection: Collection; doc: 
     </div>
   );
 }
-
-// ── Cards ─────────────────────────────────────────────────────────────
 
 function Missing({ children }: { children: ReactNode }) {
   return <div className="py-3 text-center text-[10px] leading-snug text-krypt-muted">{children}</div>;

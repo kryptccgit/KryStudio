@@ -1,9 +1,3 @@
-// Keyboard-shortcut overrides stored in settings (`Settings.keymap`).
-// Pure helpers shared by main (settings-store validation), the browser mock
-// and the renderer keymap (src/input/keymap.ts).
-//
-//   { "pianoRoll.glue": ["Ctrl+J"], "transport.panic": [] }   // [] = unbound
-
 export type KeymapOverrides = Record<string, string[]>;
 
 const MAX_COMMANDS = 512;
@@ -21,18 +15,12 @@ const MOD_ALIASES: Record<string, 'Ctrl' | 'Alt' | 'Shift'> = {
   shift: 'Shift',
 };
 
-/**
- * Canonical form of a key combo: modifiers in the order Ctrl, Alt, Shift (the
- * order eventToKeys produces), single letters upper-case. '' when invalid
- * (no key, two keys, or a bare modifier).
- */
 export function normalizeKeys(keys: string): string {
   if (typeof keys !== 'string' || keys.length > 40) return '';
   const parts = keys
     .split('+')
     .map((p) => p.trim())
     .filter(Boolean);
-  // "Ctrl++" style (the plus key itself) isn't supported; keep it simple.
   const mods = new Set<string>();
   let key = '';
   for (const p of parts) {
@@ -45,7 +33,6 @@ export function normalizeKeys(keys: string): string {
   return [...(['Ctrl', 'Alt', 'Shift'] as const).filter((m) => mods.has(m)), key].join('+');
 }
 
-/** Validate untrusted overrides (settings.json, IPC). Returns undefined when not an object. */
 export function sanitizeKeymapOverrides(input: unknown): KeymapOverrides | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
   const out: KeymapOverrides = {};

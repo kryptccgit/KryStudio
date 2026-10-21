@@ -1,8 +1,3 @@
-// Settings → MIDI output, MIDI clock (Wave 12.2b): output ports, clock out to
-// external gear, and following an external clock (sync). The engine owns the
-// ports; main persists the choices (settings.midiOut) and pushes them. Every
-// change confirms or toasts its failure.
-
 import { useEffect, useState, type ReactNode } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
 import type { MidiOutputInfo } from '@shared/engine/protocol';

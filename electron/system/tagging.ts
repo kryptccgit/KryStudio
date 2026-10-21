@@ -1,9 +1,3 @@
-// Song info + cover art into an exported file, in place and atomically:
-// the plan (which byte ranges to keep, which new bytes to add) comes from
-// shared/audio/tags.ts; this file streams it through a temp file next to the
-// export and renames it over the original, so a WAV of any size is tagged
-// with bounded memory and a failure leaves the untagged file intact.
-
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { planMp3Tags, planWavTags, scanRiff, TagError, type SongTags, type TagPicture, type TagPlan } from '@shared/audio/tags';
@@ -17,7 +11,6 @@ export function taggableFormat(file: string): TaggableFormat | null {
   return /\.wav$/i.test(file) ? 'wav' : /\.mp3$/i.test(file) ? 'mp3' : null;
 }
 
-/** Plan the tagging from the file's headers (a handful of small synchronous reads). */
 function planFor(file: string, format: TaggableFormat, tags: SongTags, picture?: TagPicture | null): TagPlan {
   const fd = fs.openSync(file, 'r');
   try {
@@ -33,7 +26,6 @@ function planFor(file: string, format: TaggableFormat, tags: SongTags, picture?:
   }
 }
 
-/** Write song info (and the cover) into a WAV or MP3. Resolves with a sentence; never throws. */
 export async function tagAudioFile(file: string, tags: SongTags, picture?: TagPicture | null): Promise<{ ok: boolean; message: string }> {
   const format = taggableFormat(file);
   if (!format) return { ok: false, message: 'Song info can only be written into WAV and MP3 files' };

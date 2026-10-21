@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Piano roll note tools: the FL "Tools" menu as pure commands (research/01
-// PR10/PR11). Each one is ONE undo step and works on a channel's notes in a
-// pattern: the given `ids`, or every note of the channel when ids is omitted.
-// Randomness only comes from the `seed` argument, so results are
-// reproducible (and testable) — commands never call Math.random().
-// ──────────────────────────────────────────────────────────────────────
-
 import { z } from 'zod';
 import { defineCommand, must, CommandError } from './types';
 import { defaultNote, patternLength, type Note, type Pattern, type Project } from '../schema/project';
@@ -15,12 +7,9 @@ import { shapeCurve } from '../schema/automation';
 import { CHORD_QUALITIES, SCALES } from '../music/theory';
 import { applyGroove, findGroove, grooveClassForChannel, grooveSummary, GROOVE_IDS } from '../grooves/apply';
 
-// ── Shared helpers ────────────────────────────────────────────────────
-
 const zSel = {
   patternId: z.string(),
   channelId: z.string(),
-  /** Notes to edit; omitted = every note of the channel in the pattern. */
   ids: z.array(z.string()).max(20000).optional(),
 };
 
@@ -31,7 +20,6 @@ type SelArgs = { patternId: string; channelId: string; ids?: string[] };
 interface Sel {
   pat: Pattern;
   notes: Record<string, Note>;
-  /** Selected notes, sorted by (tick, key, id) so every tool is deterministic. */
   sel: Note[];
 }
 
@@ -58,7 +46,6 @@ const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.m
 const clampKey = (k: number): number => clamp(Math.round(k), 0, 127);
 const round3 = (v: number): number => Math.round(v * 1000) / 1000;
 
-/** mulberry32: tiny seeded PRNG → [0, 1). */
 export function seededRandom(seed: number): () => number {
   let s = seed >>> 0 || 0x9e3779b9;
   return () => {
@@ -76,7 +63,6 @@ function scaleSteps(name: string): number[] {
   return steps;
 }
 
-/** Absolute scale degree of the in-scale key nearest to `key` (ties go down). */
 function keyToDegree(key: number, root: number, steps: number[]): number {
   let best = 0;
   let bestDist = Infinity;
@@ -100,7 +86,6 @@ function degreeToKey(deg: number, root: number, steps: number[]): number {
   return root + o * 12 + steps[((deg % n) + n) % n];
 }
 
-/** Notes grouped into chords: a note joins the group if it starts within `window` ticks of the group's first note. */
 function chordGroups(sel: Note[], window: number): Note[][] {
   const groups: Note[][] = [];
   for (const n of sel) {
@@ -111,9 +96,6 @@ function chordGroups(sel: Note[], window: number): Note[][] {
   return groups;
 }
 
-// ── Quantize ──────────────────────────────────────────────────────────
-
-/** Nearest (optionally swung) grid line: odd lines are delayed by swing × half a grid cell. */
 export function swungGridLine(t: number, grid: number, swing: number): number {
   const line = (i: number): number => i * grid + (i % 2 !== 0 ? Math.round((swing * grid) / 2) : 0);
   const i0 = Math.floor(t / grid);
@@ -149,7 +131,7 @@ export const notesQuantize = defineCommand({
       let end = a.starts ? tick + n.dur : n.tick + n.dur;
       if (a.ends) {
         let qe = q(end);
-        if (qe <= tick) qe = tick + a.grid; // never quantize a note away: at least one grid cell
+        if (qe <= tick) qe = tick + a.grid;
         end = Math.round(end + (qe - end) * a.strength);
       }
       n.tick = tick;
@@ -158,8 +140,6 @@ export const notesQuantize = defineCommand({
     return { count: sel.length };
   },
 });
-
-// ── Chop / glue / legato ──────────────────────────────────────────────
 
 export const notesChop = defineCommand({
   id: 'notes.chop',
@@ -258,8 +238,6 @@ export const notesLegato = defineCommand({
   },
 });
 
-// ── Strum / arpeggiate ────────────────────────────────────────────────
-
 export const notesStrum = defineCommand({
   id: 'notes.strum',
   label: () => 'Strum',
@@ -296,13 +274,11 @@ export const notesStrum = defineCommand({
 
 export type ArpPattern = 'up' | 'down' | 'upDown' | 'downUp' | 'random';
 
-/** One arp cycle for the given keys (ascending input). */
 export function arpSequence(keys: number[], pattern: Exclude<ArpPattern, 'random'>): number[] {
   const up = [...keys].sort((x, y) => x - y);
   const down = [...up].reverse();
   if (pattern === 'up') return up;
   if (pattern === 'down') return down;
-  // ping-pong without repeating the turning notes: C E G E | C E G E ...
   return pattern === 'upDown' ? up.concat(down.slice(1, -1)) : down.concat(up.slice(1, -1));
 }
 
@@ -347,7 +323,6 @@ export const notesArpeggiate = defineCommand({
           key = seq[j];
         } else key = seq[i % seq.length];
         prev = key;
-        // velocity: the chord note with this key (or its pitch class), else the loudest one
         const src = g.find((n) => n.key === key) ?? g.find((n) => (key - n.key) % 12 === 0) ?? loudest;
         const dur = Math.max(1, Math.min(Math.round(a.rate * a.gate), end - t));
         ids.push(addNote(pat, a.channelId, { ...base, vel: src.vel, tick: t, dur, key }, ctx.newId));
@@ -356,8 +331,6 @@ export const notesArpeggiate = defineCommand({
     return { ids };
   },
 });
-
-// ── Randomize / flip / scale snap / limit ─────────────────────────────
 
 export const notesRandomize = defineCommand({
   id: 'notes.randomize',
@@ -474,8 +447,6 @@ export const notesLimit = defineCommand({
   },
 });
 
-// ── Levels (ramp / LFO over the selection) ────────────────────────────
-
 const LEVEL_PROPS = {
   vel: { min: 0, max: 1, int: false },
   pan: { min: -1, max: 1, int: false },
@@ -537,8 +508,6 @@ export const notesLevels = defineCommand({
   },
 });
 
-// ── Flags (mute / colour group / slide) ───────────────────────────────
-
 export const notesSetProps = defineCommand({
   id: 'notes.setProps',
   label: (a) => (a.mute !== undefined ? 'Mute notes' : a.color !== undefined ? 'Note colour' : 'Slide notes'),
@@ -567,8 +536,6 @@ export const notesSetProps = defineCommand({
     return { count: sel.length, mute, slide };
   },
 });
-
-// ── Groove (timing + accents measured from real drummers) ─────────────
 
 export const notesGroove = defineCommand({
   id: 'notes.groove',

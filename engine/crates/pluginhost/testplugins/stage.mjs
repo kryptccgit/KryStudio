@@ -1,12 +1,3 @@
-// Build + stage the plugin-host test plugins (NOT shipped).
-//
-//   node engine/crates/pluginhost/testplugins/stage.mjs [--out <dir>] [--test]
-//
-// Produces <out>/CLAP/krypt-test.clap, <out>/VST3/KryptTestGain.vst3 (single
-// file) and <out>/VST3/KryptTestGainBundle.vst3/ (bundle with a
-// moduleinfo.json, for the scanner's fast path). --test also runs the
-// engine-side end-to-end tests against them. Add <out>/CLAP and <out>/VST3
-// as folders in the Plugin Manager to try them in the app.
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -36,7 +27,6 @@ const bundle = path.join(out, 'VST3', 'KryptTestGainBundle.vst3');
 mkdirSync(path.join(bundle, 'Contents', 'x86_64-win'), { recursive: true });
 mkdirSync(path.join(bundle, 'Contents', 'Resources'), { recursive: true });
 copyFileSync(path.join(dbg, 'krypt_test_vst3.dll'), path.join(bundle, 'Contents', 'x86_64-win', 'KryptTestGainBundle.vst3'));
-// JSON5 on purpose (comments + trailing commas), like real SDK output.
 writeFileSync(
   path.join(bundle, 'Contents', 'Resources', 'moduleinfo.json'),
   `{

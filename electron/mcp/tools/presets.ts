@@ -1,11 +1,3 @@
-// Sound tools (owned by sounds-core): find_presets, load_preset, save_preset,
-// apply_chain. See research/10-sound-and-craft.md.
-//
-// Presets are asked for by ROLE + genre + words and resolved with
-// shared/sounds/select.ts; loading one is a presets.* doc command (one undo
-// step per call). The preset list comes from the sounds service (factory +
-// the user's presets) or, when it isn't wired, the shared factory data.
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import { CHAIN_ROLES, INSTRUMENT_ROLES, type ChainPreset, type ChainRole, type InstrumentPreset, type InstrumentRole, type Preset } from '@shared/sounds/types';
@@ -23,14 +15,12 @@ const zLabel = z.string().max(80).optional().describe("Short description of this
 
 const ALL_ROLES: readonly string[] = [...INSTRUMENT_ROLES, ...CHAIN_ROLES];
 
-/** 'drumbus' / 'Drum Bus' → 'drumBus'; null when it isn't a role. */
 function parseRole(raw: string | undefined): InstrumentRole | ChainRole | null {
   if (!raw) return null;
   const k = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
   return (ALL_ROLES.find((r) => r.toLowerCase() === k) as InstrumentRole | ChainRole | undefined) ?? null;
 }
 
-/** The chain role words imply ("club master" → master, "drum bus" → drumBus), or null. */
 export function chainRoleFromText(text: string): ChainRole | null {
   const t = text.toLowerCase();
   if (/\bmaster(ing)?\b/.test(t)) return 'master';
@@ -75,13 +65,12 @@ interface Resolved<T extends Preset> {
   others: T[];
 }
 
-/** A preset by id, exact name (case-insensitive) or descriptive words, best-first by role + genre. */
 function resolvePreset<T extends Preset>(all: readonly Preset[], kind: T['kind'], query: string, roleHint: InstrumentRole | ChainRole | null, genre: GenreId | null): Resolved<T> | null {
   const pool = all.filter((p): p is T => p.kind === kind);
   const q = query.trim();
   const byId = pool.find((p) => p.id === q) ?? pool.find((p) => p.id.toLowerCase() === q.toLowerCase());
   if (byId) return { preset: byId, how: 'id', others: [] };
-  if (/^(factory|user):/i.test(q)) return null; // an id that isn't (or isn't of this kind): never a word search
+  if (/^(factory|user):/i.test(q)) return null;
   const byName = pool.filter((p) => p.name.toLowerCase() === q.toLowerCase());
   if (byName.length) {
     const ranked = rankPresets(byName, { genre: genre ?? undefined }, byName.length);
@@ -100,9 +89,6 @@ function noPresetMessage(kind: Preset['kind'], query: string, count: number, not
   return `No ${what} matches "${safeName(query, 60)}". Call find_presets${kind === 'chain' ? ' {"kind":"chain"}' : ''} to see what exists (by role, genre or words).`;
 }
 
-// ── find_presets ──────────────────────────────────────────────────────
-
-/** find_presets {like}: the closest instrument presets by timbre (same role family first; `role` picks another). */
 async function likePresets(deps: MainDeps, caller: ToolCaller, a: { like: string; role?: string; limit: number; text?: string; genre?: string; tags?: string[]; kind?: string; plugin?: string }, ctx?: RunCtx): Promise<ToolResult> {
   let role: InstrumentRole | undefined;
   if (a.role !== undefined) {
@@ -156,7 +142,6 @@ export const findPresets = defineTool({
     }
     const plugin = a.plugin ? findPluginRef(deps.doc.catalog, a.plugin, 'instrument').id : undefined;
     const genre = genreArg(a.genre, deps, warnings);
-    // A role that is both an instrument and a chain role ('bass', 'lead' …) means the instrument unless kind says chain.
     const kind = a.kind ?? (role && !(INSTRUMENT_ROLES as readonly string[]).includes(role) ? 'chain' : role || plugin ? 'instrument' : undefined);
     const q: SoundQuery = { text: a.text, role, genre: genre ?? undefined, tags: a.tags, kind, plugin };
     const hits = rankPresets(lib.presets, q, a.limit);
@@ -188,15 +173,12 @@ export const findPresets = defineTool({
           genres: p.genres,
           description: safeName(p.description, 300),
           source: p.id.startsWith('user:') ? 'user' : 'factory',
-          // The sound pack it needs that isn't installed ({id, name}); absent when it plays as is.
           needsPack: missingPack(deps.packs, p) ?? undefined,
         })),
       },
     };
   },
 });
-
-// ── load_preset ───────────────────────────────────────────────────────
 
 export const loadPreset = defineTool({
   name: 'load_preset',
@@ -225,7 +207,6 @@ export const loadPreset = defineTool({
       fail(noPresetMessage('instrument', a.preset, lib.presets.filter((p) => p.kind === 'instrument').length, lib.note));
     }
     const warnings: string[] = [];
-    // A preset whose sound pack isn't installed can't play: named → refused; a word search falls back to one that plays.
     const pack = missingPack(deps.packs, r.preset);
     if (pack) {
       const why = `${safeName(r.preset.name)} (${r.preset.id}) ${needsPackText(pack.name)}`;
@@ -272,12 +253,9 @@ export const loadPreset = defineTool({
   },
 });
 
-// ── save_preset ───────────────────────────────────────────────────────
-
 export const savePreset = defineTool({
   name: 'save_preset',
   title: 'Save a preset',
-  // Writes a user preset file; the project only gets the channel's preset label (no undo step of its own).
   kind: 'transport',
   description:
     "Save a sound you designed as a USER preset (it shows in the user's preset browser and in find_presets): a channel's instrument + params + sample + its own insert's effects, or a mixer insert's effect chain (insert: \"master\", a bus …). Only params that differ from the defaults are stored; a saved channel is then labelled with the new preset. Example: {\"channel\":\"Lead\",\"name\":\"Glass Lead\",\"tags\":[\"bright\",\"wide\"],\"genres\":[\"future-bass\"],\"description\":\"Shimmery detuned lead for drops.\"}",
@@ -324,7 +302,6 @@ export const savePreset = defineTool({
     const r = deps.sounds.saveUser(preset);
     if (!r.ok || !r.data) fail(r.message ?? `Couldn't save "${meta.name}".`);
     const s = r.data;
-    // The channel now plays that preset: label it (as this agent, inside the call's group; not an undo step).
     if (channelId) ctx.tryExec('presets.markChannel', { channelId, preset: { id: s.id, name: s.name } });
     const detail =
       preset.kind === 'instrument'
@@ -334,8 +311,6 @@ export const savePreset = defineTool({
     return { ok: true, message: `Saved user preset "${safeName(s.name)}" (${s.id}; ${detail}). ${how} loads it.`, changed: [], data: s };
   },
 });
-
-// ── apply_chain ───────────────────────────────────────────────────────
 
 const NEW_INSERT_NAME: Partial<Record<ChainRole, string>> = { drumBus: 'Drum Bus', reverbSend: 'Reverb', delaySend: 'Delay' };
 
@@ -369,7 +344,6 @@ export const applyChain = defineTool({
     let created = '';
     const fresh = typeof a.insert === 'string' ? /^new(?::\s*(.+))?$/i.exec(a.insert.trim()) : null;
     if (fresh) {
-      // "new:Music Bus" names the new insert; bare "new" names bus / send chains after their role.
       const name = fresh[1]?.trim().slice(0, 64) || NEW_INSERT_NAME[preset.role];
       if (!name) fail(`insert "new" is for bus and send chains (drumBus, reverbSend, delaySend); "${safeName(preset.name)}" is a ${preset.role} chain. Name the new insert ("new:Music Bus") or the insert to load it on.`);
       const taken = new Set(p0.mixer.insertOrder.map((id) => p0.mixer.inserts[id].name.toLowerCase()));

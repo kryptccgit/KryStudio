@@ -1,10 +1,3 @@
-// End-to-end agent smoke test: talks MCP through the real stdio shim
-// (resources/bin/krypt-studio-mcp.exe) to a RUNNING Krypt Studio, exactly
-// like Claude Code would. It writes a beat, arranges it, adds an effect,
-// renders + analyzes it ("hearing"), then reverts every agent edit.
-//
-//   npm run dev            (in another terminal; or launch the installed app)
-//   node scripts/agent-smoke.mjs [--keep]   (--keep = don't revert at the end)
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -84,8 +77,6 @@ await tool('arrange', { placements: [{ pattern: PAT, bars: '1-8' }] });
 await tool('add_effect', { insert: 'Keys', effect: 'reverb', params: { decay: 2.5 }, mix: 30 });
 await tool('commit_edit', {});
 const r = await tool('render_preview', { scope: 'song', key: 'F#m' });
-// The beat was written a few ms earlier: a silent render means the engine
-// rendered a stale project (the bridge must sync before rendering).
 const lufs = Number(/I=(-?[\d.]+) LUFS/.exec(r.text)?.[1]);
 if (r.ok && !(lufs > -40)) {
   failures++;
@@ -93,7 +84,6 @@ if (r.ok && !(lufs > -40)) {
 }
 await tool('get_history', { who: 'all' });
 if (!keep) await tool('revert_all_agent_edits', { confirm: true });
-// A no-op must be reported as a no-op, never a fake success.
 await tool('set_tempo', { bpm: keep ? 142 : 140 }, { expectOk: false });
 
 p.stdin.end();

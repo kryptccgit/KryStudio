@@ -1,8 +1,3 @@
-//! `RemoteInstrument` / `RemoteEffect`: the dsp traits, proxied to the
-//! plugin host. Every [RT] method here is allocation-free and lock-free:
-//! events go into a preallocated local list and cross to the host in the
-//! shared block of the next process() call (one synchronous round trip).
-
 use crate::manager::Inst;
 use crate::shm::{self, ev, flag, Ev, MAX_EVENTS, MAX_FRAMES};
 use krypt_studio_dsp::{Effect, Instrument, NoteExtras, ProcessContext};
@@ -11,25 +6,18 @@ use std::sync::atomic::Ordering::*;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Live engine: how long one call may block the audio thread before we
-/// give up on this block (the host is then "busy" until it answers).
 const RT_DEADLINE: Duration = Duration::from_millis(30);
-/// Offline render: plugins may be slow, nobody is listening.
 const OFFLINE_DEADLINE: Duration = Duration::from_secs(10);
-/// A host that stays busy this long is hung (the watchdog kills it).
 const HUNG_AFTER_SEC: f32 = 2.0;
 
 pub(crate) struct Core {
     pub inst: Arc<Inst>,
     param_ids: Arc<[u32]>,
-    /// Latest value per descriptor param not yet sent (NaN = none).
     pending: Vec<f32>,
     any_pending: bool,
     events: Vec<Ev>,
     seq: u32,
     inflight: bool,
-    /// set_param calls before the first process() are the engine's full
-    /// default sweep: ignore them (initial values come from `initial`).
     armed: bool,
     busy_frames: f32,
     deadline: Duration,
@@ -99,15 +87,12 @@ impl Core {
         self.inst.chan.map.block().state.load(Acquire)
     }
 
-    /// [RT] One round trip. `input` (effects) is copied into the block;
-    /// on success the plugin's output is in the block's `audio_out`.
-    /// Returns false when there is no output for this block.
     fn exchange(&mut self, ctx: &ProcessContext, input: Option<(&[f32], &[f32])>, n: usize) -> bool {
         self.armed = true;
         let chan = &self.inst.chan;
         if self.inflight {
             if chan.is_done(self.seq) {
-                self.inflight = false; // stale block: drop its output
+                self.inflight = false;
             } else {
                 self.busy_frames += n as f32;
                 if self.busy_frames > HUNG_AFTER_SEC * self.sr.max(8000.0) {
@@ -118,7 +103,6 @@ impl Core {
             }
         }
         let p = chan.map.raw();
-        // SAFETY: not in flight → the client owns the block's plain fields.
         unsafe {
             let mut k = 0usize;
             for e in self.events.iter() {
@@ -171,19 +155,14 @@ impl Core {
         }
     }
 
-    /// [RT] Read output channel `c` of the last completed block.
     #[inline]
     fn out(&self, c: usize, n: usize) -> &[f32] {
-        // SAFETY: done → the client owns the block; the slice dies before the next publish.
         unsafe { &(&(*self.inst.chan.map.raw()).audio_out)[c][..n] }
     }
 }
 
-// ── Instrument ───────────────────────────────────────────────────────────
-
 pub struct RemoteInstrument {
     core: Core,
-    /// Key actually sent to the plugin for each engine key (pitch offsets).
     sent: [u8; 128],
     held: [bool; 128],
     held_count: u32,
@@ -214,7 +193,6 @@ impl Instrument for RemoteInstrument {
         let k = (key as usize).min(127);
         let target = pitch.round().clamp(0.0, 127.0);
         if self.held[k] {
-            // Retrigger: release the previous voice for this key first.
             self.core.push(Ev { kind: ev::NOTE_OFF, offset: offset as u32, key: self.sent[k] as u32, id: 0, value: 0.5, aux: 0.0 });
         } else {
             self.held[k] = true;
@@ -265,7 +243,6 @@ impl Instrument for RemoteInstrument {
         let (ol, or) = (self.core.out(0, n), self.core.out(1, n));
         for i in 0..n {
             let (a, b) = (ol[i], or[i]);
-            // Never let a misbehaving plugin poison the mix with NaN/inf.
             let (a, b) = (if a.is_finite() { a } else { 0.0 }, if b.is_finite() { b } else { 0.0 });
             l[i] += a;
             r[i] += b;
@@ -284,17 +261,13 @@ impl Instrument for RemoteInstrument {
     }
 
     fn is_active(&self) -> bool {
-        // Keep processing while notes are held and for a few seconds of tail.
         self.held_count > 0 || self.silent_frames < 3.0 * self.core.sr.max(8000.0) || !self.core.events.is_empty()
     }
 
-    /// The plugin's reported latency (instrument PDC, docs/ENGINE_PROTOCOL.md §12).
     fn latency(&self) -> usize {
         self.core.inst.latency()
     }
 }
-
-// ── Effect ───────────────────────────────────────────────────────────────
 
 pub struct RemoteEffect {
     core: Core,
@@ -320,12 +293,10 @@ impl Effect for RemoteEffect {
         let [l, r] = buf;
         match self.core.state() {
             shm::state::READY => {}
-            // Still loading / failed to load: pass audio through (like a missing stock effect).
             shm::state::LOADING | shm::state::FAILED | shm::state::PAUSED => {
                 self.core.events.clear();
                 return;
             }
-            // Crashed: silence.
             _ => {
                 l[..n].fill(0.0);
                 r[..n].fill(0.0);

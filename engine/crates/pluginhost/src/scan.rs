@@ -1,15 +1,3 @@
-//! `--scan <path>`: describe the plugins in ONE .clap / .vst3 file and
-//! print JSON lines to stdout. Electron main runs one scan process per file
-//! with a timeout and a crash journal, so a plugin that crashes or hangs
-//! while being scanned only kills this throwaway process (research/03 §2.4).
-//!
-//! Output lines (the LAST complete line wins):
-//!   {"ok":true,"format":"clap","path":…,"plugins":[descriptor…]}
-//!   {"ok":false,"format":…,"path":…,"message":…}
-//! For VST3 a first line comes from moduleinfo.json (no code loaded,
-//! "fromModuleInfo":true); a second line follows once the module was loaded
-//! and its parameters read.
-
 use crate::clap_host;
 use clack_host::prelude::*;
 use serde_json::{json, Value};
@@ -45,7 +33,6 @@ pub fn run(path: &str) -> i32 {
     }
 }
 
-/// Title-cased category from CLAP features / VST3 sub-categories.
 pub fn category_from(features: &[String], instrument: bool) -> String {
     const MAP: &[(&str, &str)] = &[
         ("synthesizer", "Synth"),
@@ -88,7 +75,6 @@ pub fn category_from(features: &[String], instrument: bool) -> String {
 }
 
 fn scan_clap(path: &str) -> Result<Vec<Value>, String> {
-    // SAFETY: foreign code, isolated in this throwaway process.
     let entry = unsafe { PluginEntry::load(path) }.map_err(|e| format!("couldn't load: {e}"))?;
     let factory = entry.get_plugin_factory().ok_or("no CLAP plugin factory")?;
     struct D {

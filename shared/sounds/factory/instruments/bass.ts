@@ -1,13 +1,9 @@
-// Factory BASS and SUB presets: bass lines, sub layers. Low end stays mono
-// (mono channels and/or a 0% low-band imager) so the mix translates to clubs and phones.
-
 import type { InstrumentPreset } from '../../types';
 import {
   ALG, DIV, FM, HARD, K808, LFO, POS, ROOM, SH, T, TAPE, TRI, TUBE, WAVE,
   comp, delay, drive, eq, fm, imager, k808, preset, reverb, tri, wave,
 } from './kit';
 
-/** Low end mono below `freq`. */
 const monoLows = (freq = 150) => imager(0, 1, 1, { lowFreq: freq });
 
 export const BASS_PRESETS: InstrumentPreset[] = [

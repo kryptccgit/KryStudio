@@ -1,15 +1,3 @@
-// Live drum kit: Virtuosity Drums by Versilian Studios and Karoryfer Samples (CC0 1.0), a jazz/club "house kit"
-// recorded at Virtuosity Musical Instruments, Boston, played with sticks by Austin McMahon. 48 kHz / 24-bit FLAC
-// (close mics mono, room/overhead mics stereo), pinned to a commit of the sfzinstruments repository.
-//
-// Two mixes from the same session, both ours:
-// - "studio": each piece's close mic layered with the stereo overheads (kick mic + OH on the kick, snare mic + OH on
-//   the snare, OH with a little snare-mic bleed on the hats, OH alone on cymbals and toms), the way the upstream
-//   basic kit balances them by default (every mic at full level).
-// - "lofi": the session's vintage "lofi" mic alone, a dark, compressed, roomy colour for lo-fi and boom bap.
-// Articulations with many velocity layers and no round robins (snare 36, cross-stick 16, rimshot 12, toms 16) use
-// neighbouring layers as round robins, so repeated hits at one velocity alternate instead of machine-gunning.
-
 import type { BuildCtx, InstrumentSpec, Opcodes, PackSpec, SampleRef, SfzGroup } from '../lib';
 
 const SHA = '9f04cf9a734527edfbb0a4eee1f674e45bbf71bc';
@@ -17,16 +5,11 @@ const SHA = '9f04cf9a734527edfbb0a4eee1f674e45bbf71bc';
 type Mic = 'kickmic' | 'snaremic' | 'oh' | 'lofi';
 
 interface Artic {
-  /** Upstream piece folder. */
   folder: string;
-  /** Upstream articulation stem after the mic prefix, e.g. 'kick_snon'. */
   stem: string;
   layers: number;
-  /** Round robins per layer upstream (0 = none: neighbouring layers become round robins, `rrFrom` per band). */
   rr: number;
-  /** For rr articulations: velocity bands per layer (upstream). */
   bands?: [number, number][];
-  /** For layer-only articulations: adjacent layers per band used as round robins. */
   rrFrom?: number;
 }
 
@@ -49,7 +32,6 @@ const A = {
 } satisfies Record<string, Artic>;
 type ArticId = keyof typeof A;
 
-/** Which mics (and at what level, dB) make up each articulation in a mix. */
 type Mix = Record<ArticId, [Mic, number][]>;
 const STUDIO: Mix = {
   kick: [['kickmic', 0], ['oh', 0]],
@@ -67,12 +49,6 @@ const STUDIO: Mix = {
 };
 const LOFI: Mix = Object.fromEntries(Object.keys(A).map((k) => [k, [['lofi', 0]]])) as unknown as Mix;
 
-/**
- * Level per articulation (dB on every mic of it), measured with scripts/audition-presets.mjs --packs-dir so each
- * single-piece preset at gain 0 lands on its role's loudness target, which also balances the pieces inside the GM
- * kits. The session's mics hear the kit very differently (the vintage mic barely hears the kick but loves the hats),
- * hence the two columns. Rimshot follows the snare, the pedal hat the closed hat, the bell the ride.
- */
 const LEVEL: Record<'studio' | 'lofi', Record<ArticId, number>> = {
   studio: { kick: 2, snare: 12.5, rimshot: 12.5, xstick: 7, hhClosed: 6, hhPedal: 6, hhOpen: 4, ride: 16.5, bell: 13.5, crash: 9, ltom: 7.5, htom: 3.5 },
   lofi: { kick: 19, snare: 6, rimshot: 6, xstick: -1, hhClosed: 1, hhPedal: 1, hhOpen: -4.5, ride: 8, bell: 5, crash: -3, ltom: 7, htom: 5 },
@@ -85,7 +61,6 @@ const LOFI_MIX = leveled(LOFI, LEVEL.lofi);
 const fileName = (mic: Mic, a: Artic, v: number, r: number) => `${mic}_${a.stem}_vl${v}${a.rr ? `_rr${r}` : ''}.flac`;
 const packPath = (mic: Mic, a: Artic, v: number, r: number) => `samples/${mic}/${fileName(mic, a, v, r)}`;
 
-/** Every file an articulation uses on one mic. */
 function filesOf(mic: Mic, a: Artic): SampleRef[] {
   const out: SampleRef[] = [];
   for (let v = 1; v <= a.layers; v++) {
@@ -94,7 +69,6 @@ function filesOf(mic: Mic, a: Artic): SampleRef[] {
   return out;
 }
 
-/** Long cymbal and tom tails are trimmed (seconds kept, fade before the cut) to keep the kit's RAM modest. */
 const TRIM: Partial<Record<ArticId, [number, number]>> = {
   hhOpen: [3.5, 1],
   crash: [5, 1.5],
@@ -104,7 +78,6 @@ const TRIM: Partial<Record<ArticId, [number, number]>> = {
   htom: [2.5, 0.8],
 };
 
-/** Regions (without key opcodes) for one articulation on one mic: velocity bands + round robins. */
 function articRegions(ctx: BuildCtx, id: ArticId, mic: Mic, volume: number): Opcodes[] {
   const a: Artic = A[id];
   const out: Opcodes[] = [];
@@ -139,12 +112,10 @@ function articRegions(ctx: BuildCtx, id: ArticId, mic: Mic, volume: number): Opc
   return out;
 }
 
-/** All mics of an articulation in a mix, placed on keys. */
 function placed(ctx: BuildCtx, mix: Mix, id: ArticId, keys: Opcodes): Opcodes[] {
   return mix[id].flatMap(([mic, vol]) => articRegions(ctx, id, mic, vol).map((r) => ({ ...r, ...keys })));
 }
 
-/** Per-articulation level and envelope (amp_veltrack 0 where many layers already carry the dynamics). */
 const FEEL: Record<ArticId, Opcodes> = {
   kick: { amp_veltrack: 30 },
   snare: { amp_veltrack: 0 },
@@ -162,7 +133,6 @@ const FEEL: Record<ArticId, Opcodes> = {
 
 const GLOBAL: Opcodes = { loop_mode: 'one_shot', ampeg_attack: 0.001, ampeg_release: 0.08, off_mode: 'normal' };
 
-/** The GM kit layout: 35/36 kick, 37 cross-stick, 38 snare, 40 rimshot, toms 41-50, hats 42/44/46, cymbals; kick on 60 too. */
 function kit(path: string, mix: Mix, title: string): InstrumentSpec {
   const fixed = (k: number) => ({ lokey: k, hikey: k, pitch_keycenter: k, pitch_keytrack: 0 });
   return {
@@ -175,15 +145,12 @@ function kit(path: string, mix: Mix, title: string): InstrumentSpec {
         control: { default_path: 'samples/' },
         global: GLOBAL,
         groups: [
-          // the kick also answers on C4 (60), where step-sequencer steps land on a channel with the default root key
           g('kick (35, 36, and 60 for steps)', 'kick', [...placed(ctx, mix, 'kick', { lokey: 35, hikey: 36, pitch_keycenter: 36, pitch_keytrack: 0 }), ...placed(ctx, mix, 'kick', fixed(60))]),
           g('cross-stick (37)', 'xstick', placed(ctx, mix, 'xstick', fixed(37))),
           g('snare (38)', 'snare', placed(ctx, mix, 'snare', fixed(38))),
           g('rimshot (40)', 'rimshot', placed(ctx, mix, 'rimshot', fixed(40))),
-          // GM toms sit between the hats: the low tom plays 41/43/45 (-2/0/+2 st), the high tom 47/48/50 (-1/0/+2 st)
           g('low tom (41, 43, 45)', 'ltom', [41, 43, 45].flatMap((k) => placed(ctx, mix, 'ltom', { lokey: k, hikey: k, pitch_keycenter: 43 }))),
           g('high tom (47, 48, 50)', 'htom', [47, 48, 50].flatMap((k) => placed(ctx, mix, 'htom', { lokey: k, hikey: k, pitch_keycenter: 48 }))),
-          // hats: closed and pedal (group 1) choke the open hat (group 2)
           g('closed hat (42)', 'hhClosed', placed(ctx, mix, 'hhClosed', fixed(42)), { group: 1 }),
           g('pedal hat (44)', 'hhPedal', placed(ctx, mix, 'hhPedal', fixed(44)), { group: 1 }),
           g('open hat (46), choked by the closed and pedal hats', 'hhOpen', placed(ctx, mix, 'hhOpen', fixed(46)), { group: 2, off_by: 1 }),
@@ -196,7 +163,6 @@ function kit(path: string, mix: Mix, title: string): InstrumentSpec {
   };
 }
 
-/** One piece across the keyboard, its natural pitch on C4 (60): play it from a step-sequencer channel. */
 function piece(path: string, mix: Mix, id: ArticId, title: string): InstrumentSpec {
   return {
     path,

@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// "Show me" ([[show:<anchor>|…]] in a guide): open the anchor's panel, wait
-// for the element with data-guide="<anchor>" (main window or a detached
-// panel window), scroll it into view and pulse a gradient ring around it for
-// about 2.5 s. The ring is an overlay that follows the element's rect, so it
-// never changes the element's own styles. Reduced motion: no pulse, no smooth
-// scroll. Anything that can't be shown ends in a toast naming it.
-// ──────────────────────────────────────────────────────────────────────
-
 import { toast } from '../app/notify';
 import { popoutWindows, revealWorkspace, wm } from '../workspace/WindowManager';
 import { runCommand } from '../input/commands';
@@ -31,7 +22,6 @@ function docs(): Document[] {
     try {
       out.push(w.document);
     } catch {
-      /* closing */
     }
   }
   return out;
@@ -42,7 +32,6 @@ function sized(el: Element): boolean {
   return r.width > 0 && r.height > 0;
 }
 
-/** The first rendered element for an anchor, in any window. */
 function findAnchor(id: string): HTMLElement | null {
   const sel = `[data-guide="${id}"]`;
   for (const d of docs()) {
@@ -51,7 +40,6 @@ function findAnchor(id: string): HTMLElement | null {
   return null;
 }
 
-/** Something (Home, a floating window) sits over the element's centre. */
 function covered(el: HTMLElement): boolean {
   const r = el.getBoundingClientRect();
   const hit = el.ownerDocument.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
@@ -80,7 +68,6 @@ function reducedMotion(win: Window): boolean {
 
 let stopRing: (() => void) | null = null;
 
-/** Draw the ring around `el` and keep it on the element's rect until it fades. */
 export function pulseRing(el: HTMLElement): void {
   stopRing?.();
   const doc = el.ownerDocument;
@@ -90,7 +77,6 @@ export function pulseRing(el: HTMLElement): void {
   ring.id = RING_ID;
   ring.setAttribute('aria-hidden', 'true');
   const pad = 4;
-  // A gradient border (the indigo → purple → pink accent) with the inside masked out, plus a soft glow behind it.
   ring.style.cssText =
     'position:fixed;z-index:2147483000;pointer-events:none;border-radius:10px;padding:2px;' +
     'background:linear-gradient(135deg,#6366F1,#A855F7,#EC4899);' +
@@ -108,7 +94,7 @@ export function pulseRing(el: HTMLElement): void {
   let alive = true;
   const place = (): void => {
     if (!alive) return;
-    if (!el.isConnected) return stop(); // the panel closed or re-rendered it away
+    if (!el.isConnected) return stop();
     const r = el.getBoundingClientRect();
     const box = { left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + pad * 2}px`, height: `${r.height + pad * 2}px` };
     Object.assign(ring.style, box);
@@ -137,7 +123,6 @@ export function pulseRing(el: HTMLElement): void {
       );
     }
   } catch {
-    /* no Web Animations: the ring just shows, then goes */
   }
 
   function stop(): void {
@@ -154,7 +139,6 @@ export function pulseRing(el: HTMLElement): void {
   stopRing = stop;
 }
 
-/** Extra steps after the panel opens: the right tab / section, so the element is actually rendered. */
 const BEFORE: Partial<Record<GuideAnchorId, () => void>> = {
   'agent.chat': () => runCommand('tools.agentChat'),
   'agent.connect': () => runCommand('tools.connections'),
@@ -163,20 +147,14 @@ const BEFORE: Partial<Record<GuideAnchorId, () => void>> = {
   'browser.factory': () => requestBrowserReveal('sounds'),
 };
 
-/** Anchors outside the Studio panels: open what holds them first (Home ▸ Audio Tools, the Auto Mashup dialog). */
 const openMashupForm = (): void => {
   if (getMashup().phase === 'idle') openMashup();
 };
-/**
- * The Auto Mix form; a running job or a result waiting for Keep / Undo stays on screen instead (the toast says why).
- * Master a song on screen is left as it is: its presets, prompt, options and button are the same anchors.
- */
 const openAutoMixForm = (): void => {
   const s = getAutoMix();
   if (s.visible && s.target === 'file') return;
   if (s.phase === 'idle' || !s.visible) openAutoMix();
 };
-/** Master a song's own steps: open it (step ①), or unfold step ③ / More options when it is already on screen. */
 const openMasterSongForm = (): void => {
   const s = getAutoMix();
   if (!(s.visible && s.target === 'file')) openMasterSong();
@@ -186,7 +164,6 @@ const unfoldOr = (part: 'reference' | 'more') => (): void => {
   if (s.visible && s.target === 'file') unfoldMasterPart(part);
   else openAutoMixForm();
 };
-/** The Krypt Voice dialog (left as it is when it's already on screen). */
 const openVoiceForm = (): void => {
   if (!getVoice().visible) openKryptVoice();
 };
@@ -224,7 +201,6 @@ function cannotShow(a: GuideAnchor, why?: string): void {
   toast.warn(`Couldn't show ${a.label}: ${why ?? a.missing ?? "it isn't on screen right now"}.`);
 }
 
-/** [[show:<anchor>]]: open its panel, find the element, scroll to it and highlight it. Never silent. */
 export async function showGuideAnchor(id: string): Promise<void> {
   if (!isGuideAnchor(id)) {
     toast.error(`This guide points at something that doesn't exist ("${id}").`);
@@ -239,7 +215,6 @@ export async function showGuideAnchor(id: string): Promise<void> {
     } else if (OPEN[id]) {
       OPEN[id]!();
     } else {
-      // Title bar / transport: step Home aside only when it actually covers the element.
       const now = findAnchor(id);
       if (!now || covered(now)) revealWorkspace();
     }

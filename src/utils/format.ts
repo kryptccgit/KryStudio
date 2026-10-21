@@ -2,9 +2,7 @@ export function cls(...parts: Array<string | false | null | undefined>): string 
   return parts.filter(Boolean).join(' ');
 }
 
-/** Platform for UI labels (⌘ vs Ctrl). Guarded so node-side tests can import. */
 export const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC');
-/** The primary modifier's display name for shortcut labels. */
 export const MOD_KEY = IS_MAC ? '⌘' : 'Ctrl';
 
 export function fmtBytes(n: number): string {
@@ -19,7 +17,6 @@ export function fmtBytes(n: number): string {
   return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-/** Seconds → timecode. mm:ss.cc, or h:mm:ss.cc past an hour. */
 export function fmtTimecode(seconds: number): string {
   const t = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
   const total = Math.floor(t);
@@ -31,7 +28,6 @@ export function fmtTimecode(seconds: number): string {
   return h > 0 ? `${h}:${p(m)}:${p(s)}.${p(cs)}` : `${p(m)}:${p(s)}.${p(cs)}`;
 }
 
-/** Compact seconds label for ruler ticks (e.g. "0s", "1:05"). */
 export function fmtClock(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
   const s = total % 60;

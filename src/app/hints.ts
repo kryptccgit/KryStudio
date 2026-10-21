@@ -1,10 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The hint bar (FL's top-left hint panel, here in the status bar).
-// Any element with `data-hint="..."` shows its hint on hover. Controls push
-// live values while dragging; actions can flash a confirmation. All writes go
-// straight to the DOM, so hovering never re-renders React.
-// ──────────────────────────────────────────────────────────────────────
-
 type Tone = 'info' | 'ok' | 'warn' | 'error' | 'agent';
 
 let el: HTMLElement | null = null;
@@ -42,7 +35,6 @@ export function bindHintElement(node: HTMLElement | null): void {
   render();
 }
 
-/** Live text while a gesture runs (knob drag). Pass '' to clear. */
 export function setLiveHint(text: string): void {
   live = text;
   render();
@@ -55,7 +47,6 @@ export function flashHint(text: string, tone: Tone = 'info', ms = 2600): void {
   timer = setTimeout(render, ms + 20);
 }
 
-/** Track `[data-hint]` hovers in a document (main window + every popout). */
 export function installHintTracking(doc: Document): void {
   if (docs.has(doc)) return;
   docs.add(doc);

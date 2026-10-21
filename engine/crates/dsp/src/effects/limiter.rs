@@ -1,13 +1,3 @@
-//! krypt.limiter — lookahead brickwall limiter with 4x-oversampled
-//! true-peak detection.
-//!
-//! Detection p[n] (true peak around input sample n-M) → required gain
-//! r = ceiling / p → sliding minimum over D+1 samples → moving average over
-//! L+1 samples (a smooth attack ramp that is GUARANTEED to reach r before the
-//! peak) → one-pole release. Audio is delayed D = L + 2M samples, so the
-//! applied gain is at or below the requirement of every sample within ±M of
-//! the output sample (M = interpolation half-width). Constant latency D.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::delay::DelayLine;
 use crate::blocks::truepeak::TruePeak;
@@ -37,10 +27,8 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
-/// Internal safety margin under the ceiling (dB).
 const MARGIN_DB: f32 = 0.03;
 
-/// Fixed-capacity monotonic deque for sliding-window minimum.
 struct MinWindow {
     vals: Vec<f32>,
     idx: Vec<u64>,
@@ -63,7 +51,6 @@ impl MinWindow {
     #[inline]
     fn push(&mut self, v: f32) -> f32 {
         let cap = self.vals.len();
-        // pop from back while back >= v
         while self.len > 0 {
             let back = (self.head + self.len - 1) % cap;
             if self.vals[back] >= v {
@@ -76,7 +63,6 @@ impl MinWindow {
         self.vals[pos] = v;
         self.idx[pos] = self.t;
         self.len += 1;
-        // drop expired front
         while self.len > 0 && self.idx[self.head] + self.window <= self.t {
             self.head = (self.head + 1) % cap;
             self.len -= 1;
@@ -88,7 +74,6 @@ impl MinWindow {
 
 pub struct Limiter {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     l: usize,
@@ -192,7 +177,6 @@ impl Effect for Limiter {
             let ceil = self.ceiling.next();
             let xl = crate::blocks::finite(buf[0][i]) * gi;
             let xr = crate::blocks::finite(buf[1][i]) * gi;
-            // detection (aligned to input sample n - M)
             let tpl = self.tp[0].push(xl);
             let tpr = self.tp[1].push(xr);
             self.raw[0].push(xl);
@@ -205,7 +189,6 @@ impl Effect for Limiter {
             let lim = ceil * margin;
             let r = if p > lim { lim / p } else { 1.0 };
             let h = self.minw.push(r);
-            // moving average (attack ramp)
             self.box_sum += h as f64 - self.boxbuf[self.box_pos] as f64;
             self.boxbuf[self.box_pos] = h;
             self.box_pos += 1;
@@ -213,13 +196,11 @@ impl Effect for Limiter {
                 self.box_pos = 0;
             }
             let b = ((self.box_sum * inv_box) as f32).min(1.0);
-            // release
             if b < self.g {
                 self.g = b;
             } else {
                 self.g += (b - self.g) * self.rel;
             }
-            // delayed audio
             self.audio[0].push(xl);
             self.audio[1].push(xr);
             let yl = (self.audio[0].read(self.d) * self.g).clamp(-ceil, ceil);

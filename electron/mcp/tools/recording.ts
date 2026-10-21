@@ -1,10 +1,3 @@
-// setup_recording: the document side of the Recording Studio (Home ▸ Recording
-// Studio): a Vocals insert + track with a vocal chain as the recording target
-// (recording.setupVocals), or another insert / track as the target
-// (recording.setTarget), and a read-only report of the recording setup.
-// Agents never arm, start a take, pick the input device or switch monitoring:
-// the microphone is the user's (Settings ▸ Audio input, the Record button).
-
 import { z } from 'zod';
 import type { ChainPreset } from '@shared/sounds/types';
 import { rankPresets } from '@shared/sounds/select';
@@ -15,7 +8,6 @@ import { soundLibrary } from './instruments';
 
 const zLabel = z.string().max(80).optional().describe("Short description of this change for the user's AI-history panel.");
 
-/** A vocal chain by id, exact name or words (vocal role first); null for "none". */
 function vocalChain(presets: ReturnType<typeof soundLibrary>['presets'], ref: string): ChainPreset | null {
   const q = ref.trim();
   if (/^(none|no effects|dry|clean)$/i.test(q)) return null;

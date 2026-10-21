@@ -1,11 +1,3 @@
-//! Linear-phase halfband FIR oversampling (2x and 4x), Kaiser-window design
-//! computed at construction. Latency is an exact integer number of base-rate
-//! samples so plugin delay compensation is sample-accurate.
-//!
-//! Stage A (base <-> 2x): 71 taps, ~90 dB stopband, passband to ~20 kHz at 48 kHz.
-//! Stage B (2x <-> 4x): 23 taps (content is already band-limited by stage A).
-
-/// Zeroth-order modified Bessel function (series), for Kaiser windows.
 pub fn bessel_i0(x: f64) -> f64 {
     let mut sum = 1.0;
     let mut term = 1.0;
@@ -20,15 +12,12 @@ pub fn bessel_i0(x: f64) -> f64 {
     sum
 }
 
-/// Kaiser window value at position n of N (0..N-1).
 pub fn kaiser(n: usize, len: usize, beta: f64) -> f64 {
     let m = (len - 1) as f64;
     let r = 2.0 * n as f64 / m - 1.0;
     bessel_i0(beta * (1.0 - r * r).max(0.0).sqrt()) / bessel_i0(beta)
 }
 
-/// Halfband taps (length 4m+3). Even offsets from the centre are zero except
-/// the centre (0.5).
 fn halfband(len: usize, beta: f64) -> Vec<f64> {
     let c = (len - 1) / 2;
     (0..len)
@@ -46,17 +35,12 @@ fn halfband(len: usize, beta: f64) -> Vec<f64> {
         .collect()
 }
 
-/// One 2x stage: an upsampler and a downsampler sharing a design.
 #[derive(Clone, Debug)]
 struct Stage {
-    /// Non-zero side taps (the odd offsets), in order of increasing index.
     side: Vec<f32>,
-    /// m: (len-3)/4
     m: usize,
-    // upsampler history (base-rate input), mirrored ring for contiguous reads
     up_hist: Vec<f32>,
     up_pos: usize,
-    // downsampler: history of even-index samples (for side taps) and odd ones (centre)
     dn_even: Vec<f32>,
     dn_odd: Vec<f32>,
     dn_pos: usize,
@@ -67,8 +51,8 @@ impl Stage {
     fn new(len: usize, beta: f64) -> Self {
         assert!(len % 4 == 3, "halfband length must be 4m+3");
         let h = halfband(len, beta);
-        let side: Vec<f32> = h.iter().step_by(2).map(|&v| v as f32).collect(); // indices 0,2,4.. (odd offsets)
-        let k = side.len(); // 2m+2
+        let side: Vec<f32> = h.iter().step_by(2).map(|&v| v as f32).collect();
+        let k = side.len();
         let m = (len - 3) / 4;
         Self {
             side,
@@ -88,33 +72,25 @@ impl Stage {
         self.dn_odd.iter_mut().for_each(|v| *v = 0.0);
     }
 
-    /// Base sample in → two oversampled samples out (gain-compensated).
     #[inline]
     fn up(&mut self, x: f32) -> (f32, f32) {
         let k = self.side.len();
-        // push into mirrored ring: newest at up_pos, read up_hist[up_pos..up_pos+k] newest-first
         self.up_pos = if self.up_pos == 0 { k - 1 } else { self.up_pos - 1 };
         self.up_hist[self.up_pos] = x;
         self.up_hist[self.up_pos + k] = x;
         let hist = &self.up_hist[self.up_pos..self.up_pos + k];
-        // y[2n] = 2 Σ h[2i] x[n-i]
         let mut acc = 0.0f32;
         for (h, v) in self.side.iter().zip(hist) {
             acc += h * v;
         }
         let even = 2.0 * acc;
-        // y[2n+1] = x[n-m]
         let odd = hist[self.m];
         (even, odd)
     }
 
-    /// Two oversampled samples in (a = earlier/even, b = later/odd) → one base
-    /// sample out: z[p] = Σ h[j] w[2p - j], which keeps the round-trip delay
-    /// an integer (2m+1 base samples).
     #[inline]
     fn down(&mut self, a: f32, b: f32) -> f32 {
         let k = self.side.len();
-        // side taps (even j) act on the even-phase samples a[p-i]
         self.dn_pos = if self.dn_pos == 0 { k - 1 } else { self.dn_pos - 1 };
         self.dn_even[self.dn_pos] = a;
         self.dn_even[self.dn_pos + k] = a;
@@ -123,7 +99,6 @@ impl Stage {
         for (h, v) in self.side.iter().zip(hist) {
             acc += h * v;
         }
-        // centre tap (0.5, j = 2m+1) acts on the odd-phase sample b[p-m-1]
         let n = self.m + 2;
         self.dn_odd_pos = if self.dn_odd_pos == 0 { n - 1 } else { self.dn_odd_pos - 1 };
         self.dn_odd[self.dn_odd_pos] = b;
@@ -133,8 +108,6 @@ impl Stage {
     }
 }
 
-/// Down-only 2x decimator with the stage-A halfband design: synthesizers
-/// that render at 2x (FM) feed it two samples and get one base-rate sample.
 #[derive(Clone, Debug)]
 pub struct Decimator2x {
     st: Stage,
@@ -155,19 +128,16 @@ impl Decimator2x {
         self.st.reset();
     }
 
-    /// Two 2x-rate samples in (earlier first) → one base-rate sample.
     #[inline]
     pub fn process(&mut self, a: f32, b: f32) -> f32 {
         self.st.down(a, b)
     }
 
-    /// Base-rate samples of silence needed to flush the filter's memory.
     pub fn flush_len(&self) -> usize {
         self.st.side.len() + self.st.m + 2
     }
 }
 
-/// Oversampling factor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Factor {
     X1,
@@ -185,12 +155,10 @@ impl Factor {
     }
 }
 
-/// Mono oversampler: `process` runs a closure on every oversampled sample.
 #[derive(Clone, Debug)]
 pub struct Oversampler {
     a: Stage,
     b: Stage,
-    /// one-sample delay at 2x on the 4x path's way down (integer latency)
     b_pad: [f32; 2],
 }
 
@@ -211,18 +179,14 @@ impl Oversampler {
         self.b_pad = [0.0; 2];
     }
 
-    /// Latency in base-rate samples for a factor.
     pub fn latency(&self, f: Factor) -> usize {
         match f {
             Factor::X1 => 0,
-            // up (2m+1) + down (2m+1) at 2x = 2m+1 base samples
             Factor::X2 => 2 * self.a.m + 1,
-            // + stage B: (2mb+1) at 4x round trip = (2mb+1)/2 base, padded by +1 sample at 2x (= 0.5 base)
             Factor::X4 => 2 * self.a.m + 1 + (2 * self.b.m + 1).div_ceil(2),
         }
     }
 
-    /// Process one base sample through `f(x) -> y` at the oversampled rate.
     #[inline]
     pub fn process<F: FnMut(f32) -> f32>(&mut self, x: f32, factor: Factor, mut f: F) -> f32 {
         match factor {
@@ -239,7 +203,6 @@ impl Oversampler {
                 let (y0, y1, y2, y3) = (f(v0), f(v1), f(v2), f(v3));
                 let d0 = self.b.down(y0, y1);
                 let d1 = self.b.down(y2, y3);
-                // one-sample pad at the 2x rate keeps total latency integer
                 let p = self.b_pad[0];
                 self.b_pad[0] = d1;
                 self.a.down(p, d0)

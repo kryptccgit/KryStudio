@@ -1,12 +1,3 @@
-//! Live MIDI input + recording hooks into the real-time core. Declared as a
-//! child module of `core` (core.rs: `#[path = "record_hooks.rs"] mod
-//! record_hooks;`) so it can drive the sequencer's private state; core.rs
-//! only carries the call sites, each marked `// live input:`.
-//!
-//! [RT] Everything here runs on the audio thread: no allocation, no locks.
-//! Offline renders never attach the live queues, so every hook is a no-op
-//! there (`self.live.attached()` is false).
-
 use super::*;
 use crate::midi::{now_ns, MidiMsg};
 use crate::record::{
@@ -14,23 +5,17 @@ use crate::record::{
     OpenNote, RecMsg, RecState,
 };
 
-/// Live events sort between sequenced note-offs (0) and note-ons (2); among
-/// themselves they keep arrival order (Ev::seq).
 const LIVE_ORDER: u8 = 1;
-/// Monitor: refill to this many frames after an underrun, drop above MAX.
 const MON_PRIME: usize = 768;
 const MON_MAX: usize = 4096;
 
 impl Core {
-    /// [RT] Hook: start of every device block, before commands are drained.
     pub(super) fn live_block(&mut self, frames: usize) {
         if self.live.attached() {
             self.live.begin_block(now_ns(), frames, self.sr as f64);
         }
     }
 
-    /// [RT] Hook (top of `play`): with record armed and a count-in set, count
-    /// in on the metronome first; the transport starts when it ends.
     pub(super) fn live_intercept_play(&mut self) -> bool {
         if !self.live.attached() || self.render_mode || self.playing {
             return false;
@@ -53,7 +38,6 @@ impl Core {
         true
     }
 
-    /// [RT] Hook (top of `stop` / `pause`): cancel a count-in, end the take.
     pub(super) fn live_transport_stopped(&mut self) {
         if !self.live.attached() {
             return;
@@ -65,21 +49,16 @@ impl Core {
         }
     }
 
-    /// Hook (`loop_bounds`): while record is armed, song mode without a loop
-    /// region keeps playing past the last clip (FL), so a take can extend the song.
     #[inline]
     pub(super) fn live_extends_song(&self) -> bool {
         self.live.attached() && self.live.live.armed.load(Relaxed)
     }
 
-    /// Hook (`finish_master`): the count-in clicks while the transport is stopped.
     #[inline]
     pub(super) fn live_counting_in(&self) -> bool {
         self.live.state == RecState::CountIn
     }
 
-    /// [RT] Hook: after the sequencer advanced this sub-block (`self.pos` is
-    /// its END position) and before its events are dispatched.
     pub(super) fn live_sub(&mut self, n: usize) {
         if !self.live.attached() || n == 0 {
             return;
@@ -87,11 +66,8 @@ impl Core {
         let sr = self.sr as f64;
         let tpf = ticks_per_frame(self.program.transport.bpm.clamp(10.0, 999.0), sr);
         let base = self.live.sub_base;
-        // Whether the transport advanced during THIS sub-block (a play() issued
-        // below by the count-in only takes effect from the next one).
         let playing = self.playing && !self.render_mode;
 
-        // 1. Count-in: metronome clicks; the transport starts after the last beat.
         if self.live.state == RecState::CountIn {
             let (click, done) = self.live.count_in_step(n);
             if let Some((off, accent)) = click {
@@ -101,11 +77,10 @@ impl Core {
             if done {
                 self.live.cancel_count_in();
                 self.live.bypass_intercept = true;
-                self.play(); // takes effect from the next sub-block
+                self.play();
             }
         }
 
-        // 2. Take start / end (arm while playing = punch in, disarm = punch out).
         let armed = self.live.live.armed.load(Relaxed);
         let (lo, hi) = self.loop_bounds();
         if self.live.state == RecState::Recording && !(armed && playing) {
@@ -120,7 +95,6 @@ impl Core {
                 self.live.wrapped = true;
                 self.live.pass += 1;
                 let take = self.live.take;
-                // Takes (docs §13): when, in heard time since the take began, the wrap happened.
                 let off = base + wrap_offset(self.pos, lo, n, tpf);
                 let at = heard_ns(self.live.block_t_ns, self.out_latency_ns(), off, self.sr as f64);
                 let sec = at.saturating_sub(self.live.take_from_ns) as f64 * 1e-9;
@@ -129,7 +103,6 @@ impl Core {
             self.live.last_pos = self.pos;
         }
 
-        // 3. MIDI events that fall into this sub-block.
         while self.live.pend_idx < self.live.pending.len() {
             let p = self.live.pending[self.live.pend_idx];
             if p.off as usize >= base + n {
@@ -140,7 +113,6 @@ impl Core {
             self.live_event(off, p.msg, n, tpf, lo, hi);
         }
 
-        // 4. Input monitoring straight into the master bus.
         self.live_monitor(n);
 
         if self.live.state == RecState::Recording {
@@ -194,7 +166,6 @@ impl Core {
         }
     }
 
-    /// End the take at frame `off` of the current block (sub-block start).
     fn live_end_take(&mut self, off: usize) {
         let until_ns = heard_ns(
             self.live.block_t_ns,
@@ -203,7 +174,6 @@ impl Core {
             self.sr as f64,
         );
         let take = self.live.take;
-        // Notes still held end here.
         for k in 0..128u8 {
             self.live_close_note(k, 0.0);
         }
@@ -217,7 +187,6 @@ impl Core {
         r.publish_state();
     }
 
-    /// Close a recorded note `extra_ticks` after the current sub-block start.
     fn live_close_note(&mut self, key: u8, extra_ticks: f64) {
         let k = key as usize & 127;
         let o = self.live.open[k];
@@ -244,7 +213,7 @@ impl Core {
             MidiMsg::NoteOn { key, vel, .. } => {
                 let k = key as usize & 127;
                 if self.live.held[k] != NONE {
-                    self.live_release(off, key, tpf); // same key again: retrigger
+                    self.live_release(off, key, tpf);
                 }
                 let slot = self.live.live.target_slot.load(Relaxed);
                 let Some(ch) = self.program.channel(slot) else {
@@ -344,7 +313,6 @@ impl Core {
             self.live.mon_starved = true;
             return;
         }
-        // Keep the monitor latency bounded (input and output clocks drift).
         if avail > MON_MAX {
             if let Ok(c) = rx.read_chunk((avail - MON_PRIME) * 2) {
                 c.commit_all();

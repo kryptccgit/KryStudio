@@ -1,20 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Auto Mix planner (research/20 §4-5). Pure: a project, its roles and a
-// measurement (render analysis per insert + gain reduction per slot) →
-// operations on Krypt-owned slots, insert volumes and send routes.
-//
-// Krypt-owned slots are marked by a SIGNATURE parameter value that the
-// planner never uses for anything else (like match_mix's Match EQ is known
-// by its band frequencies; FxSlot has no name field): a re-run finds and
-// ADJUSTS them instead of stacking new ones. With keepUserFx (the default)
-// any other slot is never touched; without it, a slot of the same type is
-// adopted instead of adding a second one.
-//
-// Every measured rule is FEEDBACK (new = current + k · (target − measured),
-// with a dead band), so re-running on a finished mix is a no-op and the
-// convergence passes settle instead of oscillating.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { FxSlot, MixerInsert, Project } from '../schema/project';
 import type { PluginCatalog } from '../plugins/types';
 import type { SlotGainReduction } from '../engine/protocol';
@@ -22,9 +5,6 @@ import type { AutoMixChange, AutoMixIntent, AutoMixMode, AutoMixPreset } from '.
 import { AUTO_SENDS, BANDS, type Band, type Bands, type InsertInfo } from './roles';
 import { planTune } from '../vocals/plan';
 
-// ── Krypt-owned slots ─────────────────────────────────────────────────
-
-/** Highest vocal fader the planner sets (dB); beyond it the beat is turned down instead. */
 const VOCAL_FADER_MAX = 3;
 
 export type KryptKind = 'eq' | 'comp' | 'deesser' | 'glue' | 'heat' | 'imager' | 'clipper' | 'limiter' | 'duck';
@@ -41,7 +21,6 @@ export const KIND_TYPE: Record<KryptKind, string> = {
   duck: 'krypt.duck',
 };
 
-/** The signature of each kind: one param at a value nothing else sets (inaudible). The limiter's is a .5 ms release. */
 export const MARK: Record<KryptKind, { param: string; value: number }> = {
   eq: { param: 'b7Freq', value: 19990 },
   comp: { param: 'knee', value: 5.95 },
@@ -54,7 +33,6 @@ export const MARK: Record<KryptKind, { param: string; value: number }> = {
   duck: { param: 'curve', value: 0.505 },
 };
 
-/** Is this slot the Krypt-owned `kind` (any kind when omitted)? */
 export function isKryptSlot(slot: FxSlot | undefined, kind?: KryptKind): boolean {
   if (!slot) return false;
   const kinds = kind ? [kind] : (Object.keys(KIND_TYPE) as KryptKind[]);
@@ -68,7 +46,6 @@ export function isKryptSlot(slot: FxSlot | undefined, kind?: KryptKind): boolean
   });
 }
 
-/** The slot Auto Mix adjusts for `kind` on an insert: its own, or (keepUserFx false) the first slot of that type. */
 export function findKryptSlot(ins: MixerInsert | undefined, kind: KryptKind, keepUserFx: boolean): string | null {
   if (!ins) return null;
   const own = ins.slotOrder.find((s) => isKryptSlot(ins.slots[s], kind));
@@ -83,7 +60,6 @@ const markParams = (kind: KryptKind, release?: number): Record<string, number> =
   return { [MARK[kind].param]: MARK[kind].value };
 };
 
-/** The master loudness drive Auto Mix controls now (its limiter input + its tone EQ's output trim), dB. `insertId`: a song's insert (album mastering). */
 export function masterDrive(p: Project, keepUserFx: boolean, insertId?: string): number {
   const m = p.mixer.inserts[insertId ?? p.mixer.masterId];
   if (!m) return 0;
@@ -92,16 +68,12 @@ export function masterDrive(p: Project, keepUserFx: boolean, insertId?: string):
   return (lim ? (m.slots[lim].params.inputGain ?? 0) : 0) + (eq ? (m.slots[eq].params.output ?? 0) : 0);
 }
 
-/** Canonical order of Krypt slots on an insert (new ones go before later kinds, after everything else). */
 const ORDER: KryptKind[] = ['duck', 'eq', 'deesser', 'comp', 'glue', 'heat', 'imager', 'clipper', 'limiter'];
-
-// ── Inputs ────────────────────────────────────────────────────────────
 
 export interface InsertMeasure {
   lufs: number | null;
   peakDb: number | null;
   crestDb: number | null;
-  /** Absolute band energies (dB), the engine's Analysis bands. */
   bands: Bands | null;
   centroidHz?: number | null;
 }
@@ -112,16 +84,13 @@ export interface MasterMeasure {
   peakDb: number | null;
   crestDb: number | null;
   lra: number;
-  /** Bands relative to the mids. */
   tone: Bands;
   correlation: number;
-  /** Stereo width 0..1 (side energy / total), when the render measured it. */
   width?: number | null;
 }
 
 export interface PlanMeasure {
   master: MasterMeasure;
-  /** Per insert (a stems render); empty without stems. */
   inserts: Record<string, InsertMeasure>;
   gr: SlotGainReduction[];
 }
@@ -136,20 +105,11 @@ export interface PlanInput {
   catalog: PluginCatalog;
   measure: PlanMeasure;
   roles: Record<string, InsertInfo>;
-  /** 1 = the first plan, 2-3 = refining after a render. */
   pass: number;
-  /** Earlier passes: the master loudness drive (limiter input + trim, dB) and the LUFS it gave. */
   loudHistory?: Array<{ drive: number; lufs: number }>;
-  /** Krypt Tune on the vocals (only when the prompt asks). */
   tune?: { style: 'natural' | 'pop' | 'hard'; key: { root: number; scale: number; name: string } | null } | null;
-  /**
-   * The insert the mastering chain goes on (default the Master). Album mastering puts a chain on each song's
-   * insert; `measure.master` is then that song's render.
-   */
   masterInsertId?: string;
-  /** The tonal target (relative to the mids), replacing toneTarget(preset, intent): a reference song, an album curve. */
   tone?: Bands | null;
-  /** A stereo width (0..1) to steer the master imager toward (a reference song); null = the preset's width. */
   widthTarget?: number | null;
 }
 
@@ -163,16 +123,11 @@ export type PlanOp =
 export interface Plan {
   ops: PlanOp[];
   notes: string[];
-  /** The measurement already meets the targets (the service stops refining). */
   converged: boolean;
-  /** Vocal minus beat loudness (dB) and its target, when vocals were measured. */
   vocalVsBeat: number | null;
   vocalTarget: number | null;
-  /** The master loudness drive this plan sets (dB), for the next pass's history. */
   drive: number | null;
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────
 
 const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const clamp = (x: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, x));
@@ -191,24 +146,19 @@ const iv = (i: AutoMixIntent | null, k: keyof AutoMixIntent): number => {
   return typeof v === 'number' ? v : 0;
 };
 
-/** Gain reduction measured on a slot. */
 function grOf(m: PlanMeasure, insertId: string, slotId: string | null): SlotGainReduction | null {
   if (!slotId) return null;
   return m.gr.find((g) => g.insertId === insertId && g.slotId === slotId) ?? null;
 }
 
-/** Feedback: move `cur` toward the value that brings `measured` to `target`, outside a dead band. */
 function feedback(cur: number, measured: number, target: number, opts: { dead: number; k: number; lo: number; hi: number }): number {
   const dev = measured - target;
   if (Math.abs(dev) <= opts.dead) return clamp(cur, opts.lo, opts.hi);
   return r05(clamp(cur - opts.k * (dev - Math.sign(dev) * (opts.dead * 0.5)), opts.lo, opts.hi));
 }
 
-/** A threshold nudged so the measured average gain reduction approaches `targetGr`. */
 function thresholdFromGr(cur: number, gr: SlotGainReduction | null, targetGr: number, lo: number, hi: number): number {
   if (!gr || !isNum(gr.avgDb)) return cur;
-  // The reduction WHILE it works: a vocal is silent for much of a song, and those silent stretches would pull the
-  // whole-render average down, so every run would read "too little" and lower the threshold again (a runaway).
   const working = isNum(gr.active) && gr.active > 0.02 ? Math.min(gr.avgDb / gr.active, isNum(gr.maxDb) ? gr.maxDb : Infinity) : gr.avgDb;
   const d = working - targetGr;
   if (Math.abs(d) < 0.6) return cur;
@@ -237,21 +187,18 @@ function has(c: Ctx, kind: KryptKind): boolean {
   return c.in.catalog.plugins.some((x) => x.id === KIND_TYPE[kind]);
 }
 
-/** Current params of the Krypt slot (empty when it doesn't exist yet). */
 function cur(c: Ctx, insertId: string, kind: KryptKind): { slotId: string | null; params: Record<string, number> } {
   const ins = c.p.mixer.inserts[insertId];
   const id = findKryptSlot(ins, kind, c.in.keepUserFx);
   return { slotId: id, params: id ? { ...ins!.slots[id].params } : {} };
 }
 
-/** The fader move (dB) this plan already holds for an insert. */
 function plannedMove(c: Ctx, id: string): number {
   const op = c.ops.find((o) => o.op === 'volume' && o.insertId === id) as Extract<PlanOp, { op: 'volume' }> | undefined;
   const ins = c.p.mixer.inserts[id];
   return op && ins ? op.db - gainToDb(ins.volume) : 0;
 }
 
-/** How much the master input moves (LU) with the fader moves this plan holds (power sum of the top-level stems). */
 function plannedMasterShift(c: Ctx): number {
   const top = Object.values(c.in.roles).filter((r) => r.topLevel && r.role !== 'send');
   const now: number[] = [];
@@ -272,9 +219,6 @@ function slot(c: Ctx, insertId: string, kind: KryptKind, params: Record<string, 
   c.ops.push({ op: 'slot', key: `${insertId}/${kind}`, insertId, kind, params, target: `${insName(c, insertId)} ▸ ${pluginName(c, kind)}`, what, ...extra });
 }
 
-// ── Vocals ────────────────────────────────────────────────────────────
-
-/** Vocal and beat loudness (power sums of the stems), when measured. */
 export function vocalVsBeat(m: PlanMeasure, roles: Record<string, InsertInfo>): { vocal: number; beat: number; delta: number } | null {
   const all = Object.values(roles);
   const vocals = all.filter((r) => r.vocal);
@@ -300,10 +244,7 @@ function planVocals(c: Ctx): { delta: number | null; target: number | null } {
     const ins = c.p.mixer.inserts[v.id];
     if (!ins) continue;
     const volDb = gainToDb(ins.volume);
-    // ── EQ: high-pass, mud, presence, air (feedback toward vocal tone targets)
     const eq = cur(c, v.id, 'eq');
-    // A re-run on a mix Krypt already balanced: wider dead bands, gentler steps, so small measurement shifts
-    // (the de-esser and comp move the bands too) don't keep nudging the EQ.
     const tdead = eq.slotId ? 2.5 : 1.5;
     const tk = eq.slotId ? 0.4 : 0.6;
     const hp = preset.id === 'podcast-voice' ? 80 : rap ? 90 : 100;
@@ -320,7 +261,6 @@ function planVocals(c: Ctx): { delta: number | null; target: number | null } {
     else Object.assign(p, { b5On: 1, b5Freq: 7000, b5Q: 4, b5Gain: r05(clamp(-(2 + lh), -4, -1)) });
     const parts = [`high-pass ${hp} Hz`, p.b3Gain ? `${sgn(p.b3Gain)} dB at 300 Hz${p.b3Gain < 0 ? ' (mud)' : ''}` : '', p.b4Gain ? `presence ${sgn(p.b4Gain)} dB at 3 kHz` : '', p.b6Gain ? `air ${sgn(p.b6Gain)} dB` : '', deess ? '' : `${sgn(p.b5Gain)} dB at 7 kHz (sibilance)`];
     slot(c, v.id, 'eq', p, parts.filter(Boolean).join(', '));
-    // ── De-esser: threshold follows the measured reduction
     if (deess) {
       const de = cur(c, v.id, 'deesser');
       const range = r05(clamp(6 + 2 * lh, 3, 12));
@@ -333,7 +273,6 @@ function planVocals(c: Ctx): { delta: number | null; target: number | null } {
       }
       slot(c, v.id, 'deesser', { frequency: bright > 0.6 ? 7000 : 6500, threshold: thr, range, listen: 0, ...markParams('deesser') }, `de-ess above ${hz(bright > 0.6 ? 7000 : 6500)}, threshold ${r1(thr)} dB, up to ${range} dB`);
     }
-    // ── Compressor sized by the crest factor, threshold follows the measured reduction
     const crest = m?.crestDb ?? 14;
     const ratio = (crest >= 18 ? 4 : crest >= 14 ? 3 : 2.5) + (punch > 0.7 ? 1 : 0);
     const attack = punch > 0.7 ? 3 : 8;
@@ -344,14 +283,12 @@ function planVocals(c: Ctx): { delta: number | null; target: number | null } {
     if (!isNum(thr)) thr = clamp(r05((m?.peakDb ?? -6) - volDb - (6 + Math.max(0, crest - 12) * 0.5)), -50, -6);
     else thr = thresholdFromGr(thr, grOf(measure, v.id, cp.slotId), grTarget, -60, 0);
     slot(c, v.id, 'comp', { threshold: thr, ratio, attack, release, autoMakeup: 1, detector: 1, useSidechain: 0, ...markParams('comp') }, `${ratio}:1, threshold ${r1(thr)} dB (about ${r1(grTarget)} dB of reduction), ${attack} ms attack`);
-    // ── Krypt Tune (only when asked)
     if (c.in.tune) {
       if (!c.in.tune.key) c.notes.push(`Krypt Tune was asked for, but the song's key couldn't be read: tune "${v.name}" with Krypt Tune and a key (tune_vocal).`);
       else if (!c.in.keepUserFx || !ins.slotOrder.some((s) => ins.slots[s]?.type === 'krypt.pitch')) {
         c.ops.push({ op: 'tune', key: `${v.id}/tune`, insertId: v.id, style: c.in.tune.style, root: c.in.tune.key.root, scale: c.in.tune.key.scale, target: `${v.name} ▸ Krypt Tune`, what: `${c.in.tune.style} correction in ${c.in.tune.key.name}` });
       } else c.notes.push(`"${v.name}" already has Krypt Tune: left as it is.`);
     }
-    // ── Space: reverb / delay sends (the factory send chains)
     const space = clamp(preset.vocalSpace + 0.2 * iv(intent, 'vocalSpace'), 0, 1);
     if (space < 0.1) {
       c.ops.push({ op: 'send', key: `${v.id}/send/reverb`, from: v.id, send: 'reverb', chainId: '', levelDb: null, target: `${v.name} ▸ ${AUTO_SENDS.reverb}`, what: 'no reverb send (dry)' });
@@ -363,7 +300,6 @@ function planVocals(c: Ctx): { delta: number | null; target: number | null } {
       c.ops.push({ op: 'send', key: `${v.id}/send/delay`, from: v.id, send: 'delay', chainId: 'factory:chain/delay-send/dotted-eighth', levelDb: dl, target: `${v.name} ▸ ${AUTO_SENDS.delay}`, what: `send ${dl} dB to a dotted-eighth delay` });
     }
   }
-  // ── Level against the beat
   const vb = vocalVsBeat(measure, c.in.roles);
   const target = r1(preset.vocalLevel + 1.5 * vf);
   if (!vb) {
@@ -373,8 +309,6 @@ function planVocals(c: Ctx): { delta: number | null; target: number | null } {
   const dev = vb.delta - target;
   if (Math.abs(dev) > 0.75) {
     const move = clamp(-dev, -6, 6);
-    // Past VOCAL_FADER_MAX the vocal stays put and the beat comes down instead: a maxed vocal fader leaves no room
-    // for the next run (its compression would pull the vocal back under the beat with nothing to make it up).
     let excess = 0;
     for (const v of vocals) {
       const ins = c.p.mixer.inserts[v.id];
@@ -399,7 +333,6 @@ function planVocals(c: Ctx): { delta: number | null; target: number | null } {
       if (bed.length) c.notes.push(`The beat came down ${excess} dB instead of pushing the vocal past +${VOCAL_FADER_MAX} dB on its fader.`);
     }
   }
-  // ── Room in the beat: a dip at 2.8 kHz on the busiest melodic insert
   const bed = Object.values(c.in.roles)
     .filter((r) => !r.vocal && ['keys', 'lead', 'other'].includes(r.role) && measure.inserts[r.id]?.bands)
     .map((r) => {
@@ -413,8 +346,6 @@ function planVocals(c: Ctx): { delta: number | null; target: number | null } {
   }
   return { delta: vb.delta, target };
 }
-
-// ── Mix (every insert) ────────────────────────────────────────────────
 
 const HP_BY_ROLE: Partial<Record<string, number>> = { hats: 300, perc: 200, snare: 120, keys: 150, lead: 150, fx: 150 };
 const LEVEL_BY_ROLE: Partial<Record<string, number>> = { bass: -1, snare: -1.5, hats: -9, perc: -10, keys: -7, lead: -4, fx: -12 };
@@ -430,14 +361,12 @@ function planMix(c: Ctx): void {
   const punch = clamp(preset.punch + 0.15 * iv(intent, 'punchier'), 0, 1);
   const masterHarsh = measure.master.tone.highMid - (preset.tone.highMid - iv(intent, 'lessHarsh'));
   const list = Object.values(roles).filter((r) => !r.vocal && r.role !== 'bus' && r.role !== 'send');
-  // The worst high-mid offender takes the master's excess harshness.
   const harshest = masterHarsh > 2 ? list.filter((r) => r.role !== 'hats' && measure.inserts[r.id]?.bands).sort((a, b) => (measure.inserts[b.id].bands!.highMid ?? -120) - (measure.inserts[a.id].bands!.highMid ?? -120))[0] : undefined;
   for (const r of list) {
     const m = measure.inserts[r.id];
     const ins = c.p.mixer.inserts[r.id];
     if (!ins || !m) continue;
     const volDb = gainToDb(ins.volume);
-    // EQ: high-pass by role, mud and harshness by measurement.
     const eq = cur(c, r.id, 'eq');
     const p: Record<string, number> = {};
     const parts: string[] = [];
@@ -460,7 +389,6 @@ function planMix(c: Ctx): void {
       if (g < 0) parts.push(`${sgn(g)} dB at 3.5 kHz (harshness)`);
     }
     if (Object.keys(p).length && (parts.length || eq.slotId)) slot(c, r.id, 'eq', { ...p, ...markParams('eq') }, parts.join(', ') || 'flat');
-    // Compression on drums and bass.
     const cr = COMP_BY_ROLE[r.role];
     if (cr) {
       const cp = cur(c, r.id, 'comp');
@@ -470,7 +398,6 @@ function planMix(c: Ctx): void {
       slot(c, r.id, 'comp', { threshold: thr, ratio: cr.ratio, attack: cr.attack + (punch > 0.7 ? 5 : 0), release: cr.release, autoMakeup: 1, detector: r.role === 'bass' ? 1 : 0, useSidechain: 0, ...markParams('comp') }, `${cr.ratio}:1 at ${r1(thr)} dB (about ${cr.gr} dB of reduction)`);
     }
   }
-  // Gain staging: each role against the kick (or the loudest drum / bass).
   const ref = list.find((r) => r.role === 'kick' && isNum(measure.inserts[r.id]?.lufs)) ?? list.filter((r) => ['bass', 'snare'].includes(r.role) && isNum(measure.inserts[r.id]?.lufs)).sort((a, b) => measure.inserts[b.id].lufs! - measure.inserts[a.id].lufs!)[0];
   const moved = new Map<string, number>();
   if (ref) {
@@ -487,7 +414,6 @@ function planMix(c: Ctx): void {
       moved.set(r.id, move);
     }
   }
-  // Headroom: about -16 LUFS into the master before mastering (full), or no clipping without a master limiter (mix).
   const top = Object.values(roles).filter((r) => r.topLevel && r.role !== 'send');
   const sum = powerSum(top.map((r) => (measure.inserts[r.id]?.lufs ?? Number.NaN) + (moved.get(r.id) ?? 0) + plannedMove(c, r.id)));
   const master = c.p.mixer.inserts[c.p.mixer.masterId];
@@ -505,7 +431,6 @@ function planMix(c: Ctx): void {
     const ins = c.p.mixer.inserts[r.id];
     if (!ins) continue;
     const from = gainToDb(ins.volume);
-    // The vocal level move (planVocals) and the headroom trim add up in ONE op.
     const prior = c.ops.find((o) => o.op === 'volume' && o.insertId === r.id) as Extract<PlanOp, { op: 'volume' }> | undefined;
     const to = r1(clamp((prior ? prior.db : from) + move, -40, 6));
     if (prior) {
@@ -516,7 +441,6 @@ function planMix(c: Ctx): void {
     if (Math.abs(to - from) < 0.05) continue;
     c.ops.push({ op: 'volume', key: `${r.id}/volume`, insertId: r.id, db: to, target: `${r.name} ▸ Volume`, what: `${sgn(to)} dB${moved.has(r.id) ? ` (${r.role} level against the ${ref?.role ?? 'kick'})` : ' (headroom)'}` });
   }
-  // Drum bus glue (else the master glue does it).
   const bus = Object.values(roles).find((r) => r.drumBus);
   if (bus) {
     const m = measure.inserts[bus.id];
@@ -527,7 +451,6 @@ function planMix(c: Ctx): void {
     else thr = thresholdFromGr(thr, grOf(measure, bus.id, g.slotId), 2, -40, 0);
     slot(c, bus.id, 'glue', { threshold: thr, ratio: 0, attack: punch > 0.6 ? 4 : 3, release: 4, makeup: 2, scHpf: 3, useSidechain: 0, mix: 1, ...markParams('glue') }, `2:1 glue at ${r1(thr)} dB, sidechain high-pass 120 Hz`);
   }
-  // Bass vs kick: duck the bass when their low bands collide.
   const kick = list.find((r) => r.role === 'kick');
   const bass = list.find((r) => r.role === 'bass');
   if (kick && bass) {
@@ -548,8 +471,6 @@ function planMix(c: Ctx): void {
   }
 }
 
-// ── Master ────────────────────────────────────────────────────────────
-
 const MASTER_EQ: Array<{ band: Exclude<Band, 'mid'>; p: string; hz: number; q: number }> = [
   { band: 'sub', p: 'b2', hz: 60, q: 0.7 },
   { band: 'low', p: 'b3', hz: 150, q: 0.8 },
@@ -558,7 +479,6 @@ const MASTER_EQ: Array<{ band: Exclude<Band, 'mid'>; p: string; hz: number; q: n
   { band: 'high', p: 'b6', hz: 10000, q: 0.7 },
 ];
 
-/** The tonal target after the intent's adjustments (relative to the mids). */
 export function toneTarget(preset: AutoMixPreset, intent: AutoMixIntent | null): Bands {
   const br = iv(intent, 'brighter');
   const bs = iv(intent, 'bassier');
@@ -575,16 +495,11 @@ export function toneTarget(preset: AutoMixPreset, intent: AutoMixIntent | null):
   };
 }
 
-/** How hard the limiter may work on average (dB) before Auto Mix stops pushing. */
 export function maxLimiterGr(preset: AutoMixPreset, intent: AutoMixIntent | null): number {
   const aggressive = iv(intent, 'cleaner') < 0 || preset.id === 'phonk-slam';
   return iv(intent, 'cleaner') > 0 ? 2.5 : aggressive ? 5 : preset.targetLufs >= -9 ? 4 : 3;
 }
 
-/**
- * The imager width multiplier that moves a measured stereo width toward a target (both 0..1, side energy / total).
- * Side energy scales with the multiplier squared: w² = (t / (1 − t)) / (s / (1 − s)). Clamped to 0.5..1.6.
- */
 export function widthFactor(measured: number, target: number): number {
   const s = clamp(measured, 0.005, 0.95);
   const t = clamp(target, 0.005, 0.95);
@@ -598,26 +513,21 @@ function planMaster(c: Ctx): number | null {
   const mm = measure.master;
   const punch = clamp(preset.punch + 0.15 * iv(intent, 'punchier'), 0, 1);
   const cleaner = iv(intent, 'cleaner');
-  // ── Loudness drive (limiter input, or a negative trim on the tone EQ's output)
   const eq = cur(c, mid, 'eq');
   const lim = cur(c, mid, 'limiter');
   const driveNow = (lim.params.inputGain ?? 0) + (eq.params.output ?? 0);
   const hist = (c.in.loudHistory ?? []).filter((h) => isNum(h.drive) && isNum(h.lufs));
   let drive = driveNow;
-  // Fader moves planned this pass (vocal level, gain staging) shift the master input: aim past them.
   const need = target.lufs - (mm.lufs + plannedMasterShift(c));
   if (Math.abs(need) > 0.5 || c.in.pass === 1) {
     let slope = 1;
     if (hist.length >= 2) {
       const [a, b] = hist.slice(-2);
-      // A slope outside what a limiter does means something else moved between the two renders (gain staging,
-      // the tone EQ): don't trust it, step 1:1.
       const s = Math.abs(b.drive - a.drive) > 0.2 ? (b.lufs - a.lufs) / (b.drive - a.drive) : Number.NaN;
       if (s >= 0.25 && s <= 1.2) slope = s;
     }
     drive = driveNow + need / slope;
   }
-  // Crest guard: the limiter's measured work and the crest factor cap the loudness.
   const grL = grOf(measure, mid, lim.slotId);
   const maxGr = maxLimiterGr(preset, intent);
   let capped = false;
@@ -634,7 +544,6 @@ function planMaster(c: Ctx): number | null {
   drive = r1(clamp(drive, -12, 24));
   const inputGain = Math.max(0, drive);
   const trim = Math.min(0, drive);
-  // ── Tone EQ toward the curve
   const tt = c.in.tone ?? toneTarget(preset, intent);
   const p: Record<string, number> = { b1On: 1, b1Freq: 25, b1Slope: 1, output: r1(trim), ...markParams('eq') };
   const parts: string[] = [];
@@ -646,14 +555,12 @@ function planMaster(c: Ctx): number | null {
   }
   if (trim < 0) parts.push(`trim ${sgn(trim)} dB (to come down to ${target.lufs} LUFS)`);
   slot(c, mid, 'eq', p, parts.length ? `tone: ${parts.join(', ')}` : 'sub-sonic cut at 25 Hz, tone already on the curve');
-  // ── Glue
   const g = cur(c, mid, 'glue');
   const grTarget = r1(1 + 1.5 * (1 - punch));
   let thr = g.params.threshold;
   if (!isNum(thr)) thr = clamp(r05((mm.peakDb ?? -1) + trim - 9 + 3 * punch), -30, -3);
   else thr = thresholdFromGr(thr, grOf(measure, mid, g.slotId), grTarget, -40, 0);
   slot(c, mid, 'glue', { threshold: thr, ratio: 0, attack: punch >= 0.6 ? 5 : 4, release: 4, makeup: 0, scHpf: preset.tone.sub >= 6 ? 3 : 2, useSidechain: 0, mix: 1, ...markParams('glue') }, `2:1 glue, ${punch >= 0.6 ? 30 : 10} ms attack, threshold ${r1(thr)} dB (about ${grTarget} dB)`);
-  // ── Heat (warmth / grit)
   const want = preset.warmth + 0.25 * iv(intent, 'warmer') - 0.3 * cleaner;
   const heat = cur(c, mid, 'heat');
   if ((want > 0.6 || cleaner <= -1) && cleaner <= 0) {
@@ -663,21 +570,16 @@ function planMaster(c: Ctx): number | null {
   } else if (heat.slotId && isKryptSlot(c.p.mixer.inserts[mid].slots[heat.slotId], 'heat') && c.p.mixer.inserts[mid].slots[heat.slotId].enabled) {
     c.ops.push({ op: 'disable', key: `${mid}/heat`, insertId: mid, kind: 'heat', target: `${where} ▸ ${pluginName(c, 'heat')}`, what: 'bypassed (a clean master was asked for)' });
   }
-  // ── Imager: mono lows under 120 Hz, width per the card
   const wide = iv(intent, 'wider');
   let midW = r1(clamp(1 + 0.2 * (preset.width - 0.5) + 0.08 * wide, 0.7, 1.3));
   let highW = r1(clamp(1 + 0.4 * (preset.width - 0.5) + 0.12 * wide, 0.7, 1.4));
   let widthWhy = '';
   const wt = c.in.widthTarget;
   if (isNum(wt) && isNum(mm.width)) {
-    // Toward a measured width (a reference song): feedback on the imager this insert already has, a dead band of
-    // 0.02 so a re-run settles. The lows stay mono either way.
     const im = cur(c, mid, 'imager');
     const m0 = isNum(im.params.midWidth) && im.slotId ? im.params.midWidth : 1;
     const h0 = isNum(im.params.highWidth) && im.slotId ? im.params.highWidth : 1;
     if (Math.abs(mm.width - wt) > 0.02) {
-      // Eased, never squeezed: a near-mono reference must not fold a stereo song toward mono (≥ 85%), and a very
-      // wide one must not smear it (≤ 130 / 140%).
       const f = Math.pow(widthFactor(mm.width, wt), 0.8);
       midW = Math.round(clamp(m0 * f, 0.85, 1.3) * 100) / 100;
       highW = Math.round(clamp(h0 * f, 0.85, 1.4) * 100) / 100;
@@ -694,7 +596,6 @@ function planMaster(c: Ctx): number | null {
     c.notes.push(`${mid === c.p.mixer.masterId ? 'The mix' : `"${where}"`} is very wide (correlation ${r1(mm.correlation)}): the imager narrows it to stay mono-safe.`);
   }
   slot(c, mid, 'imager', { lowWidth: 0, lowFreq: 120, midWidth: midW, highWidth: highW, output: 0, ...markParams('imager') }, `mono below 120 Hz, mids ${Math.round(midW * 100)}%, highs ${Math.round(highW * 100)}%${widthWhy}`);
-  // ── Clipper for loud cards (shaves peaks so the limiter works less)
   const clip = cur(c, mid, 'clipper');
   if (target.lufs >= -9.5 && (punch >= 0.6 || cleaner < 0) && cleaner <= 0) {
     const d = r1(clamp(1 + 2.5 * punch + (cleaner < 0 ? 1.5 : 0) + (target.lufs + 9) * 0.5, 0, 5));
@@ -702,10 +603,7 @@ function planMaster(c: Ctx): number | null {
   } else if (clip.slotId && isKryptSlot(c.p.mixer.inserts[mid].slots[clip.slotId], 'clipper') && c.p.mixer.inserts[mid].slots[clip.slotId].enabled) {
     c.ops.push({ op: 'disable', key: `${mid}/clipper`, insertId: mid, kind: 'clipper', target: `${where} ▸ ${pluginName(c, 'clipper')}`, what: 'bypassed (not needed at this loudness)' });
   }
-  // ── Limiter last: true-peak ceiling, input toward the LUFS target
   let ceiling = isNum(lim.params.ceiling) && lim.slotId ? lim.params.ceiling : r1(target.truePeak - 0.1);
-  // Overshoot is only our limiter's when it was in the measured render: a first pass measures the unlimited song,
-  // whose peaks say nothing about the ceiling (lowering it then only crushed loud songs 1-2 dB more).
   if (lim.slotId && mm.truePeak > target.truePeak + 0.05) ceiling = r1(ceiling - (mm.truePeak - target.truePeak) - 0.1);
   ceiling = clamp(Math.min(ceiling, target.truePeak - 0.1), -6, 0);
   const release = Math.round(30 + 60 * (1 - punch));
@@ -713,9 +611,6 @@ function planMaster(c: Ctx): number | null {
   return drive;
 }
 
-// ── Convergence ───────────────────────────────────────────────────────
-
-/** Does a measurement meet the targets of the mode? */
 export function meetsTargets(input: Pick<PlanInput, 'mode' | 'target' | 'measure' | 'roles' | 'preset' | 'intent'>): { ok: boolean; why: string[] } {
   const why: string[] = [];
   const m = input.measure.master;
@@ -731,7 +626,6 @@ export function meetsTargets(input: Pick<PlanInput, 'mode' | 'target' | 'measure
   return { ok: why.length === 0, why };
 }
 
-/** The plan for one pass. */
 export function planAutoMix(input: PlanInput): Plan {
   const c: Ctx = { in: input, ops: [], notes: [], p: input.project };
   const met = meetsTargets(input);
@@ -755,38 +649,29 @@ export function planAutoMix(input: PlanInput): Plan {
       slot(c, m.id, 'glue', { threshold: thr, ratio: 0, attack: 5, release: 4, makeup: 0, scHpf: 3, useSidechain: 0, mix: 1, ...markParams('glue') }, `2:1 glue at ${r1(thr)} dB (no drum bus, so on the master)`);
     }
   }
-  // Capped loudness can't get closer: done once the true peak is safe.
   const capped = c.notes.some((n) => n.startsWith('Loudness capped')) && input.measure.master.truePeak <= input.target.truePeak + 0.05;
   return { ops: c.ops, notes: c.notes, converged: met.ok || capped, vocalVsBeat: delta, vocalTarget: vtarget, drive };
 }
 
-// ── Applying ──────────────────────────────────────────────────────────
-
 export interface ApplyIO {
   project(): Project;
   catalog: PluginCatalog;
-  /** Runs a command; throws on failure. */
   exec<T = unknown>(cmd: string, args: unknown): T;
-  /** The factory chain a send uses. */
   chain(id: string): { fx: Array<{ type: string; params: Record<string, number>; mix?: number }>; insert?: { volumeDb?: number } } | null;
 }
 
 export interface ApplyResult {
-  /** Changes keyed by op key (a later pass's text replaces an earlier one's). */
   changes: Map<string, AutoMixChange>;
   notes: string[];
-  /** Commands that changed the document. */
   edits: number;
 }
 
 const same = (a: number | undefined, b: number): boolean => typeof a === 'number' && Math.abs(a - b) < 0.005;
 
-/** Index for a new Krypt slot: before our own slots of later kinds, else at the end. */
 function placeIndex(ins: MixerInsert, kind: KryptKind): number {
   const later = ORDER.slice(ORDER.indexOf(kind) + 1);
   const idx = ins.slotOrder.findIndex((s) => later.some((k) => isKryptSlot(ins.slots[s], k)));
   if (idx >= 0) return idx;
-  // On the master, Krypt's processing goes before the user's own limiter (which stays as it is, last of theirs).
   if (ins.isMaster && kind !== 'limiter') {
     const userLim = ins.slotOrder.findIndex((s) => ins.slots[s]?.type === 'krypt.limiter' && !isKryptSlot(ins.slots[s]));
     if (userLim >= 0) return userLim;
@@ -794,7 +679,6 @@ function placeIndex(ins: MixerInsert, kind: KryptKind): number {
   return ins.slotOrder.length;
 }
 
-/** Apply a plan through commands (one per change; nothing when a value already matches). */
 export function applyPlan(plan: Plan, io: ApplyIO, opts: { keepUserFx: boolean }): ApplyResult {
   const changes = new Map<string, AutoMixChange>();
   const notes: string[] = [];
@@ -904,7 +788,6 @@ export function applyPlan(plan: Plan, io: ApplyIO, opts: { keepUserFx: boolean }
       }
     }
   }
-  // The master limiter stays last (and a song's own limiter on its insert, album mastering).
   const p = io.project();
   const limited = new Set<string>([p.mixer.masterId]);
   for (const op of plan.ops) if (op.op === 'slot' && op.kind === 'limiter') limited.add(op.insertId);
@@ -917,7 +800,6 @@ export function applyPlan(plan: Plan, io: ApplyIO, opts: { keepUserFx: boolean }
   return { changes, notes, edits };
 }
 
-/** Band levels relative to the mids, from absolute band energies. */
 export function toneOf(bands: Partial<Bands> | undefined | null): Bands {
   const mid = bands?.mid;
   const out = { sub: 0, low: 0, lowMid: 0, mid: 0, highMid: 0, high: 0 } as Bands;

@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Piano roll controller: owns the view (scroll/zoom), the local selection,
-// gesture state and every canvas layer. React renders the chrome once and
-// hands us the elements; from then on everything is imperative:
-//   - painters run from the shared frame loop, only for dirty layers
-//   - drags keep their state here and repaint the overlay; the document is
-//     touched ONCE per gesture on pointerup (one dispatch = one undo step)
-// ──────────────────────────────────────────────────────────────────────
-
 import type { Note, Project } from '@shared/schema/project';
 import { patternLength } from '@shared/schema/project';
 import { TICKS_PER_STEP, secondsToTicks, ticksPerBar, ticksPerBeat, ticksToSeconds, type TimeSig } from '@shared/schema/time';
@@ -121,7 +112,6 @@ type Drag =
   | { kind: 'lane'; values: Map<string, number>; lastX: number; lastV: number; prop: LaneProp; committing?: boolean };
 
 export class PianoRollController {
-  // ── layers ──
   private gridL = new Layer();
   private contentL = new Layer();
   private overlayL = new Layer();
@@ -132,12 +122,10 @@ export class PianoRollController {
   private hbar: ScrollbarCtl | null = null;
   private vbar: ScrollbarCtl | null = null;
 
-  // ── view ──
   tv: TimeView = { scrollTick: 0, pxPerTick: 0.075 };
   kv: KeyView = { scrollY: 0, rowH: 15 };
   private dpr = 1;
 
-  // ── data ──
   patternId: string | null = null;
   channelId: string | null = null;
   private notesRec: Record<string, Note> | undefined;
@@ -148,11 +136,9 @@ export class PianoRollController {
   private ts: TimeSig = { num: 4, den: 4 };
   private patternClips: Array<{ start: number; length: number; offset: number }> = [];
 
-  // ── interaction ──
   readonly selection = new Set<string>();
   private drag: Drag | null = null;
   private ptr: Ptr | null = null;
-  /** Pointer at gesture start; edge auto-scroll arms only after real movement (a click near an edge must not scroll). */
   private downPt: { x: number; y: number; armed: boolean } | null = null;
   private hover: { tick: number; key: number; noteId: string | null; zone: string } | null = null;
   private lastClickTick: number | null = null;
@@ -164,16 +150,9 @@ export class PianoRollController {
   private glowWasActive = false;
   private centeredFor: string | null = null;
   private offs: Array<() => void> = [];
-  /** Tool-dialog preview: originals hidden + the would-be result drawn on the overlay. */
   private preview: { hide: Set<string>; notes: Note[] } | null = null;
-  /** Sing my notes (src/voice/SingDialog.tsx): syllable labels drawn above the notes they land on. */
   private syllables: SyllableMark[] | null = null;
-  /** performance.now() of the last user scroll/zoom: follow-playhead backs off for a moment. */
   private lastManualScroll = 0;
-
-  // ────────────────────────────────────────────────────────────────────
-  // Lifecycle
-  // ────────────────────────────────────────────────────────────────────
 
   attach(els: PianoRollEls): () => void {
     this.els = els;
@@ -260,7 +239,6 @@ export class PianoRollController {
         if (s.tool !== prev.tool) this.updateCursor();
       }),
       onFrame((_dt, now) => this.frame(now)),
-      // Project tabs (research/19): a tab switch drops the note selection / tool preview and re-centres on its notes.
       registerTabView('pianoRoll', { capture: () => null, restore: () => this.resetForTab() }),
     );
     void els.root.ownerDocument.fonts?.ready.then(() => this.markAll());
@@ -295,10 +273,6 @@ export class PianoRollController {
     this.updateScrollbars();
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Data
-  // ────────────────────────────────────────────────────────────────────
-
   private refresh(agent: boolean): void {
     const p: Project | null = getProject();
     if (!p) return;
@@ -328,7 +302,6 @@ export class PianoRollController {
       this.contentL.dirty = this.overlayL.dirty = this.laneL.dirty = true;
     }
 
-    // ghosts: other channels in the same pattern
     const ghosts: Array<{ color: string; index: SpanIndex<Note> }> = [];
     if (pat) {
       for (const [chId, r] of Object.entries(pat.notes)) {
@@ -360,17 +333,15 @@ export class PianoRollController {
     if (targetChanged) this.ensureCentered();
   }
 
-  /** Another project tab came in: forget this one's selection, drag and preview; centre on the new target. */
   private resetForTab(): void {
     this.selection.clear();
     this.preview = null;
     this.cancelDrag();
     this.centeredFor = null;
-    this.patternId = null; // forces a target change on the refresh
+    this.patternId = null;
     this.refresh(false);
   }
 
-  /** Scroll vertically so the channel's notes (or C5 when empty) are in view, once per target. */
   private ensureCentered(): void {
     const key = `${this.patternId}|${this.channelId}`;
     if (this.centeredFor === key || this.gridL.h <= 0) return;
@@ -407,17 +378,12 @@ export class PianoRollController {
     return { inScale, root: v.scaleRoot };
   }
 
-  /** Keys for one placement: the chord stamp stack, or a single key. */
   private stampKeys(root: number): number[] {
     const q = usePianoRollView.getState().chord;
     const iv = q ? CHORD_QUALITIES[q] : null;
     if (!iv) return [root];
     return iv.map((i) => root + i).filter((k) => k >= 0 && k <= 127);
   }
-
-  // ────────────────────────────────────────────────────────────────────
-  // View
-  // ────────────────────────────────────────────────────────────────────
 
   private contentTicks(): number {
     const bar = ticksPerBar(this.ts);
@@ -484,10 +450,6 @@ export class PianoRollController {
     if (el.style.cursor !== c) el.style.cursor = c;
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Audition
-  // ────────────────────────────────────────────────────────────────────
-
   private audSet(keys: number[], vel = 0.78): void {
     const ch = this.channelId;
     if (!ch) return;
@@ -496,7 +458,6 @@ export class PianoRollController {
       for (const k of this.sounding) if (!next.has(k)) window.krypt.engine.audition(ch, k, 0, false);
       for (const k of keys) if (!this.sounding.includes(k)) window.krypt.engine.audition(ch, k, vel, true);
     } catch {
-      /* engine not available */
     }
     this.sounding = keys;
     this.pressedKeys = new Set(keys);
@@ -506,10 +467,6 @@ export class PianoRollController {
   private audOff(): void {
     if (this.sounding.length) this.audSet([]);
   }
-
-  // ────────────────────────────────────────────────────────────────────
-  // Grid pointer handling
-  // ────────────────────────────────────────────────────────────────────
 
   private local(e: PointerEvent | MouseEvent): { x: number; y: number } {
     const r = this.els!.overlay.getBoundingClientRect();
@@ -546,7 +503,6 @@ export class PianoRollController {
       return;
     }
     if (e.button === 0 && tool === 'mute') {
-      // FL mute tool: click / drag over notes; the first note decides mute vs unmute
       this.drag = { kind: 'mute', ids: new Set(hit ? [hit.note.id] : []), value: hit ? !hit.note.mute : null, lastX: p.x, lastY: p.y };
       this.contentL.dirty = this.overlayL.dirty = true;
       return;
@@ -622,7 +578,6 @@ export class PianoRollController {
       return;
     }
 
-    // empty space: draw / paint
     const start = cellStart(tick, grid, p.alt);
     const len = Math.max(1, view.lastLen);
     const keys = this.stampKeys(key);
@@ -658,7 +613,6 @@ export class PianoRollController {
       this.updateDrag();
       return;
     }
-    // hover
     const tick = xToTick(this.tv, p.x);
     const key = clamp(yToKey(this.kv, p.y), 0, 127);
     const hit = this.target() ? hitNote(this.index, tick, key, this.tv.pxPerTick, EDGE_PX) : null;
@@ -672,7 +626,6 @@ export class PianoRollController {
     }
   }
 
-  /** Re-evaluate the active gesture from the latest pointer (also called by edge auto-scroll). */
   private updateDrag(): void {
     const d = this.drag;
     const p = this.ptr;
@@ -750,7 +703,6 @@ export class PianoRollController {
       }
       case 'erase':
       case 'mute': {
-        // sample the segment so fast swipes don't skip notes
         const steps = Math.max(1, Math.ceil(Math.hypot(p.x - d.lastX, p.y - d.lastY) / 4));
         let grew = false;
         for (let i = 1; i <= steps; i++) {
@@ -786,7 +738,6 @@ export class PianoRollController {
     try {
       this.els?.overlay.releasePointerCapture(e.pointerId);
     } catch {
-      /* not captured */
     }
     if (cancelled) {
       this.cancelDrag();
@@ -803,7 +754,6 @@ export class PianoRollController {
     this.updateCursor();
   }
 
-  /** Finish a gesture with ONE dispatch; keep the preview until the doc reflects it. */
   private async commit(d: Drag): Promise<void> {
     const t = this.target();
     const finish = () => {
@@ -834,7 +784,6 @@ export class PianoRollController {
       }
       case 'move': {
         if (!d.moved) {
-          // a click: pick up this note's length for the next drawn notes (FL)
           usePianoRollView.getState().set({ lastLen: d.primary.dur });
           break;
         }
@@ -909,7 +858,6 @@ export class PianoRollController {
     return { tick, dur: end - tick };
   }
 
-  /** Notes the knife crosses, and where (the line's tick at each crossed row). */
   private sliceCuts(d: Extract<Drag, { kind: 'slice' }>): Array<{ note: Note; at: number }> {
     const rowH = this.kv.rowH;
     const kA = 127 - Math.floor(d.yA / rowH);
@@ -935,10 +883,6 @@ export class PianoRollController {
     return out;
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Keyboard column, ruler, lane, splitter
-  // ────────────────────────────────────────────────────────────────────
-
   private keyAtKeys(e: PointerEvent): number {
     const r = this.els!.keys.getBoundingClientRect();
     return clamp(yToKey(this.kv, e.clientY - r.top), 0, 127);
@@ -950,7 +894,7 @@ export class PianoRollController {
     const k = this.keyAtKeys(e);
     this.keyboardDown = k;
     const r = this.els!.keys.getBoundingClientRect();
-    const vel = clamp(0.35 + ((e.clientX - r.left) / r.width) * 0.65, 0.2, 1); // FL: further right = louder
+    const vel = clamp(0.35 + ((e.clientX - r.left) / r.width) * 0.65, 0.2, 1);
     this.audSet([k], vel);
   }
 
@@ -1006,7 +950,6 @@ export class PianoRollController {
     d.lastV = v;
   }
 
-  /** Paint values along the pointer segment onto the note bars it crosses. */
   private applyLane(x0: number, v0: number, x1: number, v1: number, click: boolean): void {
     const d = this.drag;
     if (!d || d.kind !== 'lane') return;
@@ -1067,10 +1010,6 @@ export class PianoRollController {
     el.addEventListener('pointercancel', up);
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Wheel + keyboard
-  // ────────────────────────────────────────────────────────────────────
-
   private onWheel(e: WheelEvent): void {
     if (!this.els) return;
     const r = this.els.gridHost.getBoundingClientRect();
@@ -1098,7 +1037,6 @@ export class PianoRollController {
     else this.setScrollY(this.kv.scrollY + dy);
   }
 
-  /** Alt+wheel: velocity of the hovered note (or the selection). Coalesced into one undo step. */
   private wheelVelocity(dy: number, fine: boolean): void {
     const t = this.target();
     if (!t || dy === 0) return;
@@ -1114,7 +1052,6 @@ export class PianoRollController {
   }
 
   private onKey(e: KeyboardEvent): void {
-    // the global keymap / typing-keyboard piano (capture phase) may already own it
     if (e.defaultPrevented || isTypingTarget(e.target)) return;
     const tool = toolForKey(e, PR_TOOLS);
     if (tool) {
@@ -1148,11 +1085,6 @@ export class PianoRollController {
     e.stopPropagation();
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Commands (toolbar + shortcuts)
-  // ────────────────────────────────────────────────────────────────────
-
-  /** Selected notes, or every note when nothing is selected. */
   private scope(): string[] | undefined {
     return this.selection.size ? [...this.selection] : undefined;
   }
@@ -1189,7 +1121,6 @@ export class PianoRollController {
     await this.deleteSelected();
   }
 
-  /** Paste at the last click position, else the playhead, else where the notes came from. */
   async paste(): Promise<void> {
     const t = this.target();
     const cb = getNoteClipboard();
@@ -1258,13 +1189,10 @@ export class PianoRollController {
     return this.index.size;
   }
 
-  // ── Note tools (src/panels/pianoRoll/toolDialogs.tsx drives these) ──
-
   getTarget(): { patternId: string; channelId: string } | null {
     return this.target();
   }
 
-  /** Notes a tool acts on: the selection, or the whole channel when nothing is selected. */
   scopeNotes(): Note[] {
     const ids = this.scope();
     return ids ? ids.map((id) => this.note(id)).filter((n): n is Note => !!n) : [...this.index.items];
@@ -1282,7 +1210,6 @@ export class PianoRollController {
     return this.els?.root.ownerDocument ?? document;
   }
 
-  /** The editor's client rect (tool dialogs open beside it). */
   rootRect(): DOMRect | null {
     return this.els?.root.getBoundingClientRect() ?? null;
   }
@@ -1291,7 +1218,6 @@ export class PianoRollController {
     this.els?.root.focus({ preventScroll: true });
   }
 
-  /** Select the notes matching a predicate (Tools ▸ Select). Returns how many. */
   selectWhere(pred: (n: Note) => boolean): number {
     this.selection.clear();
     for (const n of this.index.items) if (pred(n)) this.selection.add(n.id);
@@ -1299,10 +1225,6 @@ export class PianoRollController {
     return this.selection.size;
   }
 
-  /**
-   * Run a note-tool command on the scope (one undo step). Selects returned
-   * note ids (chop / arpeggiate create new notes). Failures already toast.
-   */
   async runTool(cmd: string, args: Record<string, unknown>, label?: string): Promise<boolean> {
     const t = this.target();
     if (!t) {
@@ -1328,10 +1250,6 @@ export class PianoRollController {
     return r.ok;
   }
 
-  /**
-   * Live preview for tool dialogs: run the command on a scratch copy of this
-   * channel's notes and draw the result. Returns an error message or null.
-   */
   previewTool(cmd: string, args: Record<string, unknown>): string | null {
     const t = this.target();
     const def = NOTE_TOOL_COMMANDS.find((c) => c.id === cmd) as CommandDef | undefined;
@@ -1363,7 +1281,6 @@ export class PianoRollController {
     return null;
   }
 
-  /** Sing my notes: draw these syllables above their notes (null clears). Labels only: the notes are untouched. */
   showSyllables(marks: SyllableMark[] | null): void {
     if (!marks?.length && !this.syllables) return;
     this.syllables = marks?.length ? marks : null;
@@ -1376,7 +1293,6 @@ export class PianoRollController {
     this.contentL.dirty = this.overlayL.dirty = true;
   }
 
-  /** Tools ▸ Scripts… (scriptsDialog.tsx): draw what a script run would write (replaced notes hidden, new ones outlined). */
   showPlannedNotes(plan: { remove: string[]; notes: Array<Omit<Note, 'id' | 'pan' | 'release' | 'fine' | 'slide' | 'modX' | 'modY'> & Partial<Note>> }): void {
     this.preview = {
       hide: new Set(plan.remove),
@@ -1385,24 +1301,16 @@ export class PianoRollController {
     this.contentL.dirty = this.overlayL.dirty = true;
   }
 
-  /** Select these note ids (new notes a script wrote). */
   selectIds(ids: string[]): void {
     this.selection.clear();
     for (const id of ids) this.selection.add(id);
     this.contentL.dirty = this.laneL.dirty = true;
   }
 
-  // ── Generate (src/panels/pianoRoll/generateDialog.tsx) ──
-
-  /** The selected note ids (the notes a generate replaces), or undefined. */
   selectedIds(): string[] | undefined {
     return this.scope();
   }
 
-  /**
-   * What notes.generate would write with these args (target + selection
-   * filled in): the plan, or the error message. Pure: nothing is drawn.
-   */
   planGenerate(args: Record<string, unknown>, allowSame = false): { plan: GeneratePlan } | { error: string } {
     const t = this.target();
     const p = getProject();
@@ -1416,7 +1324,6 @@ export class PianoRollController {
     }
   }
 
-  /** Live preview of a generate on the roll: replaced notes hidden, new notes outlined. Returns the plan or an error. */
   previewGenerate(args: Record<string, unknown>): { plan: GeneratePlan } | { error: string } {
     const r = this.planGenerate(args);
     if ('error' in r) {
@@ -1428,7 +1335,6 @@ export class PianoRollController {
     return r;
   }
 
-  /** Apply notes.generate (one undo step) and select the new notes. Failures toast. */
   async runGenerate(args: Record<string, unknown>, label: string): Promise<boolean> {
     const t = this.target();
     if (!t) {
@@ -1450,7 +1356,6 @@ export class PianoRollController {
 
   private audTimers: number[] = [];
 
-  /** Play notes on this channel through the engine's audition path (from `from`, at the project tempo). Returns the length in ms. */
   auditionNotes(notes: Array<{ tick: number; dur: number; key: number; vel: number }>, from: number, to: number): number {
     this.stopAudition();
     const ch = this.channelId;
@@ -1465,14 +1370,12 @@ export class PianoRollController {
           try {
             window.krypt.engine.audition(ch, n.key, n.vel, true);
           } catch {
-            /* engine not available */
           }
         }, ms(n.tick - from)),
         win.setTimeout(() => {
           try {
             window.krypt.engine.audition(ch, n.key, 0, false);
           } catch {
-            /* engine not available */
           }
         }, ms(Math.min(n.tick + n.dur, to) - from)),
       );
@@ -1488,26 +1391,18 @@ export class PianoRollController {
     try {
       window.krypt.engine.auditionOff();
     } catch {
-      /* engine not available */
     }
   }
 
-  /** Colour group + slide flag for notes drawn now (toolbar state). */
   private newNoteLook(): { color?: number; slide?: boolean } {
     const v = usePianoRollView.getState();
     return { ...(v.noteColor ? { color: v.noteColor } : {}), ...(v.slideMode ? { slide: true } : {}) };
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Playhead
-  // ────────────────────────────────────────────────────────────────────
-
-  /** Pattern-relative playhead tick, or null when this pattern isn't playing / positioned. */
   private playheadTick(): number | null {
     const f = telemetry.frame;
     const len = Math.max(1, this.patLen);
     if (!f) {
-      // no engine telemetry (browser mock, engine down): follow the simulated transport
       if (!playState.playing()) return this.localPlayhead;
       const p = getProject();
       if (p?.transport.mode === 'pattern') return p.transport.activePatternId === this.patternId ? playState.tick() % len : null;
@@ -1527,7 +1422,6 @@ export class PianoRollController {
     return null;
   }
 
-  /** FL "follow playhead": page the view when the playhead leaves it (not during gestures or right after a manual scroll). */
   private followPlayhead(now: number): void {
     if (!usePianoRollView.getState().follow || this.drag || now - this.lastManualScroll < 1500 || !this.patternId) return;
     if (!(telemetry.frame ? telemetry.playing : playState.playing())) return;
@@ -1550,10 +1444,6 @@ export class PianoRollController {
       if (visible && el.style.transform !== tx) el.style.transform = tx;
     }
   }
-
-  // ────────────────────────────────────────────────────────────────────
-  // Frame + painting
-  // ────────────────────────────────────────────────────────────────────
 
   private frame(now: number): void {
     if (!this.els) return;
@@ -1601,7 +1491,6 @@ export class PianoRollController {
     paintTimeGrid(ctx, this.tv, w, h, this.ts, dpr, { snapGrid: this.snapGrid(), shadeAltBars: true, endTick: this.patLen });
   }
 
-  /** Ids hidden from the content layer because the overlay draws their preview. */
   private hiddenIds(): Set<string> | null {
     const d = this.drag;
     if (this.preview && !d) return this.preview.hide;
@@ -1637,12 +1526,10 @@ export class PianoRollController {
     };
     const velAlpha = usePianoRollView.getState().velAlpha;
     const labels = this.kv.rowH >= 11;
-    // portamento (mono + glide channel) and slide notes: glide curves under the notes
     const chan = this.channelId ? getProject()?.channels[this.channelId] : undefined;
     const porta = chan && chan.poly.mono && chan.poly.glideMs > 0 ? secondsToTicks(chan.poly.glideMs / 1000, getProject().transport.bpm) : null;
     paintGlides(ctx, this.index, this.tv, this.kv, w, porta, hidden);
     if (this.kv.rowH < 8 || this.tv.pxPerTick * TICKS_PER_STEP < 3) {
-      // level of detail for dense views (thousands of tiny notes): one rect per note, colour batching
       let last = '';
       let lastA = 1;
       forVisibleNotes(this.index, this.tv, this.kv, w, h, (n) => {
@@ -1691,7 +1578,6 @@ export class PianoRollController {
     const d = this.drag;
     const kv = this.kv;
     const tv = this.tv;
-    // hover row + hovered note outline
     if (!d && this.hover && this.target()) {
       const y = keyToY(kv, this.hover.key);
       ctx.fillStyle = 'rgba(255,255,255,0.035)';
@@ -1708,7 +1594,6 @@ export class PianoRollController {
     const velAlpha = usePianoRollView.getState().velAlpha;
     if (!d && this.syllables) paintSyllables(ctx, this.syllables, tv, kv, w, h);
     if (!d && this.preview) {
-      // tool dialog preview: the would-be result, outlined
       for (const n of this.preview.notes) {
         const [x, y, nw, nh] = noteRect(n, tv, kv);
         if (x > w || x + nw < 0 || y > h || y + nh < 0) continue;
@@ -1827,12 +1712,10 @@ export class PianoRollController {
   }
 }
 
-/** CSS grid rows for the piano-roll body given the lane height. */
 export function prRows(laneH: number): string {
   return `${PR.rulerH}px minmax(0,1fr) ${PR.split}px ${laneH}px ${PR.sb}px`;
 }
 
-/** A Sing my notes label: the syllable on the note at tick/key ('hold' = the previous syllable stretched over it). */
 export interface SyllableMark {
   tick: number;
   key: number;
@@ -1841,7 +1724,6 @@ export interface SyllableMark {
   kind: 'start' | 'hold' | 'extra';
 }
 
-/** Sing my notes labels: a small pill above each note's start, a tie line over held notes. */
 function paintSyllables(ctx: CanvasRenderingContext2D, marks: readonly SyllableMark[], tv: TimeView, kv: KeyView, w: number, h: number): void {
   ctx.save();
   ctx.font = `600 10px ${FONT_SANS}`;

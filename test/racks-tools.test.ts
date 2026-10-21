@@ -1,6 +1,3 @@
-// The rack MCP tools (electron/mcp/tools/racks.ts: build_rack, set_macro, slice_to_pads), the Slicer tools
-// (electron/mcp/tools/slicer.ts: slice_sample, edit_slices) and the shared main-side slicer (electron/racks/slice.ts), through callTool against a real strict DocHost with a fake engine + analyzer and
-// the fixture rack catalog (test/rack-fixtures.ts).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -293,7 +290,6 @@ test('slice_sample: hits → one Slicer channel (keys C4 up) + a replay pattern;
   assert.deepEqual(Object.values(doc.project.patterns[d.patternId].notes[d.channelId]).map((n) => n.key).sort(), [60, 61, 62, 63]);
   assert.equal(Object.keys(doc.project.channels).length, before + 1, 'one channel, not a rack of pads');
   sound();
-  // Re-slicing the Slicer channel by grid keeps it and replaces its markers.
   const grid = await call('slice_sample', { channel: 'break slicer', mode: 'grid', division: 0.5, pattern: false });
   assert.equal(grid.ok, true, grid.message);
   assert.equal((grid.data as { channelId: string }).channelId, d.channelId);

@@ -1,8 +1,3 @@
-// Melody generator: notes of the key's scale only, a seeded walk that
-// mostly steps (leaps get filled back), pulled along a contour, landing on
-// chord tones on strong beats when the pattern has chords, in phrases;
-// call-and-response repeats a phrase with a new ending.
-
 import type { MelodyOptions } from './options';
 import { makeRng, type Rng } from './random';
 import { GenerateError, chordAt, chordPcs, degreeToMidi, mod12, scaleSteps, type ChordEvent } from './harmony';
@@ -19,7 +14,6 @@ const CONTOURS: Record<MelodyOptions['contour'], (x: number) => number> = {
 
 const STEP_W = [0.5, 3, 2, 0.8, 0.45];
 
-/** Weight of a 16th position for the syncopated feel: the "e" / "a" and the off-beat 8ths pull. */
 const SYNC_W = [0.75, 0.35, 0.6, 0.8];
 
 interface Slot {
@@ -36,7 +30,6 @@ function phraseRhythm(o: MelodyOptions, t0: number, t1: number, ctx: GenContext,
     const w = metricWeight(rel, ctx.barTicks, beat);
     const ws = o.feel === 'syncopated' ? SYNC_W[Math.round((rel % beat) / (beat / 4)) % 4] : w;
     const p = t === t0 ? 1 : Math.min(1, o.density * (0.3 + 1.0 * ws) + (o.density > 0.85 ? 0.3 : 0));
-    // leave the last beat of a phrase to breathe
     if (t !== t0 && t >= t1 - beat && t1 - t0 >= ctx.barTicks) continue;
     if (rng.next() < p) out.push({ tick: t, strong: w >= 0.8 });
   }
@@ -66,7 +59,6 @@ export function generateMelody(o: MelodyOptions, ctx: GenContext): GenOutput {
   const stableDeg = (d: number): boolean => [0, 2, 4].includes(((d % n) + n) % n) || (n === 5 && ((d % n) + n) % n === 3);
   const chordOf = (t: number): ChordEvent | null => (tl.events.length ? chordAt(tl.events, t) : null);
 
-  /** Pick the next degree. */
   const choose = (r: Rng, prev: number, prev2: number | null, t: number, x: number, strong: boolean, last: boolean, home: boolean): number => {
     const target = dLo + (dHi - dLo) * (0.15 + 0.7 * shape(Math.min(1, Math.max(0, x))));
     const ch = chordOf(t);
@@ -79,7 +71,6 @@ export function generateMelody(o: MelodyOptions, ctx: GenContext): GenOutput {
       const isChordTone = pcs ? pcs.includes(mod12(toMidi(d))) : stableDeg(d);
       if (strong || last) w *= isChordTone ? 1 + 4 * ct : Math.max(0.05, 1 - 0.85 * ct);
       else if (pcs && isChordTone) w *= 1 + 0.5 * ct;
-      // a leap gets filled back by a step the other way
       if (prev2 !== null && Math.abs(prev - prev2) >= 3) {
         const back = Math.sign(prev2 - prev);
         if (Math.sign(d - prev) === back && jump <= 2) w *= 2.5;
@@ -105,12 +96,10 @@ export function generateMelody(o: MelodyOptions, ctx: GenContext): GenOutput {
     const p1 = Math.min(ctx.end, p0 + phraseLen);
     const pr = rng.fork(100 + k);
     if (o.callResponse && k % 2 === 1 && phrases[k - 1]) {
-      // the answer: the call again, then a new ending that comes home
       const call = phrases[k - 1];
       const shift = phraseLen;
       const keep = call.filter((m) => m.tick + shift < p1 && (m.tick - (p0 - phraseLen)) / phraseLen < 0.55);
       const out: Mel[] = keep.map((m) => ({ ...m, tick: m.tick + shift }));
-      // copied strong notes that now clash with this phrase's chord move to the nearest chord tone
       for (const m of out) {
         const ch = chordOf(m.tick);
         if (!ch || !m.strong || ct < 0.5 || chordPcs(ch).includes(mod12(toMidi(m.deg)))) continue;

@@ -38,7 +38,7 @@ export const patternsRemove = defineCommand({
     d.patternOrder = d.patternOrder.filter((p) => p !== a.id);
     for (const c of Object.values(d.playlist.clips)) if (c.kind === 'pattern' && c.patternId === a.id) delete d.playlist.clips[c.id];
     removeLaunchClipsWhere(d, (c) => c.kind === 'pattern' && c.patternId === a.id);
-    dropTakeRefs(d, { patternIds: [a.id] }); // takes: a take that played this pattern goes
+    dropTakeRefs(d, { patternIds: [a.id] });
     if (d.transport.activePatternId === a.id) d.transport.activePatternId = d.patternOrder[0] ?? null;
     return {};
   },

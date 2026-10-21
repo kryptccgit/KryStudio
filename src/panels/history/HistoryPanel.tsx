@@ -1,9 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// History / AI History: every edit grouped by who made it (you, each agent,
-// system). Revert or re-apply any single entry, or "Revert all AI edits"
-// for an agent in one click. Refreshes on doc.onHistoryChanged.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useMemo, useState } from 'react';
 import { Bot, Loader2, RotateCcw, Undo2, User } from 'lucide-react';
 import type { HistorySummary } from '@shared/doc/DocHost';

@@ -1,15 +1,3 @@
-//! krypt.heat — three-band multiband saturator.
-//!
-//! The input is oversampled once (linear-phase halfband FIRs, blocks/oversample),
-//! split at the oversampled rate by an LR4 crossover tree (blocks/crossover:
-//! the three bands sum to an allpass, so with every band clean the device is
-//! magnitude-flat), each band is driven into its own waveshaper (soft, tube,
-//! tape, hard, fold, rectify or bitcrush), levelled, summed and decimated.
-//! A DC blocker follows (tube / rectify make DC). Mix blends a dry copy that
-//! is delayed by the oversampler latency AND passed through the crossover's
-//! allpass, so a parallel blend does not notch at the split points. At Mix 0
-//! the dry copy is the plain delayed input (bit-identical, latency-aligned).
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::crossover::{Split3, Split3Allpass};
 use crate::blocks::delay::DelayLine;
@@ -19,7 +7,6 @@ use crate::blocks::{db_to_gain, flush, tanh_fast, Smooth};
 use crate::params::{param_table, ParamBank};
 use crate::{Effect, PluginDescriptor, PluginKind, ProcessContext};
 
-/// Waveshaper names (index = the `*Shape` param value).
 pub(crate) const SHAPES: [&str; 7] = ["Soft", "Tube", "Tape", "Hard", "Fold", "Rectify", "Bitcrush"];
 const BITCRUSH: usize = 6;
 
@@ -60,22 +47,16 @@ pub fn descriptor() -> PluginDescriptor {
 
 const TUBE_BIAS: f32 = 0.3;
 
-/// One waveshaper, unity small-signal gain (except rectify, which folds the
-/// negative half up, and bitcrush, which quantizes to `levels` steps).
 #[inline]
 pub(crate) fn shape(kind: usize, x: f32, levels: f32) -> f32 {
     match kind {
-        // algebraic sigmoid: a wider, gentler knee than tanh
         0 => x / (1.0 + x * x).sqrt(),
-        // biased tanh, even harmonics; normalized to slope 1 at 0
         1 => {
-            // the same approximation at the bias, so silence stays exactly 0
             let t0 = tanh_fast(TUBE_BIAS);
             (tanh_fast(x + TUBE_BIAS) - t0) * (1.0 / (1.0 - t0 * t0))
         }
         2 => tanh_fast(x),
         3 => x.clamp(-1.0, 1.0),
-        // sine wavefolder (slope 1 at 0, folds back past ±π/2)
         4 => x.clamp(-1e4, 1e4).sin(),
         5 => tanh_fast(x).abs(),
         _ => (x.clamp(-1.0, 1.0) * levels).round() / levels,
@@ -90,7 +71,6 @@ fn factor_of(i: usize) -> Factor {
     }
 }
 
-/// Per-band gains, smoothed at the base rate.
 #[derive(Clone, Copy)]
 struct Band {
     shape: usize,
@@ -101,7 +81,6 @@ struct Band {
 
 pub struct Heat {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     factor: Factor,
@@ -169,7 +148,6 @@ impl Heat {
             let band = &mut self.bands[b];
             band.shape = kind;
             if kind == BITCRUSH {
-                // Drive 0 dB = 16 bits (clean) … 36 dB = 3 bits
                 let bits = 16.0 - drive * (13.0 / 36.0);
                 band.levels = (bits - 1.0).exp2().max(2.0);
                 band.pre.set(1.0);
@@ -177,7 +155,6 @@ impl Heat {
             } else {
                 band.levels = 32768.0;
                 band.pre.set(db_to_gain(drive));
-                // partial compensation: half the drive (in dB) is taken back
                 band.post.set(db_to_gain(-0.5 * drive) * level);
             }
         }
@@ -209,7 +186,6 @@ impl Effect for Heat {
     fn set_param(&mut self, index: usize, value: f32) {
         self.pb.set(index, value);
         if index == P::Oversample as usize {
-            // the engine reads latency() right after set_param
             self.lat = self.os[0].latency(factor_of(self.pb.idx(index)));
         }
     }
@@ -239,7 +215,6 @@ impl Effect for Heat {
             let levels = [self.bands[0].levels, self.bands[1].levels, self.bands[2].levels];
             let mix = self.mix.next();
             let out = self.out.next();
-            // below ~5 % mix the dry copy fades from plain to allpassed (phase-coherent blend)
             let phase_k = (mix * 20.0).min(1.0);
             for ch in 0..2 {
                 let x = crate::blocks::finite(buf[ch][i]);
@@ -257,7 +232,6 @@ impl Effect for Heat {
                 self.dry_line[ch].push(x);
                 let raw = if lat == 0 { x } else { self.dry_line[ch].read(lat) };
                 if mix >= 1.0 {
-                    // fully wet: the dry allpass is not heard (it restarts from rest when the mix comes down)
                     self.dry_ap[ch].reset();
                     buf[ch][i] = wet;
                     continue;
@@ -290,7 +264,6 @@ mod tests {
             let y = shape(k, 1e-3, 32768.0);
             assert!((y / 1e-3 - 1.0).abs() < 2e-3, "shape {k}: {y}");
             for x in [-50.0f32, -3.0, 3.0, 50.0] {
-                // tube is asymmetric: its negative side reaches (1 + tanh 0.3) / sech² 0.3 ≈ 1.41
                 let bound = if k == 1 { 1.42 } else { 1.0 + 1e-3 };
                 assert!(shape(k, x, 32768.0).abs() <= bound, "shape {k} at {x}");
             }

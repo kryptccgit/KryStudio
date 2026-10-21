@@ -1,14 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Slice to pads (Wave 12.2, research/16 §2.3) and into the Slicer
-// (research/13 §8.5), main side. Shared by the UI (window.krypt.racks.
-// sliceToPads, actor user) and the MCP tools slice_to_pads / slice_sample
-// (actor = the agent): resolve the sample, measure it (the analyzer: length,
-// tempo and onsets; or the engine's sample info for grid / manual slicing),
-// pick the slice times (shared sliceTimes), then ONE doc command,
-// rack.sliceToPads or slicer.slice (one undo step). Commands do no I/O; this
-// does.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import type { DocHost } from '@shared/doc/DocHost';
 import type { ActionResult, AudioTarget, SliceToPadsOptions, SliceToPadsOutcome } from '@shared/types';
@@ -18,14 +7,11 @@ import { MAX_SLICES, midiNoteName, sliceTimes } from '@shared/commands/racks';
 import { DRUM_RACK_BASE_NOTE } from '@shared/schema/rack';
 import { SLICER_PLUGIN } from '@shared/schema/slicer';
 
-/** Applies a doc command as the caller; throws an Error with a human message on failure. */
 export type SliceApply = <T = unknown>(cmd: string, args: unknown) => T;
 
 export interface SliceDeps {
   doc: Pick<DocHost, 'project'>;
-  /** The analyzer (onsets, tempo, length). Absent = grid / manual slicing only. */
   analyze?(target: AudioTarget, opts: { drums?: boolean; onProgress?(stage: string, fraction: number): void; signal?: AbortSignal }): Promise<ActionResult<AudioAnalysis>>;
-  /** Engine sample info (length) for grid / manual slicing without the analyzer. */
   sampleInfo?(absPath: string): Promise<ActionResult<SampleInfo>>;
   resolveSamplePath(p: string): string;
 }
@@ -37,7 +23,6 @@ export interface SliceRun {
 
 const fail = <T>(message: string): ActionResult<T> => ({ ok: false, message });
 
-/** Clean, bounded options from IPC / agents. */
 export function cleanSliceOptions(raw: unknown): SliceToPadsOptions {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const num = (v: unknown, lo: number, hi: number): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : undefined);
@@ -57,13 +42,8 @@ export function cleanSliceOptions(raw: unknown): SliceToPadsOptions {
   };
 }
 
-/**
- * Slice a sample, an audio clip or a channel's sample onto a drum rack. `apply` runs the doc command as the caller
- * (user / agent). The message names the slice count, how they were found and where the rack went.
- */
 export async function sliceToPads(deps: SliceDeps, source: AudioTarget, opts: SliceToPadsOptions, apply: SliceApply, run: SliceRun = {}): Promise<ActionResult<SliceToPadsOutcome>> {
   const p = deps.doc.project;
-  // 1. The sample: a pool entry (channel / clip) or a path the command pools.
   let sampleId: string | undefined;
   let samplePath: string | undefined;
   let display: string;
@@ -86,7 +66,6 @@ export async function sliceToPads(deps: SliceDeps, source: AudioTarget, opts: Sl
     display = ch.name || s.name;
   }
 
-  // 2. Measure it.
   const mode = opts.mode ?? (opts.times?.length ? 'manual' : 'onsets');
   if (mode === 'manual' && !opts.times?.length) return fail('Give the slice times (seconds) to slice by hand');
   let lengthSec: number | undefined;
@@ -118,14 +97,12 @@ export async function sliceToPads(deps: SliceDeps, source: AudioTarget, opts: Sl
   if (!lengthSec || !(lengthSec > 0)) return fail(`Couldn't tell how long "${display}" is`);
   if (run.signal?.aborted) return fail('Slicing cancelled');
 
-  // 3. Slice times → one doc command.
   const loopBpm = bpm ?? p.transport.bpm;
   const times = sliceTimes({ mode, lengthSec, times: mode === 'manual' ? opts.times : onsets, strengths: mode === 'onsets' ? strengths : undefined, bpm: loopBpm, division: opts.division, maxSlices: opts.maxSlices ?? 16 });
   if (!times.length) return fail(`No slices: nothing in "${display}" to cut at`);
   run.onProgress?.('building', 0.95);
   const how = mode === 'onsets' ? 'at its hits' : mode === 'grid' ? `every ${opts.division ?? 1} beat${(opts.division ?? 1) === 1 ? '' : 's'}` : 'at the given times';
   if (opts.to === 'slicer') {
-    // Re-slicing a Slicer channel keeps it (and its settings); any other source gets a new Slicer channel.
     const own = 'channelId' in source && p.channels[source.channelId]?.generator.type === SLICER_PLUGIN ? source.channelId : undefined;
     let s: { channelId: string; insertId: string; patternId?: string; slices: number[]; baseKey: number };
     try {

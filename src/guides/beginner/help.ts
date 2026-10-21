@@ -1,4 +1,3 @@
-// Start here (step by step) · 7: Help! The beginner's troubleshooting page.
 import type { GuideArticle } from '../articles';
 
 export const HELP: GuideArticle = {

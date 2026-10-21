@@ -1,9 +1,3 @@
-// "Ears" tools (research/08 §3, §6): hear an audio file (tempo, key,
-// sections, loudness), split a clip into stems, transcribe audio into a
-// pattern, time-stretch / pitch / tempo-sync an audio clip, list models.
-// All ML runs in krypt-studio-analyzer.exe through electron/analyzer;
-// agents only ever use INSTALLED models — downloads are the user's call.
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import type { Clip, Project } from '@shared/schema/project';
@@ -40,7 +34,6 @@ function audioClipsOf(p: Project, channelId: string): Clip[] {
     .sort((a, b) => a.start - b.start);
 }
 
-/** An audio clip by clip id, or by the name / id of its audio-clip channel (when it has exactly one clip). */
 export function findAudioClip(p: Project, ref: string): Clip {
   const r = ref.trim();
   const direct = p.playlist.clips[r];
@@ -55,7 +48,6 @@ export function findAudioClip(p: Project, ref: string): Clip {
   fail(`"${safeName(ch.name)}" has ${clips.length} audio clips; pass a clip id: ${clips.map((c) => `${c.id} (${clipLabel(p, c)})`).join(', ')}`);
 }
 
-/** clip id → clip; "C:\…" / "factory:…" → file (allow-listed, or allowed by the user); else a channel (its only clip when it has one). */
 export function resolveTarget(deps: MainDeps, ref: string, preferClip: boolean, caller?: Pick<ToolCaller, 'via'>): { target: AudioTarget; label: string } {
   const p = deps.doc.project;
   const r = ref.trim();
@@ -74,8 +66,6 @@ export function resolveTarget(deps: MainDeps, ref: string, preferClip: boolean, 
   if (preferClip && clips.length === 1) return { target: { clipId: clips[0].id }, label: clipLabel(p, clips[0]) };
   return { target: { channelId: ch.id }, label: `channel "${safeName(ch.name)}"` };
 }
-
-// ── analyze_audio ───────────────────────────────────────────────────────
 
 function mmss(sec: number): string {
   const s = Math.max(0, sec);
@@ -171,8 +161,6 @@ export const analyzeAudio = defineTool({
   },
 });
 
-// ── separate_stems ──────────────────────────────────────────────────────
-
 export function defaultOf(models: ModelState[], task: ModelState['def']['task']): ModelState | undefined {
   return models.find((m) => m.def.task === task && m.def.default) ?? models.find((m) => m.def.task === task);
 }
@@ -222,8 +210,6 @@ export const separateStems = defineTool({
   },
 });
 
-// ── audio_to_pattern ────────────────────────────────────────────────────
-
 const GRIDS: Record<string, number> = { off: 0, '1/8': PPQ / 2, '1/16': PPQ / 4, '1/32': PPQ / 8, '1/64': PPQ / 16 };
 
 export const audioToPattern = defineTool({
@@ -255,8 +241,6 @@ export const audioToPattern = defineTool({
     return { ok: true, message: r.message ?? 'Transcribed', changed: [], data: r.data };
   },
 });
-
-// ── stretch_clip ────────────────────────────────────────────────────────
 
 const zValue = z.union([z.number(), z.string().max(32), z.boolean()]);
 
@@ -307,7 +291,6 @@ export const stretchClip = defineTool({
       let how = 'given';
       if (bpm === undefined) {
         const svc = ears(deps);
-        // A stem's own tempo reading is less reliable than its full mix's: use the source mix when it is still in the project.
         const parentId = ch.generator.sampleId ? p0.samples[ch.generator.sampleId]?.origin?.parentSampleId : undefined;
         const parent = parentId ? Object.values(p0.channels).find((c) => c.generator.sampleId === parentId) : undefined;
         const target: AudioTarget = parent ? { channelId: parent.id } : clip0 ? { clipId: clip0.id } : { channelId: ch.id };
@@ -332,7 +315,6 @@ export const stretchClip = defineTool({
     }
     if (Object.keys(params).length === 0) fail('Nothing to change: pass pitch, formant, stretch, sync_to_tempo or source_bpm.');
 
-    // channels.setGenParams rescales the channel's clips itself when the timing changes (shared/commands/audioTiming.ts).
     const lengths = new Map(audioClipsOf(p0, ch.id).map((c) => [c.id, c.length]));
     ctx.exec('channels.setGenParams', { id: ch.id, params });
     const p = deps.doc.project;
@@ -349,8 +331,6 @@ export const stretchClip = defineTool({
     };
   },
 });
-
-// ── list_models ─────────────────────────────────────────────────────────
 
 function statusText(m: ModelState): string {
   switch (m.status) {

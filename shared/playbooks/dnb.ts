@@ -1,4 +1,3 @@
-// Drum & bass: two-step breakbeats at 174, a reese over a clean sub, atmospheric breakdowns.
 import type { Playbook } from './types';
 
 export const DNB: Playbook = {

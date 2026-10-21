@@ -1,6 +1,3 @@
-// Channel Rack verbs shared by rows, the header, menus and drop targets.
-// Multi-step verbs run inside withGroup so each is ONE undo entry.
-
 import {
   Copy,
   Eraser,
@@ -40,7 +37,6 @@ import { channelRackItems } from '../../racks/actions';
 export const SAMPLE_MIME = 'application/x-krypt-sample';
 export const CHANNEL_MIME = 'application/x-krypt-channel';
 
-/** Instruments offered in the "+" picker (audio-clip channels are made by the playlist). */
 export const PICKABLE_INSTRUMENTS = INSTRUMENTS.filter((p) => p.id !== 'krypt.audioclip');
 
 export function sampleNameFromPath(path: string): string {
@@ -55,7 +51,6 @@ export async function addChannel(type: string, index?: number): Promise<string |
   return r.data.id;
 }
 
-/** A factory sound's display name from the sample index ("Punchy Club Kick"), else the file name. */
 function displayName(path: string): string {
   const known = path.startsWith('factory:') ? useSounds.getState().samples?.find((x) => x.path === path)?.name : undefined;
   return known?.slice(0, 64) || sampleNameFromPath(path);
@@ -83,7 +78,6 @@ export async function replaceChannelSample(channelId: string, path: string): Pro
   const ok = await withGroup(`Load ${name}`, async (groupId) => {
     const s = await dispatch<{ id: string }>('samples.add', { path }, { groupId });
     if (!s.ok || !s.data) return false;
-    // An audio file needs a plugin that plays one: the Multisampler plays .sfz instruments only.
     if (!pluginById(ch.generator.type)?.usesSample || ch.generator.type === 'krypt.multisampler') {
       const g = await dispatch('channels.setGenerator', { id: channelId, type: 'krypt.sampler' }, { groupId });
       if (!g.ok) return false;
@@ -172,7 +166,6 @@ export function channelMenuItems(channelId: string, doc?: Document | null): Menu
   const p = getProject();
   const ch = p.channels[channelId];
   if (!ch) return [];
-  // Audio-clip / sampler channels with a sample: Detect tempo & key, Separate stems, Convert to pattern.
   const ears = channelEarsItems(channelId, doc);
   const patId = p.transport.activePatternId;
   const hasNotes = !!(patId && Object.keys(p.patterns[patId]?.notes[channelId] ?? {}).length);
@@ -266,8 +259,6 @@ export function channelMenuItems(channelId: string, doc?: Document | null): Menu
   ];
 }
 
-// ── Step tools (Fill each N steps, shift / rotate) ──────────────────────
-
 export async function fillSteps(channelId: string, every: number, offset = 0): Promise<void> {
   const p = getProject();
   const patternId = p.transport.activePatternId;
@@ -317,11 +308,8 @@ export function shiftMenuItems(channelId: string): MenuItem[] {
   ];
 }
 
-// ── Pattern length (steps per pattern) ─────────────────────────────────
-
 export const STEP_LENGTHS = [8, 12, 16, 24, 32, 48, 64, 96, 128];
 
-/** Set the active pattern's length in 16th steps (0 = auto: follows the notes). */
 export async function setPatternSteps(steps: number): Promise<void> {
   const patternId = getProject().transport.activePatternId;
   if (!patternId) return;
@@ -359,8 +347,6 @@ export function patternLengthItems(): MenuItem[] {
     { label: 'Custom…', checked: cur > 0 && !STEP_LENGTHS.includes(cur), onSelect: () => void customPatternSteps() },
   ];
 }
-
-// ── Filter groups ──────────────────────────────────────────────────────
 
 export async function setChannelGroup(channelId: string, group: string | null): Promise<void> {
   const ch = getProject().channels[channelId];
@@ -435,7 +421,6 @@ export function instrumentPickerItems(index?: number): MenuItem[] {
     items.push({ type: 'header', label: `Stock · ${cat}` });
     for (const d of list) items.push({ label: d.name, detail: d.description, onSelect: () => void addChannel(d.id, index) });
   }
-  // Third-party VST3 / CLAP instruments (Plugin Manager).
   items.push(...installedPickerItems('instrument', (d) => void addChannel(d.id, index)));
   return items;
 }

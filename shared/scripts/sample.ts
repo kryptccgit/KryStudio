@@ -1,8 +1,3 @@
-// A small made-up context (2 bars of 4/4 in A minor at 120 BPM, with an Am
-// and an F chord and a few melody notes) that write_script and the code
-// view's Check use to try a script once before it is saved, so runtime
-// errors come back with their line numbers. Pure.
-
 import { PPQ } from '../schema/time';
 import type { ScriptContextData } from './plan';
 import type { ScriptHeader, ScriptParamValues } from './types';

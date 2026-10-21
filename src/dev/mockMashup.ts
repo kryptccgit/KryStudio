@@ -1,7 +1,3 @@
-// Browser-preview Auto Mashup (window.krypt.mashup without the desktop app): a canned but option-aware check, and a
-// build that walks through the stages with progress and edits nothing. Lets the dialog be seen and screenshotted
-// with library tracks or project clips as the songs (the preview's file dialog returns nothing).
-
 import type { KryptApi } from '@shared/types';
 import { MASHUP_RIGHTS_NOTE, type MashupCheck, type MashupPlanSummary, type MashupProgress, type MashupRequest, type MashupSongReading } from '@shared/mashup/types';
 

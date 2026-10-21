@@ -1,5 +1,3 @@
-// Thin gradient progress bar; fraction < 0 = indeterminate (sweeping).
-
 import { cls } from '../utils/format';
 
 export function ProgressBar({ fraction, className }: { fraction: number; className?: string }) {

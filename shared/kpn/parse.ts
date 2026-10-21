@@ -1,14 +1,3 @@
-// KPN parser (research/04 §10.2, v0.1). Pure TS, no I/O. Never throws:
-// every problem becomes a KpnIssue with the line, track and bar it belongs to,
-// phrased so a model can fix it on the next call.
-//
-//   pattern "Trap A" bars=2 grid=16 key=F#m
-//   kick       : x... .... ..x. .... | x... .... .x.. ..x.
-//   hat/32     : (x.x.)*7 xxxx | (x.x.)*6 xxxx xxxx
-//   808 {oct=1}: F#1:6 r:4 C#2:2 E2:4 | F#1:8~ C#1:4 r:2 A1:2
-//   chords {oct=3 vel=80}: Am7:16 | Fmaj7:16 | C:16 | G/B:16
-//   lead {oct=5}: ^5:4 ^3:2 ^1 ^2:4 ^3:4 | ^1:8 r:8
-
 import { CHORD_QUALITIES, degreeToMidi, noteName, parseKey, parseNoteName, parsePitchClass, type Key } from '../music/theory';
 import { ticksPerBar, ticksPerBeat, type TimeSig } from '../schema/time';
 import type { KpnHeader, KpnIssue, KpnNote, KpnParseOptions, KpnParseResult, KpnTrack } from './types';
@@ -17,11 +6,9 @@ export const KPN_VERSION = '0.1';
 export const DEFAULT_DRUM_KEY = 60;
 export const DEFAULT_OCTAVE = 4;
 export const DEFAULT_VELOCITY = 100;
-/** Grid hit velocities (MIDI): x = line vel (100), X = accent, o = ghost, 1-9 = n × 14. */
 export const GRID_ACCENT = 127;
 export const GRID_GHOST = 50;
 export const GRID_DIGIT_STEP = 14;
-/** Melodic token velocity marks. */
 export const TOKEN_ACCENT = 120;
 export const TOKEN_GHOST = 60;
 const MAX_EXPANDED = 200_000;
@@ -29,18 +16,15 @@ const MAX_REPEAT = 512;
 
 const DEFAULT_TS: TimeSig = { num: 4, den: 4 };
 
-/** Default grid: 16th-note steps per bar for a time signature (16 in 4/4, 12 in 3/4). */
 export function defaultGrid(ts: TimeSig): number {
   const g = (ts.num * 16) / ts.den;
   return Number.isInteger(g) && g >= 1 ? g : ts.num * 4;
 }
 
-/** Default sticky note length in steps: one beat at the given grid. */
 export function defaultLenSteps(grid: number, ts: TimeSig): number {
   return Math.max(1, Math.round((grid * ticksPerBeat(ts)) / ticksPerBar(ts)));
 }
 
-/** Chord quality spellings accepted on top of shared/music/theory CHORD_QUALITIES. */
 export const CHORD_ALIASES: Record<string, string> = {
   dom7: '7',
   dom9: '9',
@@ -76,7 +60,6 @@ export function chordIntervals(quality: string): number[] | null {
   return null;
 }
 
-/** Chord symbol ("Am7", "Fmaj7", "G/B", "C#m9/G#") → MIDI notes, bass first. */
 export function chordSymbolToMidi(symbol: string, octave: number): { notes: number[] } | { error: string } {
   const m = /^([A-G](?:#|b)?)([^/]*)(?:\/([A-G](?:#|b)?))?$/.exec(symbol);
   if (!m) return { error: `"${symbol}" is not a note, chord symbol, degree or rest` };
@@ -118,7 +101,6 @@ function issue(list: KpnIssue[], line: number, track: string | undefined, bar: n
   list.push({ line, track, bar, message: fmt(line, track, bar, msg) });
 }
 
-/** Strip a `//` comment that is not inside a quoted name. */
 function stripComment(line: string): string {
   let inQuote = false;
   for (let i = 0; i < line.length; i++) {
@@ -129,7 +111,6 @@ function stripComment(line: string): string {
   return line;
 }
 
-/** Parse `k=v k2="v 2"` (space or comma separated). */
 function parseKv(s: string): { kv: Record<string, string>; bad: string[] } {
   const kv: Record<string, string> = {};
   const bad: string[] = [];
@@ -153,7 +134,6 @@ function parseKv(s: string): { kv: Record<string, string>; bad: string[] } {
   return { kv, bad };
 }
 
-/** Expand `( ... )*n` groups, innermost first. */
 function expandRepeats(body: string): { text: string; error?: string } {
   let s = body;
   let guard = 0;
@@ -181,15 +161,10 @@ function expandRepeats(body: string): { text: string; error?: string } {
 
 interface TrackState {
   track: KpnTrack;
-  /** Melodic: sticky length in ticks. */
   stickyTicks: number | null;
-  /** Melodic: suffix `~` seen; the next note token slides. */
   pendingSlide: boolean;
-  /** Grid: last note eligible for `-` holds. */
   holdNote: KpnNote | null;
-  /** Position of the last bar line (or line start / jump). */
   lastBar: number;
-  /** Last grid used (for total-length messages). */
   lastGrid: number;
   lastLine: number;
   pastEndReported: boolean;
@@ -210,7 +185,6 @@ function posLabel(tick: number, barTicks: number, stepTicks: number): string {
   return `${bar}.${Number.isInteger(step) ? step : step.toFixed(2)}`;
 }
 
-/** Validate a `|` bar check. Returns the (re-synced) cursor. */
 function barCheck(st: TrackState, pos: number, line: number, ctx: Ctx, stepTicks: number, grid: number): number {
   const { barTicks } = ctx;
   const name = st.track.name;
@@ -228,7 +202,6 @@ function barCheck(st: TrackState, pos: number, line: number, ctx: Ctx, stepTicks
   } else {
     issue(ctx.errors, line, name, barOf(pos, barTicks), `bar line at step ${stepsLabel(pos, stepTicks)} is not on a bar boundary (${grid} steps per bar)`);
   }
-  // Re-sync to the nearest bar boundary so later bars are checked on their own.
   const nb = Math.max(1, Math.round(since / barTicks));
   const resync = st.lastBar + nb * barTicks;
   st.lastBar = resync;
@@ -283,7 +256,6 @@ function parseGridBody(body: string, st: TrackState, line: number, ctx: Ctx, ste
 
 interface PitchSpec {
   keys: number[];
-  /** Per-key velocity overrides (MIDI) for chord elements. */
   vels: Array<number | null>;
 }
 
@@ -393,7 +365,6 @@ function parseMelodicBody(body: string, st: TrackState, line: number, ctx: Ctx, 
       slideIn = true;
       rest = rest.slice(1);
     }
-    // Split head / suffixes.
     let head: string;
     if (rest.startsWith('[')) {
       const close = rest.indexOf(']');
@@ -531,7 +502,6 @@ function parseHeaderLine(rest: string, line: number, header: KpnHeader, ctx: Ctx
 
 const TRACK_RE = /^\s*(?:"((?:[^"\\]|\\.)*)"|([^\s"{}:/]+))\s*(?:\/\s*(\d+))?\s*(?:\{([^}]*)\})?\s*:(.*)$/;
 
-/** Parse KPN text. Never throws. */
 export function parse(text: string, options: KpnParseOptions = {}): KpnParseResult {
   const errors: KpnIssue[] = [];
   const warnings: KpnIssue[] = [];
@@ -540,7 +510,6 @@ export function parse(text: string, options: KpnParseOptions = {}): KpnParseResu
   const maxNotes = options.maxNotes ?? 20000;
   const lines = String(text ?? '').split(/\r?\n/);
 
-  // Pass 1: find the header (first non-empty line) so ts/grid/bars apply to every track.
   let firstContent = -1;
   for (let i = 0; i < lines.length; i++) {
     if (stripComment(lines[i]).trim()) {
@@ -640,7 +609,6 @@ export function parse(text: string, options: KpnParseOptions = {}): KpnParseResu
     const t = st.track;
     Object.assign(t.opts, kv);
 
-    // Validate options.
     let oct = DEFAULT_OCTAVE;
     let vel = DEFAULT_VELOCITY;
     if (t.opts.oct !== undefined) {
@@ -678,7 +646,6 @@ export function parse(text: string, options: KpnParseOptions = {}): KpnParseResu
     const body = exp.text.trim();
     if (!body) continue;
     const strictGrid = /^[xXo.\-|_1-9\s]+$/.test(body);
-    // A step grid with a typo ("x... .q..") should report the bad character, not "x... is not a note".
     const looksGrid = !strictGrid && /[xXo.]{3,}/.test(body) && !/[A-G](?:#|b)?-?\d|[:[\]^@]/.test(body) && body.replace(/[xXo.\-|_1-9\s]/g, '').length <= 3;
     const isGrid = strictGrid || looksGrid;
     const kind = isGrid ? 'grid' : 'melodic';
@@ -699,7 +666,6 @@ export function parse(text: string, options: KpnParseOptions = {}): KpnParseResu
     }
   }
 
-  // Finish tracks: total-length checks and dangling slides.
   let maxEnd = 0;
   for (const st of order) {
     const t = st.track;
@@ -732,7 +698,6 @@ export function parse(text: string, options: KpnParseOptions = {}): KpnParseResu
   };
 }
 
-/** Human summary of parse errors for tool results (first `max`, then a count). */
 export function formatIssues(list: KpnIssue[], max = 12): string {
   const shown = list.slice(0, max).map((e) => `- ${e.message}`);
   if (list.length > max) shown.push(`- … and ${list.length - max} more`);

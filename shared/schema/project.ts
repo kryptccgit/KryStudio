@@ -1,18 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The Krypt Studio project document.
-//
-// Rules (see research/00-SYNTHESIS.md §2):
-//  - Normalized: every collection is Record<Id, T> + an explicit order array.
-//    Patches therefore address entities by id, never by array index, which is
-//    what makes per-actor / selective undo and engine diffing robust.
-//  - All time is integer ticks (PPQ 960, shared/schema/time.ts).
-//  - Gains are LINEAR (1 = 0 dB). Pans are -1..1. Normalized params 0..1.
-//  - Plugin/generator params are SPARSE: a missing key means "use the
-//    ParamSpec default" from shared/plugins/catalog.gen.json.
-//  - Nothing in here is runtime state (playing, playhead, meters, selection,
-//    zoom). That lives in the engine telemetry / renderer view stores.
-// ──────────────────────────────────────────────────────────────────────
-
 import { z } from 'zod';
 import { PPQ, type TimeSig } from './time';
 import { zSession, type Session } from './launcher';
@@ -27,85 +12,57 @@ export const SCHEMA_VERSION = 1;
 
 export type Id = string;
 
-// ── Transport ─────────────────────────────────────────────────────────
-
 export interface TransportState {
-  bpm: number; // 10..999
+  bpm: number;
   timeSig: TimeSig;
-  /** Global swing 0..1 (FL main swing). Applied to off-beat 16ths. */
   swing: number;
   mode: 'pattern' | 'song';
-  /** Pattern played in pattern mode + target of new notes. */
   activePatternId: Id | null;
-  /** Song-mode loop region in ticks. */
   loop: { enabled: boolean; start: number; end: number };
   metronome: boolean;
-  /** Master output gain (linear). */
   masterVolume: number;
 }
 
-// ── Channels (Channel Rack) ───────────────────────────────────────────
-
 export interface Generator {
-  /** Plugin id from the catalog, e.g. 'krypt.sampler', 'krypt.triosc'. */
   type: string;
-  /** Sparse param values (missing = catalog default). Plain units (see ParamSpec). */
   params: Record<string, number>;
-  /** Sample used by sample-based generators (sampler, audio clip). */
   sampleId: Id | null;
-  /** Opaque plugin state (base64), for third-party plugins. */
   state?: string;
-  /** The preset this sound was loaded from (shared/sounds); cleared when the instrument is swapped. */
   preset?: { id: string; name: string };
-  /** 'krypt.audioclip' only: warp markers + warp mode (shared/schema/warp.ts). Absent = Stretch params only. */
   warp?: WarpMap;
-  /** 'krypt.rack' / 'krypt.drumrack' only: chains, zones, macros (shared/schema/rack.ts). */
   rack?: RackDef;
-  /** 'krypt.slicer' only: slice markers sorted by sec (shared/schema/slicer.ts). Absent / empty = one slice. */
   slices?: Slice[];
 }
 
 export interface Channel {
   id: Id;
   name: string;
-  color: string; // #rrggbb
+  color: string;
   generator: Generator;
-  volume: number; // linear, default 0.78
-  pan: number; // -1..1
-  /** Pitch offset in semitones (fractional allowed). */
+  volume: number;
+  pan: number;
   pitch: number;
   mute: boolean;
-  /** Mixer insert this channel feeds. */
   insertId: Id;
-  /** MIDI key at which a sample plays at its recorded pitch. */
   rootKey: number;
-  /** How much of the global swing this channel follows, 0..1. */
   swing: number;
-  /** Mono + glide (808s), and cut groups (open/closed hats). */
   poly: { mono: boolean; glideMs: number; cutGroup: number; cutBy: number };
-  /** Channel Rack filter group ("Drums", "Synths" or a custom name). Absent = automatic by instrument type. */
   group?: string;
 }
 
-// ── Patterns & notes ──────────────────────────────────────────────────
-
 export interface Note {
   id: Id;
-  tick: number; // start within the pattern
-  dur: number; // ticks, >= 1
-  key: number; // MIDI 0..127 (60 = middle C; FL labels this C5)
-  vel: number; // 0..1
-  pan: number; // -1..1
-  release: number; // 0..1
-  /** Fine pitch in cents, -100..100. */
+  tick: number;
+  dur: number;
+  key: number;
+  vel: number;
+  pan: number;
+  release: number;
   fine: number;
-  /** FL-style slide note: glides the previous note instead of retriggering. */
   slide: boolean;
-  modX: number; // 0..1, default 0.5
-  modY: number; // 0..1, default 0.5
-  /** Muted notes stay in the pattern but never sound (FL mute tool). Absent = false. */
+  modX: number;
+  modY: number;
   mute?: boolean;
-  /** Note colour group 0..15 (FL's 16 note colours; MIDI channel on export). Absent = 0. */
   color?: number;
 }
 
@@ -113,19 +70,15 @@ export interface Pattern {
   id: Id;
   name: string;
   color: string;
-  /** Length in ticks; null = auto (content rounded up to a bar, min 1 bar). */
   length: number | null;
-  /** notes[channelId][noteId]. Step-sequencer steps ARE notes (dur = 1 step). */
   notes: Record<Id, Record<Id, Note>>;
 }
-
-// ── Playlist (arrangement) ────────────────────────────────────────────
 
 export interface PlaylistTrack {
   id: Id;
   name: string;
   color: string;
-  height: number; // px, UI hint persisted with the project
+  height: number;
   mute: boolean;
   solo: boolean;
 }
@@ -136,20 +89,17 @@ export interface Clip {
   id: Id;
   trackId: Id;
   kind: ClipKind;
-  start: number; // ticks on the song timeline
-  length: number; // ticks
-  /** Ticks into the source where playback starts (trimmed clip start). */
+  start: number;
+  length: number;
   offset: number;
   mute: boolean;
-  color: string | null; // null = source color
-  patternId?: Id; // kind 'pattern'
-  /** kind 'audio': the audio-clip channel (generator 'krypt.audioclip') that owns sample + routing. */
+  color: string | null;
+  patternId?: Id;
   channelId?: Id;
-  automationId?: Id; // kind 'automation'
-  /** kind 'audio' only. */
-  gain?: number; // linear
-  fadeIn?: number; // ticks
-  fadeOut?: number; // ticks
+  automationId?: Id;
+  gain?: number;
+  fadeIn?: number;
+  fadeOut?: number;
 }
 
 export interface Marker {
@@ -165,14 +115,10 @@ export interface Playlist {
   markers: Record<Id, Marker>;
 }
 
-// ── Automation ────────────────────────────────────────────────────────
-
 export interface AutomationPoint {
   id: Id;
-  tick: number; // relative to the automation start
-  /** Normalized 0..1, mapped through the target ParamSpec range/scale. */
+  tick: number;
   value: number;
-  /** Curve of the segment leaving this point, -1..1 (0 = linear). */
   tension: number;
 }
 
@@ -180,25 +126,18 @@ export interface Automation {
   id: Id;
   name: string;
   color: string;
-  /** ParamRef string (shared/schema/params.ts); null = unassigned. */
   target: string | null;
   points: Record<Id, AutomationPoint>;
 }
 
-// ── Mixer ─────────────────────────────────────────────────────────────
-
 export interface FxSlot {
   id: Id;
-  /** Effect plugin id, e.g. 'krypt.eq'. */
   type: string;
   enabled: boolean;
-  /** Wet/dry 0..1. */
   mix: number;
   params: Record<string, number>;
   state?: string;
-  /** Insert whose post-fader signal feeds this slot's sidechain input. */
   sidechainFrom: Id | null;
-  /** 'krypt.fxrack' only: parallel chains + macros (shared/schema/rack.ts). */
   rack?: RackDef;
 }
 
@@ -206,45 +145,37 @@ export interface MixerInsert {
   id: Id;
   name: string;
   color: string;
-  volume: number; // linear, 1 = 0 dB, max 2
-  pan: number; // -1..1
-  /** Stereo separation -1 (mono) .. 0 .. +1 (wider). */
+  volume: number;
+  pan: number;
   stereoSep: number;
   mute: boolean;
   solo: boolean;
   phaseInvert: boolean;
   swapLR: boolean;
   slots: Record<Id, FxSlot>;
-  slotOrder: Id[]; // max 10
-  /** Outgoing routes: target insert id → send level (linear). Default { [master]: 1 }. */
+  slotOrder: Id[];
   routes: Record<Id, number>;
   isMaster: boolean;
 }
 
 export interface Mixer {
   inserts: Record<Id, MixerInsert>;
-  insertOrder: Id[]; // master first
+  insertOrder: Id[];
   masterId: Id;
 }
-
-// ── Samples ───────────────────────────────────────────────────────────
 
 export interface SampleRef {
   id: Id;
   name: string;
-  /** Absolute path, or 'factory:<relative>' for bundled factory content. */
   path: string;
-  /** Path relative to the project file, for relinking moved projects. */
   relPath?: string;
   hash?: string;
   sampleRate?: number;
   channels?: number;
   frames?: number;
-  /** How Krypt produced this file (absent = imported/recorded audio). Optional, additive: no migration. */
   origin?: SampleOrigin;
 }
 
-/** A stem separated from another sample by the analyzer (Model Manager model id). */
 export interface SampleOrigin {
   kind: 'stem';
   parentSampleId: Id;
@@ -252,12 +183,6 @@ export interface SampleOrigin {
   model: string;
 }
 
-// ── Project ───────────────────────────────────────────────────────────
-
-/**
- * The project's cover image. The bytes live INSIDE the .kstudio zip as `file` (never in project.json); main keeps
- * them for the open project (electron/project/assets.ts). Content-addressed name: `cover-<16 hex>.jpg|png`.
- */
 export interface CoverRef {
   file: string;
   mime: 'image/png' | 'image/jpeg';
@@ -265,7 +190,6 @@ export interface CoverRef {
   height: number;
 }
 
-/** Cover entry names inside the .kstudio zip: the first 16 hex digits of the image's SHA-256. */
 export const COVER_FILE_RE = /^cover-[0-9a-f]{16}\.(jpg|png)$/;
 export const COVER_MAX_SIDE = 1400;
 
@@ -274,11 +198,8 @@ export interface ProjectMeta {
   author: string;
   genre: string;
   notes: string;
-  createdAt: string; // ISO
-  // Song info, embedded as tags in exports (all optional, additive to schema 1).
-  /** Song title; absent = the project name. */
+  createdAt: string;
   title?: string;
-  /** Artist; absent = author. */
   artist?: string;
   album?: string;
   year?: number;
@@ -299,14 +220,9 @@ export interface Project {
   automations: Record<Id, Automation>;
   mixer: Mixer;
   samples: Record<Id, SampleRef>;
-  /** Clip launcher (Session view, shared/schema/launcher.ts). Absent = empty. Additive: no migration. */
   session?: Session;
-  /** Krypt Script note devices this song keeps (shared/scripts). Absent = none. Additive: no migration. */
   scripts?: Record<Id, ProjectScript>;
-  /** Take lanes + comps per track span (shared/schema/takes.ts). Absent = none. Additive: no migration. */
   takeGroups?: Record<Id, TakeGroup>;
-  /** Where recorded audio goes (Home ▸ Recording Studio): takes play through `insertId` and land on `trackId` when it
-   * is free. Absent / null = a new insert per take and the first free track. Additive: no migration. */
   recording?: RecordingTarget;
 }
 
@@ -314,8 +230,6 @@ export interface RecordingTarget {
   insertId: Id | null;
   trackId: Id | null;
 }
-
-// ── Defaults & helpers ────────────────────────────────────────────────
 
 export const DEFAULT_CHANNEL_VOLUME = 0.78;
 export const MAX_FX_SLOTS = 10;
@@ -344,7 +258,6 @@ export function defaultNote(partial: Partial<Note> & Pick<Note, 'id' | 'tick' | 
   };
 }
 
-/** Effective pattern length in ticks (auto = content rounded up to a bar, min 1 bar). */
 export function patternLength(p: Pattern, ts: TimeSig): number {
   const bar = (PPQ * 4 * ts.num) / ts.den;
   if (p.length != null && p.length > 0) return p.length;
@@ -354,8 +267,6 @@ export function patternLength(p: Pattern, ts: TimeSig): number {
   }
   return Math.max(bar, Math.ceil(end / bar) * bar);
 }
-
-// ── Zod schema (load-time validation of untrusted JSON) ───────────────
 
 const zId = z.string().min(1);
 const zColor = z.string();
@@ -532,7 +443,6 @@ export const zProject = z.object({
   recording: z.object({ insertId: zId.nullable(), trackId: zId.nullable() }).optional(),
 });
 
-/** Structural integrity checks zod can't express (dangling references). */
 export function checkIntegrity(p: Project): string[] {
   const errs: string[] = [];
   const ins = p.mixer.inserts;
@@ -581,12 +491,10 @@ export function checkIntegrity(p: Project): string[] {
   return errs;
 }
 
-/** The mime a cover entry name implies (from its extension). */
 export function coverMimeOf(file: string): 'image/png' | 'image/jpeg' | null {
   return /\.png$/i.test(file) ? 'image/png' : /\.jpe?g$/i.test(file) ? 'image/jpeg' : null;
 }
 
-/** Export tags from the meta: title falls back to the project name, artist to the author. */
 export function songInfo(meta: ProjectMeta, fallbackTitle?: string): { title: string; artist: string; album: string; year: string; genre: string; track: string } {
   return {
     title: (meta.title ?? '').trim() || (fallbackTitle ?? '').trim() || meta.name.trim(),

@@ -1,8 +1,3 @@
-// Knobs follow automation: the client-side evaluation in
-// src/live/automationFollow.ts must mirror the engine's rules
-// (docs/ENGINE_PROTOCOL.md §4): inside a clip evaluate the curve, after a
-// clip its last value holds, muted clips / tracks and non-soloed tracks
-// don't drive anything. Also: MIDI export skips muted notes.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -35,7 +30,7 @@ test('inside a clip: the curve; before: nothing; after: the last value holds', (
   assert.equal(automationValueAt(p, ref, 0), null, 'no clip has played yet → document value');
   near(automationValueAt(p, ref, 3840), 0);
   near(automationValueAt(p, ref, 3840 + 1920), 0.5);
-  near(automationValueAt(p, ref, 3840 * 3), 1); // held after the clip
+  near(automationValueAt(p, ref, 3840 * 3), 1);
 });
 
 test('clip offset is respected, and the most recent clip wins when several played', () => {
@@ -44,8 +39,8 @@ test('clip offset is respected, and the most recent clip wins when several playe
   near(automationValueAt(host.project, ref, 3840), 0.5);
   const aut = host.project.playlist.clips[clipId].automationId!;
   host.exec('playlist.addClip', { kind: 'automation', automationId: aut, trackId: track, start: 3840 * 4, length: 960 }, { actor: USER });
-  near(automationValueAt(host.project, ref, 3840 * 4 + 480), 0.125); // second clip, 480/3840 into the ramp
-  near(automationValueAt(host.project, ref, 3840 * 8), 0.25); // its end value holds
+  near(automationValueAt(host.project, ref, 3840 * 4 + 480), 0.125);
+  near(automationValueAt(host.project, ref, 3840 * 8), 0.25);
 });
 
 test('muted clips, muted tracks and non-soloed tracks do not drive the knob', () => {

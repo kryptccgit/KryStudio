@@ -1,17 +1,3 @@
-//! MIDI output (docs/ENGINE_PROTOCOL.md §14): port list / open / close and
-//! the `midi-clock` sender thread.
-//!
-//!   - A manager thread enumerates output ports (every 2 s, hot-plug), opens
-//!     the enabled set through midir (WinMM) and publishes the list.
-//!   - The sender thread owns every write: clock events from the audio thread
-//!     (lock-free ring, sent at their stamp), and messages from the control
-//!     thread (grid LEDs, SysEx). It registers with MMCSS ("Pro Audio") and
-//!     waits with a high-resolution sleep, then spins the last few hundred µs
-//!     (the spin margin adapts to the measured sleep overshoot).
-//!   - Ports are `Box<dyn OutPort>` behind a mutex that only the sender locks
-//!     for a write and the manager for an insert / remove: tests swap in a
-//!     recording sink.
-
 use crate::clock::{ClockEv, ClockShared};
 use crate::midi::{dedupe_names, now_ns};
 use crossbeam_channel::{Receiver, Sender};
@@ -22,7 +8,6 @@ use std::sync::atomic::Ordering::*;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// Something MIDI bytes can be written to.
 pub trait OutPort: Send {
     fn send(&mut self, bytes: &[u8]) -> Result<(), String>;
 }
@@ -35,13 +20,11 @@ impl OutPort for MidirPort {
     }
 }
 
-/// Open ports by id.
 pub type Ports = Arc<Mutex<Vec<(String, Box<dyn OutPort>)>>>;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MidiOutputInfo {
-    /// Stable key (the port name; duplicates get " #2", " #3").
     pub id: String,
     pub name: String,
     pub enabled: bool,
@@ -50,7 +33,6 @@ pub struct MidiOutputInfo {
     pub error: Option<String>,
 }
 
-/// Check one outgoing message: a status byte, then data bytes (SysEx F0 … F7).
 pub fn valid_message(m: &[u8]) -> Result<(), String> {
     let Some(&st) = m.first() else { return Err("an empty MIDI message".into()) };
     if st < 0x80 {
@@ -80,18 +62,12 @@ pub fn valid_message(m: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-// ── Sender thread ────────────────────────────────────────────────────────
-
 pub enum SendCmd {
-    /// Write messages to a port now (between clock events).
     Bytes { port: String, msgs: Vec<Vec<u8>> },
-    /// Ports that get clock-out messages, and the offset (ns, positive = later).
     Clock { ports: Vec<String>, offset_ns: i64 },
     Shutdown,
 }
 
-/// Adaptive high-resolution wait: sleep until `margin` before the deadline,
-/// spin the rest. The margin tracks the sleep overshoot (fast attack, slow decay).
 pub struct Waiter {
     overshoot: f64,
 }
@@ -107,8 +83,6 @@ impl Waiter {
         (self.overshoot + 150_000.0).clamp(200_000.0, 3_000_000.0) as u64
     }
 
-    /// Sleep (never spin) for up to `max`, stopping `margin` before `deadline`.
-    /// Returns true when the deadline is within the margin (spin next).
     pub fn sleep_toward(&mut self, deadline: u64, max: Duration) -> bool {
         let now = now_ns();
         let m = self.margin_ns();
@@ -123,7 +97,6 @@ impl Waiter {
         false
     }
 
-    /// Spin until `deadline` (the last stretch).
     pub fn spin_until(deadline: u64) {
         while now_ns() < deadline {
             std::hint::spin_loop();
@@ -141,11 +114,9 @@ struct Sender_ {
     errors: HashMap<String, u32>,
     jitter_max_ns: u64,
     jitter_window_start: u64,
-    /// (scheduled, sent) per clock event; tests read it (None in the app).
     trace: Option<Arc<Mutex<Vec<(u64, u64)>>>>,
 }
 
-/// Late by more than this = counted as late (sent anyway).
 const LATE_NS: u64 = 1_000_000;
 
 impl Sender_ {
@@ -170,7 +141,6 @@ impl Sender_ {
         }
     }
 
-    /// Send every clock event due within the spin margin (waiting precisely for each).
     fn service_clock(&mut self) {
         loop {
             let Some(rx) = self.clock_rx.as_mut() else { return };
@@ -219,7 +189,7 @@ impl Sender_ {
         match c {
             SendCmd::Bytes { port, msgs } => {
                 for m in msgs {
-                    self.service_clock(); // a clock pulse never waits behind an LED burst
+                    self.service_clock();
                     self.write(&port, &m);
                 }
             }
@@ -249,7 +219,6 @@ impl Sender_ {
             }
             self.service_clock();
             if self.clock_ports.is_empty() && self.clock_rx.as_mut().is_none_or(|r| r.is_empty()) {
-                // Idle: no clock out; block for commands (timer precision irrelevant).
                 match rx.recv_timeout(Duration::from_millis(50)) {
                     Ok(c) => {
                         if !self.handle(c) {
@@ -261,8 +230,6 @@ impl Sender_ {
                 }
                 continue;
             }
-            // Clock out active: high-resolution sleeps of ≤ 1 ms (the audio thread
-            // pushes pulses one output latency ahead, so a pulse is never missed).
             let deadline = self.next_due().unwrap_or(now_ns() + 1_000_000);
             if self.waiter.sleep_toward(deadline, Duration::from_millis(1)) {
                 self.service_clock();
@@ -271,19 +238,14 @@ impl Sender_ {
     }
 }
 
-// ── Manager (enumerate / open / close) ───────────────────────────────────
-
 enum MgrCmd {
     Enable(Vec<String>, Sender<Vec<MidiOutputInfo>>),
     Rescan(Sender<Vec<MidiOutputInfo>>),
-    /// Messages to send right before a port closes (e.g. Launchpad back to Live mode).
     AtClose(String, Vec<Vec<u8>>),
     Shutdown,
 }
 
-/// Opens a port by its index in the current enumeration.
 pub type Opener = Box<dyn Fn(usize, &str) -> Result<Box<dyn OutPort>, String> + Send>;
-/// Lists (name, index) of every output port.
 pub type Lister = Box<dyn Fn() -> Result<Vec<(String, usize)>, String> + Send>;
 
 pub struct MidiOutManager {
@@ -305,12 +267,10 @@ struct MgrState {
 }
 
 impl MidiOutManager {
-    /// The app: midir ports.
     pub fn start(shared: Arc<ClockShared>, changed: Sender<Vec<MidiOutputInfo>>) -> MidiOutManager {
         Self::start_with(shared, changed, Box::new(list_ports), Box::new(open_port), None)
     }
 
-    /// Any port backend (tests pass a recording sink). `trace` records (scheduled, sent) per clock event.
     pub fn start_with(shared: Arc<ClockShared>, changed: Sender<Vec<MidiOutputInfo>>, lister: Lister, opener: Opener, trace: Option<Arc<Mutex<Vec<(u64, u64)>>>>) -> MidiOutManager {
         let ports: Ports = Arc::new(Mutex::new(Vec::new()));
         let list = Arc::new(Mutex::new(Vec::new()));
@@ -370,7 +330,6 @@ impl MidiOutManager {
         let _ = self.tx.send(MgrCmd::AtClose(port, msgs));
     }
 
-    /// Close every port (after its at-close messages) and stop both threads.
     pub fn shutdown(&self) {
         let _ = self.send_tx.send(SendCmd::Shutdown);
         let (tx, rx) = crossbeam_channel::bounded::<Vec<MidiOutputInfo>>(1);
@@ -414,7 +373,6 @@ impl MgrState {
         }
     }
 
-    /// Close ports that are no longer wanted (or gone), sending their at-close messages first.
     fn close_unwanted(&mut self, present: &[String]) {
         let mut ps = self.ports.lock().unwrap_or_else(|e| e.into_inner());
         let mut i = 0;
@@ -500,9 +458,6 @@ fn open_port(index: usize, _id: &str) -> Result<Box<dyn OutPort>, String> {
     Ok(Box::new(MidirPort(conn)))
 }
 
-// ── Test sink ────────────────────────────────────────────────────────────
-
-/// A port that records what it receives with the engine-clock time (tests).
 #[derive(Clone, Default)]
 pub struct RecordingPort {
     pub log: Arc<Mutex<Vec<(u64, Vec<u8>)>>>,
@@ -569,25 +524,22 @@ mod tests {
         }
         let got: Vec<Vec<u8>> = sinks["Pads"].log.lock().unwrap().iter().map(|(_, b)| b.clone()).collect();
         assert_eq!(got, vec![vec![0x90, 11, 5], vec![0x91, 11, 21]]);
-        // Disabling closes the port after its at-close messages.
         let l = m.set_enabled(vec![]).unwrap();
         assert!(!l[0].open);
         assert_eq!(sinks["Pads"].log.lock().unwrap().last().unwrap().1, vec![0xB0, 0, 0]);
         m.shutdown();
     }
 
-    /// Clock events are sent at their stamp (+ offset). Prints the measured error.
     #[test]
     fn clock_sender_timing() {
         let (m, sinks, shared, mut tx, _crx, trace) = rig(&["Clock"]);
         m.set_enabled(vec!["Clock".into()]).unwrap();
         m.set_clock(vec!["Clock".into()], 0);
         std::thread::sleep(Duration::from_millis(20));
-        // 120 bpm pulse train (20.833 ms), stamped 15 ms ahead like the audio thread does.
         let period = 1e9 / 48.0;
         let start = now_ns() + 15_000_000;
         tx.push(ClockEv::one(start, MIDI_START)).unwrap();
-        let n = 96u64; // 2 s
+        let n = 96u64;
         let mut k = 0u64;
         while k < n {
             let t = start + (k as f64 * period) as u64;
@@ -615,7 +567,6 @@ mod tests {
         eprintln!("clock sender error over {} events: median {} µs, p99 {} µs, max {} µs", errs.len(), p50 / 1000, p99 / 1000, max / 1000);
         assert!(p50 < 500_000, "median send error {p50} ns");
         assert!(shared.out_sent.load(Relaxed) >= n);
-        // An offset shifts every stamp.
         m.set_clock(vec!["Clock".into()], 5_000_000);
         std::thread::sleep(Duration::from_millis(20));
         let t = now_ns() + 10_000_000;

@@ -1,20 +1,13 @@
-//! Real-time plumbing: a try-borrow cell shared by the device callback and
-//! non-RT maintenance, FTZ/DAZ, MMCSS "Pro Audio", power-throttling opt-out.
-
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-/// A cell with an atomic "busy" flag. The audio callback only ever calls
-/// `try_borrow` (a single CAS, never blocks); if the cell is busy (a non-RT
-/// thread is re-preparing the core for a new device) it outputs silence.
 pub struct TryCell<T> {
     busy: AtomicBool,
     value: UnsafeCell<T>,
 }
 
-// SAFETY: access to `value` is serialized by the `busy` flag.
 unsafe impl<T: Send> Sync for TryCell<T> {}
 unsafe impl<T: Send> Send for TryCell<T> {}
 
@@ -27,7 +20,6 @@ impl<T> TryCell<T> {
         Self { busy: AtomicBool::new(false), value: UnsafeCell::new(v) }
     }
 
-    /// [RT] Non-blocking.
     #[inline]
     pub fn try_borrow(&self) -> Option<TryGuard<'_, T>> {
         if self.busy.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
@@ -37,7 +29,6 @@ impl<T> TryCell<T> {
         }
     }
 
-    /// Non-RT threads only: waits for the audio callback to finish its block.
     pub fn borrow_blocking(&self) -> TryGuard<'_, T> {
         loop {
             if let Some(g) = self.try_borrow() {
@@ -51,14 +42,12 @@ impl<T> TryCell<T> {
 impl<T> Deref for TryGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &T {
-        // SAFETY: we hold the busy flag.
         unsafe { &*self.cell.value.get() }
     }
 }
 
 impl<T> DerefMut for TryGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
-        // SAFETY: we hold the busy flag exclusively.
         unsafe { &mut *self.cell.value.get() }
     }
 }
@@ -69,7 +58,6 @@ impl<T> Drop for TryGuard<'_, T> {
     }
 }
 
-/// Flush denormals to zero on the calling thread (FTZ | DAZ in MXCSR).
 pub fn enable_ftz_daz() {
     #[cfg(target_arch = "x86_64")]
     #[allow(deprecated)]
@@ -79,16 +67,12 @@ pub fn enable_ftz_daz() {
     }
 }
 
-/// Register the calling thread with MMCSS as "Pro Audio" (priority High).
-/// Returns false if MMCSS refused (audio still plays at normal priority).
 pub fn mmcss_pro_audio() -> bool {
     #[cfg(windows)]
     {
         use windows_sys::Win32::System::Threading::{AvSetMmThreadCharacteristicsW, AvSetMmThreadPriority, AVRT_PRIORITY_HIGH};
-        // "Pro Audio\0" as UTF-16, static so no allocation happens here.
         static NAME: [u16; 10] = [80, 114, 111, 32, 65, 117, 100, 105, 111, 0];
         let mut idx: u32 = 0;
-        // SAFETY: NAME is NUL-terminated; idx is a valid out pointer.
         let h = unsafe { AvSetMmThreadCharacteristicsW(NAME.as_ptr(), &mut idx) };
         if h.is_null() {
             return false;
@@ -102,8 +86,6 @@ pub fn mmcss_pro_audio() -> bool {
     }
 }
 
-/// Opt the whole process out of EcoQoS / power throttling (a sidecar has no
-/// window, so Windows 11 may otherwise treat it as background work).
 pub fn disable_power_throttling() {
     #[cfg(windows)]
     unsafe {
@@ -125,8 +107,6 @@ pub fn disable_power_throttling() {
     }
 }
 
-/// Run `f` with allocation forbidden on this thread (debug builds; the
-/// global allocator in lib.rs reports violations). No-op in release.
 #[inline]
 pub fn no_alloc<T, F: FnOnce() -> T>(f: F) -> T {
     assert_no_alloc::assert_no_alloc(f)

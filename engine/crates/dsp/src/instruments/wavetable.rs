@@ -1,23 +1,3 @@
-//! krypt.wavetable — "Krypt Wave": wavetable synth with procedurally
-//! generated factory tables.
-//!
-//! Tables (5 × 31 frames × 2048 samples) are generated here from our own
-//! harmonic recipes, never from third-party content. Each frame is turned
-//! into 11 octave-spaced mip levels by inverse FFT (rustfft) with the
-//! harmonics above the level's limit removed, so every level is exactly
-//! band-limited. A voice picks the level whose top harmonic stays under
-//! 0.6 × the sample rate for its pitch: anything above Nyquist folds back
-//! only into the top 20% of the band (above ~19 kHz at 48 kHz). Frames are
-//! normalized to equal RMS (peaks capped at 1.5), so morphing and switching
-//! tables keep a steady loudness. The bank is built once per process
-//! (~14 MB) and shared by every instance.
-//!
-//! Per voice: up to 8 unison copies (symmetric detune, stereo spread),
-//! position morphing between adjacent frames, a PolyBLEP/BLAMP sub
-//! oscillator, a TPT SVF with key tracking, an amp AHDSR (env 1), a mod
-//! ADSR (env 2 → position / cutoff) and an LFO (→ position / cutoff /
-//! pitch; free or tempo-rate, restarted per note).
-
 use std::sync::{Arc, OnceLock};
 
 use rustfft::num_complex::Complex32;
@@ -89,15 +69,10 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
-// ── Factory bank ──────────────────────────────────────────────────────────
-
 const N: usize = 2048;
 const HALF: usize = N / 2;
 const MIPS: usize = 11;
-/// 31 frames: the basic morph's triangle, saw and square land exactly on
-/// frames 10, 20 and 30.
 const FRAMES: usize = 31;
-/// Stored length per mip: N plus one guard sample (= sample 0) for interpolation.
 const STRIDE: usize = N + 1;
 const MAX_UNISON: usize = 8;
 const TARGET_RMS: f32 = 0.5;
@@ -115,15 +90,11 @@ impl WaveBank {
     }
 }
 
-/// The shared factory bank (built on first use; never on the audio thread:
-/// every instance fetches it in `new`).
 pub fn bank() -> Arc<WaveBank> {
     static BANK: OnceLock<Arc<WaveBank>> = OnceLock::new();
     BANK.get_or_init(|| Arc::new(build_bank())).clone()
 }
 
-/// Harmonic coefficients for x(t) = Σ a_h cos(2πht) + b_h sin(2πht), stored
-/// as (a_h − i·b_h)/2 so an inverse DFT rebuilds the waveform directly.
 fn coef(a: f32, b: f32) -> Complex32 {
     Complex32::new(0.5 * a, -0.5 * b)
 }
@@ -133,7 +104,6 @@ fn frame_spectrum(table: usize, x: f32, fwd: &dyn rustfft::Fft<f32>, scratch: &m
     out.iter_mut().for_each(|c| *c = Complex32::default());
     match table {
         0 => {
-            // sine → triangle → saw → square (all with a positive fundamental)
             let key = |k: usize, h: usize| -> f32 {
                 let hf = h as f32;
                 match k {
@@ -165,7 +135,6 @@ fn frame_spectrum(table: usize, x: f32, fwd: &dyn rustfft::Fft<f32>, scratch: &m
             }
         }
         1 => {
-            // pulse width 50% → 6%
             let d = 0.5 - 0.44 * x;
             for h in 1..HALF {
                 let hf = h as f32;
@@ -174,7 +143,6 @@ fn frame_spectrum(table: usize, x: f32, fwd: &dyn rustfft::Fft<f32>, scratch: &m
             }
         }
         2 => {
-            // two moving formants over a bright source, vowels a → e → i → o → u
             const F1: [f32; 5] = [730.0, 530.0, 280.0, 570.0, 320.0];
             const F2: [f32; 5] = [1090.0, 1840.0, 2250.0, 840.0, 900.0];
             let seg = (x * 4.0).min(3.999);
@@ -192,7 +160,6 @@ fn frame_spectrum(table: usize, x: f32, fwd: &dyn rustfft::Fft<f32>, scratch: &m
             }
         }
         3 => {
-            // harmonics fade in one after another (1 → 64)
             let kf = 1.0 + 63.0 * x;
             for h in 1..HALF {
                 let w = (kf - h as f32 + 1.0).clamp(0.0, 1.0);
@@ -202,7 +169,6 @@ fn frame_spectrum(table: usize, x: f32, fwd: &dyn rustfft::Fft<f32>, scratch: &m
             }
         }
         _ => {
-            // hard-sync ramp (ratio 1 → 8), bit-reduced in the second half
             let ratio = 1.0 + 7.0 * x;
             let levels = if x > 0.5 { (6.0 - 8.0 * (x - 0.5)).exp2().max(2.0) } else { 0.0 };
             for (n, c) in scratch.iter_mut().enumerate() {
@@ -244,8 +210,6 @@ fn build_bank() -> WaveBank {
                 }
                 inv.process(&mut buf);
                 if m == 0 {
-                    // equal loudness across frames and tables (RMS 0.5),
-                    // with peaky shapes capped at a peak of 1.5
                     let peak = buf.iter().fold(0.0f32, |p, c| p.max(c.re.abs()));
                     let rms = (buf.iter().map(|c| c.re * c.re).sum::<f32>() / N as f32).sqrt();
                     norm = if peak > 1e-9 { (PEAK_CAP / peak).min(TARGET_RMS / rms.max(1e-9)) } else { 1.0 };
@@ -261,8 +225,6 @@ fn build_bank() -> WaveBank {
     WaveBank { data }
 }
 
-/// Mip level for a fundamental: the first whose harmonics all stay under
-/// 0.6 × the sample rate.
 #[inline]
 fn mip_for(f0: f32, sr: f32) -> usize {
     let hmax = 0.6 * sr / f0.max(1.0);
@@ -272,8 +234,6 @@ fn mip_for(f0: f32, sr: f32) -> usize {
     }
     m
 }
-
-// ── Voice ────────────────────────────────────────────────────────────────
 
 pub(crate) struct WaveShared {
     bank: Arc<WaveBank>,
@@ -327,7 +287,6 @@ pub(crate) struct WaveVoice {
     menv: Ahdsr,
     filt: [Svf; 2],
     lvl: Smooth,
-    /// smoothed table position and log2 cutoff (automation without zipper)
     pos_s: Smooth,
     cut_s: Smooth,
     lfo_ph: f64,
@@ -374,7 +333,6 @@ impl WaveVoice {
         }
     }
 
-    /// Pitch, mip level and filter coefficients (every 16 samples).
     fn control(&mut self, sh: &WaveShared, lfo: f32, menv: f32) {
         let pitch = self.glide.cur + sh.semis + lfo * sh.lfo_pitch * 0.01;
         let f0 = midi_to_hz(pitch);
@@ -407,7 +365,6 @@ impl Voice for WaveVoice {
         (self.pl, self.pr) = pan_gains(n.extras.pan);
         self.mod_x = n.extras.mod_x;
         self.mod_y = n.extras.mod_y;
-        // a single voice starts at phase 0 (punchy, repeatable); unison copies at random phases
         for u in 0..MAX_UNISON {
             self.ph[u] = if sh.unison > 1 { self.rng.next_u32() } else { 0 };
         }
@@ -476,7 +433,6 @@ impl Voice for WaveVoice {
                 self.ctrl = 16;
             }
             self.ctrl -= 1;
-            // table position (per sample: smooth morphing)
             let pos = (self.pos_s.next() + sh.mod_pos * m + sh.lfo_pos * 0.5 * lfo).clamp(0.0, 1.0) * last_frame;
             let fa = (pos as usize).min(FRAMES - 2);
             let ff = pos - fa as f32;
@@ -716,7 +672,6 @@ impl Instrument for Wavetable {
 mod tests {
     use super::*;
 
-    /// Energy of `x` at harmonic `h` of a 2048-sample cycle (naive DFT).
     fn harmonic(x: &[f32], h: usize) -> f32 {
         let (mut re, mut im) = (0.0f64, 0.0f64);
         for (n, v) in x[..N].iter().enumerate() {
@@ -738,14 +693,12 @@ mod tests {
                 assert!(peak <= PEAK_CAP + 1e-3 && rms <= TARGET_RMS + 1e-3, "{} frame {f}: peak {peak} rms {rms}", TABLES[t]);
                 assert!((peak - PEAK_CAP).abs() < 1e-3 || (rms - TARGET_RMS).abs() < 1e-3, "{} frame {f}: not normalized", TABLES[t]);
                 assert_eq!(top[N], top[0], "guard sample");
-                // level 4 keeps harmonics ≤ 64 only
                 let lv = b.level(t, f, 4);
                 for h in [65usize, 100, 300] {
                     assert!(harmonic(lv, h) < 1e-4, "{} frame {f}: harmonic {h} = {}", TABLES[t], harmonic(lv, h));
                 }
             }
         }
-        // the basic morph starts as a pure sine
         let sine = b.level(0, 0, 0);
         assert!((harmonic(sine, 1) - 0.707).abs() < 0.01 && harmonic(sine, 2) < 1e-4 && harmonic(sine, 3) < 1e-4);
     }

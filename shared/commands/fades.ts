@@ -1,15 +1,3 @@
-// Audio-clip fades and crossfades (Wave 12.2b). The engine plays a clip's
-// fadeIn / fadeOut (ticks) as LINEAR gain ramps from the clip's start / to
-// its end (engine core.rs ClipEnv); the Playlist draws the same lines.
-//
-// Crossfade with the previous clip on the same track:
-//   - overlapping clips: each fades over the overlap;
-//   - touching clips (a split): the later clip is extended back over the cut
-//     by the crossfade length (its audio before the cut plays, fading in)
-//     while the earlier one fades out; when the later clip has no audio
-//     before the cut, the earlier clip is extended past it instead (if its
-//     file is long enough); else both fade at the cut (a short dip).
-
 import { z } from 'zod';
 import { defineCommand, must, plural, CommandError } from './types';
 import type { Clip, Project } from '../schema/project';
@@ -17,7 +5,6 @@ import type { PluginCatalog } from '../plugins/types';
 import { PPQ, secondsToTicks } from '../schema/time';
 import { audioTickBpm } from '../analyzer/tempo';
 
-/** Clamp fades into a clip: each >= 0 and together at most the clip length (`keep` wins when they collide). */
 export function clampFades(length: number, fadeIn: number, fadeOut: number, keep: 'in' | 'out' = 'in'): { fadeIn: number; fadeOut: number } {
   const len = Math.max(1, Math.round(length));
   let fi = Math.max(0, Math.round(Number.isFinite(fadeIn) ? fadeIn : 0));
@@ -32,7 +19,6 @@ export function clampFades(length: number, fadeIn: number, fadeOut: number, keep
   return { fadeIn: fi, fadeOut: fo };
 }
 
-/** The clip's gain envelope at a song tick (0..1 × clip gain), exactly as the engine computes it. */
 export function fadeGainAt(c: Pick<Clip, 'start' | 'length' | 'fadeIn' | 'fadeOut' | 'gain'>, tick: number): number {
   let g = c.gain ?? 1;
   const fi = c.fadeIn ?? 0;
@@ -43,7 +29,6 @@ export function fadeGainAt(c: Pick<Clip, 'start' | 'length' | 'fadeIn' | 'fadeOu
   return g;
 }
 
-/** Length of a clip's source audio in ticks at its channel's current tempo mapping; null when unknown (no frames, warped). */
 export function sourceTicks(p: Project, catalog: PluginCatalog, c: Clip): number | null {
   const ch = c.channelId ? p.channels[c.channelId] : undefined;
   if (!ch || (ch.generator.warp?.markers.length ?? 0) >= 2) return null;
@@ -61,14 +46,8 @@ export interface CrossfadePlan {
   next: { id: string; start: number; offset: number; length: number; fadeIn: number; fadeOut: number };
 }
 
-/** The default crossfade: an eighth note. */
 export const DEFAULT_CROSSFADE = PPQ / 2;
 
-/**
- * Plan a crossfade between `prev` (earlier) and `next` on one track. `want` = the crossfade length for touching
- * clips (overlaps always use the overlap). `prevSource` = prev's source length in ticks (null = unknown).
- * Returns a human reason instead when they can't be crossfaded.
- */
 export function crossfadePlan(prev: Clip, next: Clip, want: number, prevSource: number | null): CrossfadePlan | string {
   if (prev.kind !== 'audio' || next.kind !== 'audio') return 'Crossfades are for audio clips';
   if (prev.trackId !== next.trackId) return 'The clips are on different tracks';
@@ -81,7 +60,6 @@ export function crossfadePlan(prev: Clip, next: Clip, want: number, prevSource: 
     return finish('overlap', L, prev, next, { length: prev.length }, { start: next.start, offset: next.offset, length: next.length });
   }
   if (overlap < 0) return `The clips don't touch (a gap of ${-overlap} ticks): move them together first`;
-  // Touching: room limits so neither clip is all fade.
   let L = cap(Math.min(Math.max(1, want), prev.length / 2, next.length / 2));
   if (next.offset >= 1) {
     L = Math.min(L, next.offset);
@@ -106,7 +84,6 @@ function finish(kind: CrossfadeKind, L: number, prev: Clip, next: Clip, p: { len
   };
 }
 
-/** The audio clip right before `c` on its track that touches or overlaps it (latest start wins). */
 export function previousTouching(p: Project, c: Clip): Clip | null {
   let best: Clip | null = null;
   for (const o of Object.values(p.playlist.clips)) {

@@ -1,9 +1,3 @@
-// Third-party plugin state in the renderer: the Plugin Manager snapshot from
-// main, registration of installed VST3/CLAP descriptors into the shared
-// CATALOG (so pickers, the param panel and ParamRefs see them), and the
-// actions behind the Plugin Manager / editor buttons (every one gives
-// visible feedback).
-
 import { useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import { catalogVersion, externalPlugins, isExternalPluginId, onCatalogChanged, registerExternalPlugins } from '@shared/plugins/catalog';
@@ -15,7 +9,6 @@ export { externalPlugins, isExternalPluginId };
 
 interface PluginStore {
   state: PluginManagerState | null;
-  /** A long action in flight (label for the UI). */
   busy: string | null;
 }
 
@@ -29,7 +22,6 @@ function apply(s: PluginManagerState | null | undefined): void {
 
 let installed = false;
 
-/** Boot: fetch the installed plugins and follow every change from main. */
 export function installPluginSync(): void {
   if (installed) return;
   installed = true;
@@ -42,12 +34,10 @@ export function installPluginSync(): void {
   api.onState(apply);
 }
 
-/** Re-render when third-party plugins are (re)registered. */
 export function useCatalogVersion(): number {
   return useSyncExternalStore(onCatalogChanged, catalogVersion);
 }
 
-/** "VST3" / "CLAP" (or null for stock plugins). */
 export function formatLabel(d: Pick<PluginDescriptor, 'format' | 'id'> | undefined | null): string | null {
   if (!d) return null;
   if (d.format) return d.format.toUpperCase();
@@ -56,7 +46,6 @@ export function formatLabel(d: Pick<PluginDescriptor, 'format' | 'id'> | undefin
   return null;
 }
 
-/** Picker detail line for an installed plugin: "Vendor · VST3 · Category". */
 export function installedDetail(d: PluginDescriptor): string {
   return [d.vendor || null, formatLabel(d), d.category && d.category !== 'Effect' && d.category !== 'Instrument' ? d.category : null].filter(Boolean).join(' · ');
 }
@@ -89,7 +78,6 @@ export async function reloadPlugins(): Promise<boolean> {
   }
 }
 
-/** Open (or close) a third-party plugin's own window, owned by the main window. */
 export async function openPluginEditor(target: PluginTarget, open = true): Promise<boolean> {
   try {
     return report(await window.krypt.plugins.openEditor(target, open));

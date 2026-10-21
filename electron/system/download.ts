@@ -1,11 +1,3 @@
-// Network + file-transfer helpers for the Model Manager (electron/analyzer/models.ts).
-// The only code in Krypt Studio that downloads anything: model files the
-// user asked for, over HTTPS, hashed (SHA-256) while they stream to disk.
-// Plain http:// is accepted for loopback hosts only (tests).
-//
-// Every function either resolves or throws an Error whose message is a
-// sentence the UI can show as is.
-
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -17,23 +9,17 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface DownloadOptions {
   signal?: AbortSignal;
-  /** Called as bytes arrive (callers throttle what they broadcast). */
   onProgress?(received: number, total: number): void;
-  /** Expected size (catalog); used as the total when the server sends no Content-Length. */
   expectedBytes?: number;
-  /** Abort when no byte arrives for this long (default 60 s). */
   stallMs?: number;
-  /** Test hook. */
   fetchImpl?: typeof fetch;
 }
 
 export interface DownloadResult {
   bytes: number;
-  /** Lowercase hex SHA-256 of what was written. */
   sha256: string;
 }
 
-/** Thrown when the caller's signal aborted the transfer. */
 export class DownloadCancelled extends Error {
   constructor() {
     super('Download cancelled');
@@ -49,7 +35,6 @@ function hostOf(url: string): string {
   }
 }
 
-/** Only https, or http to a loopback host (local test servers). */
 export function checkDownloadUrl(url: string): void {
   let u: URL;
   try {
@@ -62,10 +47,6 @@ export function checkDownloadUrl(url: string): void {
   throw new Error(`Refusing to download over ${u.protocol.replace(':', '')}: model files are only fetched over HTTPS (${u.host})`);
 }
 
-/**
- * Stream `url` into `dest` (created / truncated), hashing as it goes.
- * On any failure the partial file is deleted.
- */
 export async function downloadFile(url: string, dest: string, opts: DownloadOptions = {}): Promise<DownloadResult> {
   checkDownloadUrl(url);
   if (opts.signal?.aborted) throw new DownloadCancelled();
@@ -108,7 +89,7 @@ export async function downloadFile(url: string, dest: string, opts: DownloadOpti
     out = fs.createWriteStream(dest);
     const ws = out;
     const writeErr = new Promise<never>((_, reject) => ws.once('error', reject));
-    writeErr.catch(() => {}); // surfaced through the race below
+    writeErr.catch(() => {});
     const body = Readable.fromWeb(res.body as unknown as NodeWebStream<Uint8Array>);
     try {
       for await (const chunk of body as AsyncIterable<Buffer>) {
@@ -127,7 +108,6 @@ export async function downloadFile(url: string, dest: string, opts: DownloadOpti
     }
     await Promise.race([new Promise<void>((r) => ws.end(r)), writeErr]);
     out = null;
-    // (Content-Length is the encoded size when the server compresses; the SHA-256 check catches the rest.)
     if (lenHeader > 0 && !res.headers.get('content-encoding') && received < lenHeader) {
       throw new Error(`The download from ${hostOf(url)} ended early (${received} of ${lenHeader} bytes)`);
     }
@@ -142,7 +122,6 @@ export async function downloadFile(url: string, dest: string, opts: DownloadOpti
   }
 }
 
-/** Lowercase hex SHA-256 of a file (streamed). */
 export async function sha256File(file: string): Promise<string> {
   const hash = crypto.createHash('sha256');
   const rs = fs.createReadStream(file);
@@ -185,7 +164,6 @@ export async function dirExists(p: string): Promise<boolean> {
   }
 }
 
-/** Names of the direct children of `dir` (empty when it doesn't exist). */
 export async function listDir(dir: string): Promise<string[]> {
   try {
     return await fsp.readdir(dir);
@@ -194,7 +172,6 @@ export async function listDir(dir: string): Promise<string[]> {
   }
 }
 
-/** rm -rf with retries (antivirus / indexers briefly lock fresh files on Windows). */
 export async function removeDir(p: string): Promise<void> {
   let last: unknown;
   for (let i = 0; i < 5; i++) {
@@ -209,7 +186,6 @@ export async function removeDir(p: string): Promise<void> {
   throw last;
 }
 
-/** Rename (a folder) with retries: the atomic "install" step. */
 export async function renameDir(from: string, to: string): Promise<void> {
   let last: unknown;
   for (let i = 0; i < 6; i++) {
@@ -244,12 +220,10 @@ export async function readJson<T>(file: string): Promise<T | null> {
   }
 }
 
-/** Copy `src` to `dst` (and, optionally, sibling files matching `siblings`) when `dst` is missing. Dev shadow copies. */
 export function shadowCopySync(src: string, dst: string, siblings?: RegExp, siblingDirs: string[] = []): void {
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   if (!fs.existsSync(dst)) fs.copyFileSync(src, dst);
   if (!siblings) return;
-  // The exe's own folder first, then fallbacks (dev: cargo output has no runtime DLLs; resources/bin does).
   for (const dir of [path.dirname(src), ...siblingDirs]) {
     let names: string[];
     try {
@@ -264,13 +238,11 @@ export function shadowCopySync(src: string, dst: string, siblings?: RegExp, sibl
       try {
         if (fs.statSync(from).isFile() && !fs.existsSync(to)) fs.copyFileSync(from, to);
       } catch {
-        /* best effort: a DLL the exe doesn't need */
       }
     }
   }
 }
 
-/** Remove all but the newest `keep` sub-folders of `dir` (best effort). */
 export async function pruneDirs(dir: string, keep: number): Promise<void> {
   try {
     const names = await fsp.readdir(dir);
@@ -289,6 +261,5 @@ export async function pruneDirs(dir: string, keep: number): Promise<void> {
     stats.sort((a, b) => b.t - a.t);
     for (const s of stats.slice(keep)) await fsp.rm(path.join(dir, s.n), { recursive: true, force: true }).catch(() => {});
   } catch {
-    /* best effort */
   }
 }

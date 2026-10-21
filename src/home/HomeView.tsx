@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The Home hub: a full-window layer over the Studio (below the title bar).
-// "Pick what you are here to do": the Discord and free-tools links, nine
-// cards with live status pills, a
-// "Continue where you left off" panel, a rotating tip, the Guides and Lite
-// mode pills. The Studio underneath stays mounted (and inert while covered).
-// An audio file dropped on Home asks what it should become (src/audioProject);
-// projects and MIDI files fall through to the window's own drop handling.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import {
   AudioWaveform,
@@ -70,8 +60,6 @@ import { useLiveInput } from '../live/liveInput';
 import { SoundsScreen } from './screens/SoundsScreen';
 import { maybeShowWelcome } from './WelcomeDialog';
 
-// ── Studio wrapper: inert while Home covers it ────────────────────────
-
 export function StudioArea({ children }: { children: ReactNode }) {
   const covered = useHome((s) => s.open);
   const ref = useRef<HTMLDivElement>(null);
@@ -87,8 +75,6 @@ export function StudioArea({ children }: { children: ReactNode }) {
     </div>
   );
 }
-
-// ── Live pills ────────────────────────────────────────────────────────
 
 function useStudioPill(): Pill | null {
   const status = useProjectStatus((s) => s.status);
@@ -115,7 +101,7 @@ function useCards(): CardDef[] {
   const engine = useEngineStatus((s) => s.status);
   const record = useLiveInput((s) => s.record);
   const vocalsReady = useProject((p) => !!(p.recording?.insertId && p.mixer.inserts[p.recording.insertId]));
-  const firstRun = isFirstRun(homeFlags()); // two localStorage reads; the grid remounts after Guides
+  const firstRun = isFirstRun(homeFlags());
   return [
     { id: 'studio', icon: Disc3, title: 'Studio', body: 'Make the music: Channel Rack, Piano Roll, Playlist and Mixer.', pill: studio },
     { id: 'projects', icon: FolderOpen, title: 'Projects', body: 'Start something new, open a project, pick up a recent one, try the demo or import MIDI.', pill: projectsPill(recent) },
@@ -157,8 +143,6 @@ function HubCard({ card }: { card: CardDef }) {
   );
 }
 
-// ── Continue where you left off ───────────────────────────────────────
-
 function ContinuePanel() {
   const status = useProjectStatus((s) => s.status);
   const dirty = useProjectStatus((s) => isDirty(s));
@@ -171,7 +155,6 @@ function ContinuePanel() {
 
   const path = status?.path ?? null;
   const name = status?.name || metaName || 'Untitled';
-  // An untouched blank project isn't "where you left off": the last recent project is.
   const blank = !path && !dirty && !status?.recovered;
   const list = shapeRecent(recent, { currentPath: path, limit: blank ? 6 : 5, openedAt });
   const resume = blank ? list[0] ?? null : null;
@@ -273,7 +256,7 @@ function ContinuePanel() {
 }
 
 async function openRecent(path: string): Promise<void> {
-  await openProject(path); // success → the Studio (onProjectPicked); failures toast
+  await openProject(path);
 }
 
 function CurrentRow({ icon, title, detail, action, dot, warn }: { icon: LucideIcon; title: string; detail: string; action: ReactNode; dot?: boolean; warn?: boolean }) {
@@ -294,8 +277,6 @@ function CurrentRow({ icon, title, detail, action, dot, warn }: { icon: LucideIc
   );
 }
 
-// ── The card grid ─────────────────────────────────────────────────────
-
 function HubScreen() {
   const cards = useCards();
   const opens = useHome((s) => s.opens);
@@ -303,7 +284,7 @@ function HubScreen() {
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     rootRef.current?.focus({ preventScroll: true });
-    maybeShowWelcome(); // first install only: the overview video, the Discord and the free-tools links
+    maybeShowWelcome();
   }, []);
   const ext = (url: string) => () => void window.krypt.app.openExternal(url).then((r) => report(r));
   return (
@@ -365,8 +346,6 @@ function HubScreen() {
   );
 }
 
-// ── Corner pills ──────────────────────────────────────────────────────
-
 function CornerPills({ showGuides }: { showGuides: boolean }) {
   const lite = useSettings((s) => s.settings?.ui.homeLite ?? false);
   const settings = useSettings((s) => s.settings);
@@ -402,8 +381,6 @@ function CornerPills({ showGuides }: { showGuides: boolean }) {
   );
 }
 
-// ── The layer ─────────────────────────────────────────────────────────
-
 export function HomeLayer() {
   const phase = useHome((s) => s.phase);
   const open = useHome((s) => s.open);
@@ -411,7 +388,6 @@ export function HomeLayer() {
   const lite = useSettings((s) => s.settings?.ui.homeLite ?? false);
   const restoreRef = useRef<Element | null>(null);
 
-  // Remember what had focus in the Studio; give it back when Home closes.
   useEffect(() => {
     if (open && phase === 'ready') {
       const a = document.activeElement;
@@ -425,7 +401,6 @@ export function HomeLayer() {
     }
   }, [open, phase]);
 
-  // Esc: one level back (a screen → the grid → the Studio). Dialogs, menus and modals keep their own Esc.
   useEffect(() => {
     if (!open || phase !== 'ready') return;
     const onKey = (e: KeyboardEvent): void => {
@@ -447,16 +422,14 @@ export function HomeLayer() {
       aria-label="Krypt Studio Home"
       className="absolute inset-0 z-30 overflow-hidden bg-krypt-void font-sans text-white animate-fade-in"
       onDrop={(e) => {
-        // Audio only: a song dropped on Home → "Open as project" / "Use as a reference for the AI" / "Add as a sample".
         if (!hasFiles(e) || e.defaultPrevented) return;
         const names = Array.from(e.dataTransfer.files).map((f) => f.name);
-        if (!names.some((n) => AUDIO_EXT.test(n)) || names.some((n) => /\.(kstudio|midi?)$/i.test(n))) return; // the Shell opens / imports those
+        if (!names.some((n) => AUDIO_EXT.test(n)) || names.some((n) => /\.(kstudio|midi?)$/i.test(n))) return;
         e.preventDefault();
         const audio = droppedPaths(e.dataTransfer).filter((p) => AUDIO_EXT.test(p));
         if (audio.length) offerDroppedAudio(audio);
       }}
     >
-      {/* Guides are for reading: a still background there (and no GPU work). */}
       <HomeBackground lite={lite || screen === 'guides'} />
       <div className="relative h-full">
         {screen === 'home' && <HubScreen />}

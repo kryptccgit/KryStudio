@@ -1,8 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// App root: providers → boot gate (first document snapshot) → the shell
-// (title bar, transport, dockview workspace, status bar).
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useState } from 'react';
 import { ToastProvider, useToast } from './state/ToastProvider';
 import { ModalProvider } from './state/ModalProvider';
@@ -46,31 +41,29 @@ function boot(): void {
   booted = true;
   registerAppCommands();
   registerPianoRollCommands();
-  installTabs(); // project tabs: the state feed, tab shortcuts, Ctrl+Z reopening closed panels (research/19)
+  installTabs();
   installInput(window);
   installHintTracking(document);
   onPopoutWindow((w) => installInput(w));
   installStatusFeeds();
   installAgentChat();
   installSelectionGuard();
-  installLiveInput(); // MIDI target follows the selection; record state; takes
-  installControllers(); // gamepad + keyboard-pad maps → the engine's virtual MIDI inputs
-  installPluginSync(); // installed VST3/CLAP plugins → the shared catalog
-  installAnalyzerSync(); // Model Manager + analyzer jobs (status bar)
-  installLibrarySync(); // reference library: collections, queue, AI focus
-  installCoverResponder(); // agents' set_cover {generate}: drawn here, where the fonts are
+  installLiveInput();
+  installControllers();
+  installPluginSync();
+  installAnalyzerSync();
+  installLibrarySync();
+  installCoverResponder();
   void connectTelemetry();
-  // Editors (piano roll / playlist) ask the shell to show panels via a window event.
   window.addEventListener('krypt:open-panel', (e) => {
     const id = String((e as CustomEvent).detail ?? '');
     if (id in PANELS && id !== 'plugin') wm.open(id as SingletonKind);
   });
   window.krypt.app.onOpenFile((path) => {
-    noteOpenFileRequest(); // launched / re-launched with a file: go straight to the Studio
+    noteOpenFileRequest();
     if (/\.mid(i)?$/i.test(path)) void importMidi(path);
     else void openProject(path);
   });
-  // After onOpenFile: queued launch files arrive before the settings reply Home waits for.
   installHome();
 }
 
@@ -97,7 +90,6 @@ function Shell() {
       <div className="relative flex min-h-0 flex-1 flex-col">
         <StudioArea>
           <TransportBar />
-          {/* isolate: dockview's floating windows (z 999) stay under the Home layer */}
           <main className="relative isolate min-h-0 flex-1">
             <Workspace />
           </main>
@@ -119,7 +111,6 @@ function Boot() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // No silent failures: every rejected command becomes a toast.
     setDispatchErrorHandler((_cmd, message) => toast.error(message));
   }, [toast]);
 

@@ -1,6 +1,3 @@
-// Keeps the live keymap = FL defaults ⊕ the user's overrides from settings
-// (Settings → Shortcuts). Installed once at boot (registerAppCommands).
-
 import { useSettings } from '../state/status';
 import { DEFAULT_KEYMAP, applyKeymapOverrides, setKeymap } from './keymap';
 

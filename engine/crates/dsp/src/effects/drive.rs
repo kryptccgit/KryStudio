@@ -1,7 +1,3 @@
-//! krypt.drive — waveshaping distortion at 2x oversampling with first-order
-//! antiderivative anti-aliasing (ADAA, Parker/Zavalishin/Le Bivic 2016),
-//! plus a bitcrusher. Tone is a 12 dB/oct low pass after the shaper.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::filters::{DcBlock, Svf, SvfMode};
 use crate::blocks::oversample::{Factor, Oversampler};
@@ -46,7 +42,6 @@ fn shaper(mode: usize, x: f64) -> f64 {
     }
 }
 
-/// Antiderivative of `shaper`.
 #[inline]
 fn shaper_ad(mode: usize, x: f64) -> f64 {
     match mode {
@@ -66,20 +61,13 @@ fn shaper_ad(mode: usize, x: f64) -> f64 {
 #[inline]
 fn log_cosh(x: f64) -> f64 {
     let a = x.abs();
-    // ln(cosh x) = |x| + ln(1 + e^{-2|x|}) - ln 2, stable for large |x|
     a + (-2.0 * a).exp().ln_1p() - std::f64::consts::LN_2
 }
 
-/// First-order ADAA state for one channel. `ad1` must always be the
-/// antiderivative of `x1` in the CURRENT mode: Tube's and Fold's
-/// antiderivatives aren't 0 at 0, so a zeroed state (after new / reset) or a
-/// mode switch mid-stream would divide a large jump by a tiny dx and spike
-/// to ~80x full scale on the next sample.
 #[derive(Clone, Copy)]
 struct Adaa {
     x1: f64,
     ad1: f64,
-    /// Mode `ad1` was computed in; usize::MAX = not yet.
     mode: usize,
 }
 
@@ -107,7 +95,6 @@ impl Adaa {
 
 pub struct Drive {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     os: [Oversampler; 2],
@@ -160,7 +147,6 @@ impl Drive {
         self.out.set(db_to_gain(p.get(P::Output as usize)));
         let bits = p.get(P::Bits as usize).clamp(1.0, 16.0);
         self.levels = (bits - 1.0).exp2().max(1.0);
-        // downsample factor at the 2x rate
         self.hold = (p.get(P::Downsample as usize).round().max(1.0) as u32) * 2;
         let tone = (p.get(P::Tone as usize) as f64).min(self.sr as f64 * 0.45);
         for t in self.tone.iter_mut() {
@@ -232,7 +218,6 @@ impl Effect for Drive {
                 };
                 let y = self.tone[ch].tick(y as f64) as f32;
                 let y = self.dc[ch].tick(y);
-                // partial compensation: half the drive gain is taken back
                 buf[ch][i] = y * c * o;
             }
         }

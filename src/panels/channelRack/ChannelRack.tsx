@@ -1,10 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Channel Rack — FL's heart, in the Krypt look. Per row: activity LED,
-// mute, pan/volume knobs, mixer insert, the channel button (opens its
-// plugin), then the step grid (or a mini piano roll). Drag samples in from
-// the Browser, reorder rows by the grip, right-click for everything else.
-// ──────────────────────────────────────────────────────────────────────
-
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { BarChart3, GripVertical, ListFilter, Plus } from 'lucide-react';
@@ -141,7 +134,6 @@ const ChannelRow = memo(function ChannelRow({
       {drop === 'below' && <div className="pointer-events-none absolute left-0 right-0 bottom-0 z-20 h-[2px] bg-krypt-gradient" />}
       {drop === 'sample' && <div className="pointer-events-none absolute inset-0 z-20 rounded border border-krypt-purple/70 bg-krypt-purple/10" />}
 
-      {/* Left, sticky controls */}
       <div
         className={cls('sticky left-0 z-10 flex h-full flex-shrink-0 items-center gap-1 pl-0.5 pr-2', selected ? 'bg-[#13131c]' : 'bg-[#0c0c12] group-hover:bg-[#0f0f16]')}
         style={{ width: LEFT_W }}
@@ -201,12 +193,10 @@ const ChannelRow = memo(function ChannelRow({
           onClick={(e) => {
             getUi().selectChannel(channelId);
             if (e.ctrlKey) {
-              // FL: Ctrl+click previews the channel.
               try {
                 window.krypt.engine.audition(channelId, ch.rootKey, 0.8, true);
                 setTimeout(() => window.krypt.engine.audition(channelId, ch.rootKey, 0, false), 250);
               } catch {
-                /* ignore */
               }
               return;
             }
@@ -227,7 +217,6 @@ const ChannelRow = memo(function ChannelRow({
         {selected && <span className="absolute right-0 top-1 bottom-1 w-0.5 rounded-l bg-krypt-gradient" />}
       </div>
 
-      {/* Steps or mini piano roll (data-tour-steps: "click 4 boxes on the Kick row", src/tours) */}
       <div className="flex h-full items-center pl-1" data-tour-steps={channelId}>
         {isSteps ? (
           <StepGrid channelId={channelId} patternId={patternId} notes={notes} steps={steps} color={ch.color} stepsPerBeat={stepsPerBeat} />
@@ -236,7 +225,6 @@ const ChannelRow = memo(function ChannelRow({
         )}
       </div>
 
-      {/* Selection strip (FL's select LED) */}
       <button
         type="button"
         onClick={() => getUi().selectChannel(channelId)}
@@ -253,9 +241,7 @@ export function ChannelRack() {
   const allChannels = useProject(useShallow((p) => p.channelOrder));
   const filter = useRackView((s) => s.filter);
   const setFilter = useRackView((s) => s.setFilter);
-  // Channels shown under the active filter group (FL display filter); 'All' keeps the stable order array.
   const channelOrder = useProject(useShallow((p) => filterChannels(p, filter)));
-  // "name\u0001count" per filter option, as one primitive so the header only re-renders on real changes.
   const groupKey = useProject((p) => [ALL_GROUPS, ...groupNames(p)].map((g) => `${g}\u0001${filterChannels(p, g).length}`).join('\u0002'));
   const patternId = useProject((p) => p.transport.activePatternId);
   const pattern = useProject((p) => (p.transport.activePatternId ? p.patterns[p.transport.activePatternId] : null));
@@ -270,17 +256,15 @@ export function ChannelRack() {
   const [dropEnd, setDropEnd] = useState(false);
 
   const stepsPerBar = Math.max(1, Math.round(ticksPerBar(timeSig) / TICKS_PER_STEP));
-  const stepsPerBeat = stepsPerBeatGroup(timeSig); // shading per felt beat: 4 in 4/4, 6 (a dotted quarter) in 6/8
+  const stepsPerBeat = stepsPerBeatGroup(timeSig);
   const lengthTicks = pattern ? patternLength(pattern, timeSig) : ticksPerBar(timeSig);
   const steps = Math.max(stepsPerBar, Math.ceil(lengthTicks / TICKS_PER_STEP));
   const fixedSteps = pattern?.length ? Math.round(pattern.length / TICKS_PER_STEP) : 0;
 
-  // Default selection: first channel.
   useEffect(() => {
     if (!selected && channelOrder.length) getUi().selectChannel(channelOrder[0]);
   }, [selected, channelOrder]);
 
-  // LEDs + step playhead: one frame subscriber for the whole rack, direct DOM writes.
   useEffect(() => {
     const ledCache = new Map<string, number>();
     let lastX = -1;
@@ -315,7 +299,6 @@ export function ChannelRack() {
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key === 'PageUp' || e.key === 'PageDown') {
-      // FL: PgUp / PgDn step through the Channel Rack filter groups.
       e.preventDefault();
       const g = cycleFilter(getProject(), e.key === 'PageUp' ? -1 : 1);
       flashHint(`Channel Rack filter: ${g}`, 'ok', 1200);
@@ -347,7 +330,6 @@ export function ChannelRack() {
 
   const onBodyDrop = (e: React.DragEvent): void => {
     setDropEnd(false);
-    // A preset from the Browser's Presets section: a new channel playing it (src/sounds).
     const preset = decodePresetDrag(e.dataTransfer.getData(PRESET_MIME));
     if (preset) {
       e.preventDefault();
@@ -379,7 +361,6 @@ export function ChannelRack() {
 
   return (
     <div className="flex h-full flex-col bg-[#0c0c12]" tabIndex={0} onKeyDown={onKeyDown} data-editor="channelRack">
-      {/* Header */}
       <div className="flex h-9 flex-shrink-0 items-center gap-2 border-b border-white/[0.06] px-2">
         <PatternPicker compact />
         <Select
@@ -420,7 +401,6 @@ export function ChannelRack() {
         </div>
       </div>
 
-      {/* Rows */}
       <div
         ref={bodyRef}
         data-guide="channelRack.steps"
@@ -448,13 +428,11 @@ export function ChannelRack() {
                 {selected === id && graphLane !== 'off' && <LaneRow channelId={id} patternId={patternId} lane={graphLane} steps={steps} stepsPerBeat={stepsPerBeat} />}
               </div>
             ))}
-          {/* step playhead */}
           <div
             ref={playheadRef}
             className="pointer-events-none absolute top-0 bottom-0 z-[5] hidden bg-white/[0.07] border-x border-white/10"
             style={{ left: LEFT_W + 4, width: CELL_W }}
           />
-          {/* add / drop row */}
           <div className="sticky left-0 flex items-center px-2 pt-1.5 pb-2" style={{ width: LEFT_W + 220 }}>
             <button
               type="button"

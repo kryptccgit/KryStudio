@@ -1,35 +1,15 @@
-// ──────────────────────────────────────────────────────────────────────
-// "Sing my notes" planning (research/21), pure:
-//   melodyFromNotes   a pattern lane's notes → one monophonic line
-//                     (highest note wins, overlaps trimmed)
-//   mapSyllables      syllables ↔ notes: one syllable per note, "_" holds,
-//                     extra notes extend the last syllable (melisma), extra
-//                     syllables squeeze onto the last note
-//   wordSpans / fitSpans / equalSpans
-//                     where each syllable sits in the spoken audio
-//   buildSegments     → SingArgs.segments at the project tempo (+ octave)
-// The analyzer does the audio; Electron main (electron/voice) glues it.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { SingArgs } from '../analyzer/protocol';
 import { ticksToSeconds } from '../schema/time';
 import type { LyricSyllable } from './syllables';
 
 export interface MelodyNote {
-  /** Start within the pattern (ticks). */
   tick: number;
   dur: number;
   key: number;
 }
 
-/** Notes shorter than this after trimming are dropped (a 1/64 at PPQ 960). */
 export const MIN_NOTE_TICKS = 60;
 
-/**
- * One singable line from a lane's notes: muted notes are skipped; a chord keeps its highest note; a note that
- * starts under a held note cuts the held one when it is higher, and is cut (or dropped) when it is lower.
- * `range` = [start, end) ticks of the pattern: notes starting inside it, clipped at its end.
- */
 export function melodyFromNotes(notes: Array<{ tick: number; dur: number; key: number; mute?: boolean }>, range?: { start: number; end: number }): MelodyNote[] {
   const lo = range?.start ?? -Infinity;
   const hi = range?.end ?? Infinity;
@@ -37,7 +17,6 @@ export function melodyFromNotes(notes: Array<{ tick: number; dur: number; key: n
     .filter((n) => !n.mute && Number.isFinite(n.tick) && n.dur > 0 && n.tick >= lo && n.tick < hi)
     .map((n) => ({ tick: Math.round(n.tick), dur: Math.round(Math.min(n.dur, hi - n.tick)), key: Math.round(n.key) }))
     .sort((a, b) => a.tick - b.tick || b.key - a.key);
-  // Chords: the highest note at each start.
   const starts: MelodyNote[] = [];
   for (const n of src) if (!starts.length || starts[starts.length - 1].tick !== n.tick) starts.push(n);
   const out: MelodyNote[] = [];
@@ -47,7 +26,6 @@ export function melodyFromNotes(notes: Array<{ tick: number; dur: number; key: n
     if (prev && prev.tick + prev.dur > n.tick) {
       if (n.key >= prev.key) prev.dur = n.tick - prev.tick;
       else {
-        // A lower note under a held higher one: it sounds only after the higher one ends.
         const end = n.tick + n.dur;
         const from = prev.tick + prev.dur;
         if (end - from < MIN_NOTE_TICKS) continue;
@@ -60,27 +38,20 @@ export function melodyFromNotes(notes: Array<{ tick: number; dur: number; key: n
   return out;
 }
 
-/** A group of syllables sung over a group of consecutive notes. */
 export interface SingGroup {
-  /** Indices into the syllable list (more than one = squeezed onto one note). */
   syllables: number[];
-  /** Indices into the melody (more than one = the syllable is held across them). */
   notes: number[];
 }
 
 export interface SyllableMapping {
   groups: SingGroup[];
-  /** Human notes: notes left over, syllables squeezed, holds cut short. */
   notes: string[];
-  /** Melody notes that got no syllable of their own (held by the one before). */
   extraNotes: number;
-  /** Syllables that had no note of their own (squeezed onto the last note). */
   extraSyllables: number;
 }
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-/** Spread syllables over notes in order (see the file header). */
 export function mapSyllables(syllables: Array<Pick<LyricSyllable, 'text' | 'hold'>>, noteCount: number): SyllableMapping {
   const groups: SingGroup[] = [];
   const notes: string[] = [];
@@ -91,7 +62,6 @@ export function mapSyllables(syllables: Array<Pick<LyricSyllable, 'text' | 'hold
     const want = 1 + Math.max(0, Math.floor(syllables[si].hold || 0));
     const take = Math.min(want, noteCount - note);
     if (take < want) cutHold = true;
-    // A hold takes the notes it asks for (explicit markup wins over the syllables after it).
     groups.push({ syllables: [si], notes: Array.from({ length: take }, (_, k) => note + k) });
     note += take;
   }
@@ -120,7 +90,6 @@ export interface Span {
   endSec: number;
 }
 
-/** `count` equal spans over [start, end). */
 export function equalSpans(count: number, startSec: number, endSec: number): Span[] {
   const n = Math.max(0, Math.floor(count));
   const len = Math.max(0, endSec - startSec);
@@ -129,10 +98,6 @@ export function equalSpans(count: number, startSec: number, endSec: number): Spa
 
 const vowelWeight = (s: string): number => Math.max(1, s.replace(/[^\p{L}\p{N}]/gu, '').length);
 
-/**
- * Syllable spans from the TTS word timings of one line: each word's span is split over its syllables by letter
- * count. null when the words don't line up with the lyric (TTS reads numbers / symbols its own way).
- */
 export function wordSpans(lineSyllables: Array<Pick<LyricSyllable, 'text' | 'wordInLine'>>, lineWords: string[], timings: Array<{ text: string; startSec: number; endSec: number }>): Span[] | null {
   const words = timings.filter((w) => /[\p{L}\p{N}]/u.test(w.text ?? '') && Number.isFinite(w.startSec) && Number.isFinite(w.endSec) && w.endSec > w.startSec);
   if (!lineWords.length || words.length !== lineWords.length) return null;
@@ -153,10 +118,6 @@ export function wordSpans(lineSyllables: Array<Pick<LyricSyllable, 'text' | 'wor
   return out.length === lineSyllables.length ? out : null;
 }
 
-/**
- * Detected syllable nuclei → exactly `expected` spans: too many → the shortest neighbours merge; too few → the
- * longest spans split in half. Spans are sorted and never overlap. Empty input → [].
- */
 export function fitSpans(detected: Span[], expected: number): Span[] {
   let spans = detected
     .filter((s) => Number.isFinite(s.startSec) && Number.isFinite(s.endSec) && s.endSec > s.startSec)
@@ -183,20 +144,16 @@ export function fitSpans(detected: Span[], expected: number): Span[] {
     const mid = (s.startSec + s.endSec) / 2;
     spans.splice(best, 1, { startSec: s.startSec, endSec: mid }, { startSec: mid, endSec: s.endSec });
   }
-  // Each syllable runs until the next one starts (the consonants between nuclei belong to the next syllable).
   spans = spans.map((s, i) => ({ startSec: s.startSec, endSec: i + 1 < spans.length ? Math.max(s.endSec, Math.min(spans[i + 1].startSec, s.endSec + 0.25)) : s.endSec }));
   return spans;
 }
 
 export interface SegmentOptions {
   bpm: number;
-  /** Pattern tick that becomes 0 s in the output (the first melody note). */
   originTick: number;
-  /** Octave shift −2..2. */
   octave?: number;
 }
 
-/** Groups + where each syllable is in the source → the analyzer's `sing` segments, in melody order. */
 export function buildSegments(groups: SingGroup[], melody: MelodyNote[], spans: Span[], opts: SegmentOptions): SingArgs['segments'] {
   const shift = 12 * Math.max(-2, Math.min(2, Math.round(opts.octave ?? 0)));
   const segs: SingArgs['segments'] = [];
@@ -226,7 +183,6 @@ export function buildSegments(groups: SingGroup[], melody: MelodyNote[], spans: 
   return segs;
 }
 
-/** The syllable → note list the UI shows (one row per note; held notes show "_"). */
 export function mappingRows(groups: SingGroup[], melody: MelodyNote[], syllables: Array<Pick<LyricSyllable, 'text'>>): Array<{ syllable: string; noteTick: number; key: number }> {
   const rows: Array<{ syllable: string; noteTick: number; key: number }> = [];
   for (const g of groups) {
@@ -239,7 +195,6 @@ export function mappingRows(groups: SingGroup[], melody: MelodyNote[], syllables
   return rows;
 }
 
-/** "1-4" / "3" (1-based, inclusive bars of the pattern) → [start, end) ticks, or an error sentence. */
 export function patternBarRange(bars: string | undefined, ticksPerBar: number): { start: number; end: number } | { error: string } | null {
   if (bars === undefined || !String(bars).trim()) return null;
   const m = /^\s*(\d+)\s*(?:[-–:]\s*(\d+))?\s*$/.exec(String(bars));

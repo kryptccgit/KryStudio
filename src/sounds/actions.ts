@@ -1,10 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Preset verbs shared by the preset bar, the preset browser, the Browser
-// panel, the Mixer and Home. Loading a preset is ONE doc command (one undo
-// step); every verb ends in a toast (failed dispatches are toasted by the
-// app's dispatch error handler).
-// ──────────────────────────────────────────────────────────────────────
-
 import { pluginById } from '@shared/plugins/catalog';
 import type { PresetSummary } from '@shared/sounds/types';
 import { factoryPreset } from '@shared/sounds/factory';
@@ -25,7 +18,6 @@ function insertLabel(insertId: string): string {
   return ins.isMaster ? 'the master' : ins.name;
 }
 
-/** Load an instrument preset onto a channel (replaces the instrument, its params, sample and, withFx, the insert effects). */
 export async function loadPresetOnChannel(channelId: string, presetId: string, opts: { withFx?: boolean } = {}): Promise<boolean> {
   const ch = getProject().channels[channelId];
   if (!ch) {
@@ -49,7 +41,6 @@ export async function loadPresetOnChannel(channelId: string, presetId: string, o
   return r.ok;
 }
 
-/** A new channel (on its own insert) playing a preset. */
 export async function addPresetChannel(presetId: string, index?: number): Promise<string | null> {
   const got = await fetchPreset(presetId);
   if (!got.ok || !got.data) {
@@ -71,7 +62,6 @@ export async function addPresetChannel(presetId: string, index?: number): Promis
   return id;
 }
 
-/** Load an effect-chain preset onto a mixer insert: replace its effects, or add after them. */
 export async function applyChainPreset(insertId: string, presetId: string, mode: 'replace' | 'append' = 'replace'): Promise<boolean> {
   if (!getProject().mixer.inserts[insertId]) {
     toast.error('That mixer insert no longer exists');
@@ -92,11 +82,9 @@ export async function applyChainPreset(insertId: string, presetId: string, mode:
   return r.ok;
 }
 
-/** The preset bar's arrows: the previous / next preset of the channel's instrument. */
 export async function stepPreset(channelId: string, dir: 1 | -1): Promise<void> {
   const ch = getProject().channels[channelId];
   if (!ch) return;
-  // Presets whose sound pack isn't installed are stepped over (the preset browser offers their pack instead).
   const packs = usePacks.getState().state;
   const cache = useSounds.getState().cache;
   const current = ch.generator.preset?.id;
@@ -113,8 +101,6 @@ export async function stepPreset(channelId: string, dir: 1 | -1): Promise<void> 
   }
   await loadPresetOnChannel(channelId, next.id);
 }
-
-// ── Your presets ──────────────────────────────────────────────────────
 
 export async function renameUserPreset(p: Pick<PresetSummary, 'id' | 'name' | 'source'>): Promise<void> {
   if (p.source !== 'user') {
@@ -167,7 +153,6 @@ export async function revealUserPresets(): Promise<void> {
   }
 }
 
-/** Re-read presets and the factory index; errors toast, `success` (when given) toasts too. */
 export async function reloadSounds(success?: string): Promise<void> {
   await Promise.all([refreshSounds(), loadFactorySamples()]);
   const { error, samplesError } = useSounds.getState();
@@ -176,15 +161,11 @@ export async function reloadSounds(success?: string): Promise<void> {
   else if (success) toast.success(success);
 }
 
-// ── Navigation + folders ──────────────────────────────────────────────
-
-/** Open the Browser at its Presets section. */
 export function openPresetsInBrowser(): void {
   wm.open('browser');
   requestBrowserReveal('presets');
 }
 
-/** Add a folder to the Browser (settings.browserRoots, the path the Browser's own folder button writes). */
 export async function addFolderToBrowser(path: string): Promise<boolean> {
   try {
     const s = await window.krypt.settings.get();

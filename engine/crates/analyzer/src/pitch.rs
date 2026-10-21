@@ -1,14 +1,3 @@
-//! Monophonic pitch (pYIN-style) and note segmentation.
-//!
-//! f0 candidates follow pYIN (Mauch & Dixon, "pYIN: a fundamental frequency
-//! estimator using probabilistic threshold distributions", ICASSP 2014): the
-//! YIN cumulative-mean-normalised difference function (de Cheveigné &
-//! Kawahara 2002) is thresholded at 100 thresholds weighted by a Beta(2, 18)
-//! prior, giving each trough a probability. A sparse Viterbi pass (voiced
-//! candidates + one unvoiced state, pitch-jump and voicing-switch penalties)
-//! picks a smooth path. Notes are stable-pitch runs, split at pitch changes
-//! and at loudness re-attacks. Krypt-original implementation.
-
 use std::sync::Arc;
 
 use rustfft::num_complex::Complex32;
@@ -20,26 +9,20 @@ use crate::{JobCtx, JobError};
 
 pub const FRAME: usize = 2048;
 pub const HOP: usize = 256;
-const W: usize = FRAME / 2; // YIN integration window
+const W: usize = FRAME / 2;
 
-/// Short energy envelope (for note onsets/offsets): window and hop.
 pub const SHORT_WIN: usize = 256;
 pub const SHORT_HOP: usize = 64;
 
 pub struct PitchTrack {
     pub sr: f32,
     pub hop: usize,
-    /// MIDI pitch per frame (NaN when unvoiced). Frame t is centred on t·hop.
     pub midi: Vec<f32>,
-    /// Voicing probability (sum of candidate probabilities) per frame.
     pub voiced_prob: Vec<f32>,
-    /// Frame RMS in dBFS.
     pub rms_db: Vec<f32>,
-    /// RMS in dBFS over [`SHORT_WIN`] samples every [`SHORT_HOP`] (centred).
     pub short_db: Vec<f32>,
 }
 
-/// Beta(2, 18) CDF: 1 − (1−x)^18 · (1 + 18x).
 fn beta_cdf(x: f32) -> f32 {
     let x = x.clamp(0.0, 1.0) as f64;
     (1.0 - (1.0 - x).powi(18) * (1.0 + 18.0 * x)) as f32
@@ -60,7 +43,6 @@ pub fn track(x: &[f32], sr: f32, fmin: f32, fmax: f32, ctx: &JobCtx) -> Result<P
     let mut buf = vec![Complex32::new(0.0, 0.0); size];
     let mut prod = vec![Complex32::new(0.0, 0.0); size];
     let mut scratch = vec![Complex32::new(0.0, 0.0); fft.get_inplace_scratch_len().max(ifft.get_inplace_scratch_len())];
-    // Thresholds 0.01..1.00 with Beta(2,18) prior mass.
     let thresholds: Vec<(f32, f32)> = (1..=100).map(|i| {
         let s = i as f32 / 100.0;
         (s, beta_cdf(s) - beta_cdf(s - 0.01))
@@ -68,11 +50,9 @@ pub fn track(x: &[f32], sr: f32, fmin: f32, fmax: f32, ctx: &JobCtx) -> Result<P
     let mut frame = vec![0f32; FRAME];
     let mut rms_db = vec![-120f32; n_frames];
     let mut cands: Vec<Vec<Cand>> = Vec::with_capacity(n_frames);
-    // The YIN integration window [s, s+W) is centred on the frame time.
     let half = (W / 2) as i64;
     let mut d = vec![0f32; tau_max + 2];
     let mut cm = vec![0f32; tau_max + 2];
-    // Silence gate relative to the loudest frame.
     let mut frame_rms = vec![0f32; n_frames];
     for (t, r) in frame_rms.iter_mut().enumerate() {
         let start = t as i64 * HOP as i64 - half;
@@ -100,7 +80,6 @@ pub fn track(x: &[f32], sr: f32, fmin: f32, fmax: f32, ctx: &JobCtx) -> Result<P
             let k = start + j as i64;
             *v = if k >= 0 && (k as usize) < x.len() { x[k as usize] } else { 0.0 };
         }
-        // r(τ) = Σ_{j<W} x_j x_{j+τ}: correlate head (real) with frame (imag) in one FFT.
         for i in 0..size {
             let a = if i < W { frame[i] } else { 0.0 };
             let b = if i < FRAME { frame[i] } else { 0.0 };
@@ -110,14 +89,13 @@ pub fn track(x: &[f32], sr: f32, fmin: f32, fmax: f32, ctx: &JobCtx) -> Result<P
         for k in 0..size {
             let z = buf[k];
             let zc = buf[(size - k) % size].conj();
-            let a = (z + zc) * 0.5; // FFT(head)
+            let a = (z + zc) * 0.5;
             let dd = (z - zc) * 0.5;
-            let b = Complex32::new(dd.im, -dd.re); // FFT(frame)
+            let b = Complex32::new(dd.im, -dd.re);
             prod[k] = a.conj() * b;
         }
         ifft.process_with_scratch(&mut prod, &mut scratch);
         let inv = 1.0 / size as f32;
-        // Energies: e0 = Σ_{j<W} x_j², eτ = Σ_{j<W} x_{j+τ}².
         let mut pre = vec![0f32; FRAME + 1];
         for j in 0..FRAME {
             pre[j + 1] = pre[j] + frame[j] * frame[j];
@@ -128,14 +106,12 @@ pub fn track(x: &[f32], sr: f32, fmin: f32, fmax: f32, ctx: &JobCtx) -> Result<P
             let et = pre[tau + W] - pre[tau];
             d[tau] = (e0 + et - 2.0 * prod[tau].re * inv).max(0.0);
         }
-        // CMNDF
         cm[0] = 1.0;
         let mut run = 0f32;
         for tau in 1..=tau_max {
             run += d[tau];
             cm[tau] = if run > 0.0 { d[tau] * tau as f32 / run } else { 1.0 };
         }
-        // Troughs (local minima) in range.
         let mut troughs: Vec<usize> = Vec::new();
         for tau in tau_min.max(1)..tau_max {
             if cm[tau] < cm[tau - 1] && cm[tau] <= cm[tau + 1] {
@@ -164,11 +140,10 @@ pub fn track(x: &[f32], sr: f32, fmin: f32, fmax: f32, ctx: &JobCtx) -> Result<P
             .collect();
         cands.push(c);
     }
-    // Sparse Viterbi: states = candidates of the frame + unvoiced (index len).
     let ln = |p: f32| p.max(1e-9).ln();
     let stay_v = ln(0.99);
     let switch = ln(0.01);
-    let jump = |a: f32, b: f32| -> f32 { -((a - b).abs() / 2.5) }; // Laplacian, 2.5 semitones
+    let jump = |a: f32, b: f32| -> f32 { -((a - b).abs() / 2.5) };
     let mut score: Vec<f32> = Vec::new();
     let mut back: Vec<Vec<usize>> = Vec::with_capacity(n_frames);
     let mut prev_c: &[Cand] = &[];
@@ -262,18 +237,13 @@ fn add(v: &mut Vec<(usize, f32)>, tau: usize, w: f32) {
 }
 
 pub struct SegParams {
-    /// Voicing probability needed per frame (0..1).
     pub voicing: f32,
-    /// Loudness rise (dB within ~35 ms) that starts a new note on the same pitch.
     pub reattack_db: f32,
     pub min_note_sec: f32,
     pub min_key: u8,
     pub max_key: u8,
 }
 
-/// Segment a pitch track into notes: voiced runs split at pitch changes,
-/// then at loudness re-attacks; boundaries next to silence are refined on the
-/// short energy envelope.
 pub fn segment(tr: &PitchTrack, p: &SegParams) -> Vec<TranscribedNote> {
     let n = tr.midi.len();
     if n == 0 || tr.short_db.is_empty() {
@@ -281,8 +251,6 @@ pub fn segment(tr: &PitchTrack, p: &SegParams) -> Vec<TranscribedNote> {
     }
     let fps = tr.sr / tr.hop as f32;
     let sfps = tr.sr / SHORT_HOP as f32;
-    // A frame counts only if its centre isn't silent: the 93 ms YIN window
-    // otherwise "hears" a neighbouring note from inside a gap.
     let s_peak = tr.short_db.iter().cloned().fold(-120f32, f32::max);
     let centre_loud = |t: usize| -> bool {
         let u = (t * tr.hop / SHORT_HOP).min(tr.short_db.len() - 1);
@@ -292,8 +260,6 @@ pub fn segment(tr: &PitchTrack, p: &SegParams) -> Vec<TranscribedNote> {
     };
     let voiced: Vec<bool> = (0..n).map(|t| tr.midi[t].is_finite() && tr.voiced_prob[t] >= p.voicing && centre_loud(t)).collect();
     let peak_db = tr.rms_db.iter().cloned().fold(-120f32, f32::max);
-    // 1. Voiced runs (gaps of ≤ 2 frames bridged), split where the pitch moves
-    //    more than 0.7 semitone for ≥ 3 frames (a legato boundary).
     struct Seg {
         a: usize,
         b: usize,
@@ -348,7 +314,6 @@ pub fn segment(tr: &PitchTrack, p: &SegParams) -> Vec<TranscribedNote> {
         legato_next = changed;
         t = end;
     }
-    // 2. Times refined on the short envelope; 3. splits at re-attacks.
     let sdb = &tr.short_db;
     let last = sdb.len() - 1;
     let s_at = |sec: f32| -> usize { ((sec * sfps).round().max(0.0) as usize).min(last) };
@@ -362,25 +327,18 @@ pub fn segment(tr: &PitchTrack, p: &SegParams) -> Vec<TranscribedNote> {
         let level = median(&sdb[ba.min(bb)..=bb.max(ba)]);
         let th = level - 12.0;
         if !sg.legato_start {
-            // Rising crossing of (body − 12 dB) within ±70 ms, after the previous note.
             let lo = s_at((t0 - 0.07).max(prev_end)).max(1);
             if let Some(u) = (lo..=s_at(t0 + 0.07)).find(|&u| sdb[u] >= th && sdb[u - 1] < th) {
                 t0 = u as f32 / sfps;
             }
         }
         if !sg.legato_end {
-            // Last falling crossing within −120..+70 ms, before the next note.
             let hi = s_at((t1 + 0.07).min(next_start)).min(last.saturating_sub(1));
             if let Some(u) = (s_at(t1 - 0.12)..=hi).rev().find(|&u| sdb[u] >= th && sdb[u + 1] < th) {
                 t1 = (u as f32 / sfps).max(t0 + 0.001);
             }
         }
         prev_end = t1;
-        // Re-attacks: a rise of ≥ reattack_db within 30 ms, up to the body level.
-        // Low notes: the 11.6 ms envelope ripples once per period (a bass with a
-        // weak fundamental swings > 10 dB every cycle), which would read as
-        // re-attacks and chop the note into fragments. So the rise is measured
-        // on a peak-hold over 1.25 periods of the note's pitch.
         let mut cuts = vec![t0];
         let lag = ((0.03 * sfps).round() as usize).max(1);
         let min_gap = p.min_note_sec.max(0.04);
@@ -394,7 +352,6 @@ pub fn segment(tr: &PitchTrack, p: &SegParams) -> Vec<TranscribedNote> {
             let lo = (u - lag..u).map(env).fold(f32::MAX, f32::min);
             let cur = env(u);
             if cur - lo >= p.reattack_db && cur >= level - 6.0 && u as f32 / sfps - cuts.last().copied().unwrap_or(t0) >= min_gap {
-                // Onset = first point of the rise within 12 dB of the body.
                 let on = (u - lag..=u).find(|&k| sdb[k] >= level - 12.0).unwrap_or(u);
                 cuts.push(on as f32 / sfps);
                 u += lag;
@@ -407,7 +364,6 @@ pub fn segment(tr: &PitchTrack, p: &SegParams) -> Vec<TranscribedNote> {
         for (i, w) in cuts.windows(2).enumerate() {
             let mut end = w[1];
             if i + 1 < k {
-                // Split at a re-attack: end at the dip before it, if there is one.
                 let (a, b) = (s_at((w[1] - 0.12).max(w[0])), s_at(w[1]).saturating_sub(1));
                 if let Some(u) = (a..b.min(last - 1)).rev().find(|&u| sdb[u] >= th && sdb[u + 1] < th) {
                     end = (u as f32 / sfps).max(w[0] + 0.001);

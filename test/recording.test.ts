@@ -1,5 +1,3 @@
-// Live input + recording: take planning (shared/live/recording.ts) and the
-// main-process controller (electron/input/liveInput.ts) against a fake engine.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -33,8 +31,6 @@ function newDoc(): DocHost {
   return new DocHost(createDefaultProject('T'), CATALOG, { strict: true });
 }
 
-// ── Pure planning ─────────────────────────────────────────────────────
-
 test('settings: untrusted live-input settings are validated over the defaults', () => {
   const base = { midi: DEFAULT_MIDI_SETTINGS, recording: DEFAULT_RECORDING, audioInput: DEFAULT_AUDIO_INPUT };
   const m = mergeLiveSettings(base, {
@@ -48,11 +44,9 @@ test('settings: untrusted live-input settings are validated over the defaults', 
   assert.deepEqual(m.midi.mappings[0], { id: 'a', device: null, channel: 0, cc: 127, paramRef: 'transport/bpm', min: 0, max: 0.5 });
   assert.deepEqual(m.recording, { mode: 'midi', quantize: 240, countInBars: 0 });
   assert.deepEqual(m.audioInput, { deviceId: null, channels: [1, 2], monitor: true });
-  // A partial patch keeps everything else.
   const m2 = mergeLiveSettings(m, { recording: { countInBars: 2 } });
   assert.deepEqual(m2.recording, { mode: 'midi', quantize: 240, countInBars: 2 });
   assert.deepEqual(m2.midi, m.midi);
-  // Settings objects without the optional fields read as defaults.
   assert.deepEqual(midiSettings({} as Settings), DEFAULT_MIDI_SETTINGS);
   assert.deepEqual(recordingSettings(null), DEFAULT_RECORDING);
 });
@@ -83,8 +77,8 @@ test('pattern mode: ticks wrap at the pattern length, quantize, durations never 
   assert.equal(groups.length, 1);
   assert.deepEqual(groups[0].notes, [
     { tick: 240, key: 60, dur: 19, vel: 0.8 },
-    { tick: 0, key: 62, dur: 400, vel: 0.8 }, // 3830 → 3840 → wraps to 0
-    { tick: 960, key: 64, dur: 2880, vel: 0.8 }, // clamped to the 1-bar pattern end
+    { tick: 0, key: 62, dur: 400, vel: 0.8 },
+    { tick: 960, key: 64, dur: 2880, vel: 0.8 },
   ]);
   const raw = planPatternNotes(p, [n(182.4, 19.2)], 0);
   assert.equal(raw[0].notes[0].tick, 182);
@@ -101,17 +95,14 @@ test('song mode: through the active pattern clip, or a new pattern at the start 
   assert.ok(r.ok);
   const clip = songClipFor(doc.project, 5000)!;
   assert.equal(clip.id, r.data!.id);
-  // song 5000 → clip-relative 1160 + offset 960 = 2120; song 9000 → 6120 → wraps (1 bar) → 2280.
   const g = planSongNotesInClip(doc.project, clip, [
     { channelId: ch, patternId: null, tick: 5000, dur: 100, key: 60, vel: 1 },
     { channelId: ch, patternId: null, tick: 9000, dur: 100, key: 61, vel: 1 },
   ], 0);
   assert.deepEqual(g[0].notes.map((x) => x.tick), [2120, 2280]);
-  // New pattern: relative to the bar where recording started (bar 3 = 7680).
   assert.equal(takeBarStart(doc.project, 8000), 7680);
   const nw = planSongNotesNew(doc.project, 7680, [{ channelId: ch, patternId: null, tick: 7600, dur: 50, key: 60, vel: 1 }, { channelId: ch, patternId: null, tick: 8950, dur: 50, key: 62, vel: 1 }], 240);
   assert.deepEqual(nw[0].notes.map((x) => x.tick), [0, 1200], 'early notes clamp to the bar, later ones quantize');
-  // Free track: track 1 is busy over [3840, 11520).
   assert.equal(freeTrack(doc.project, 4000, 5000), doc.project.playlist.trackOrder[1]);
   assert.equal(freeTrack(doc.project, 0, 3840), t1);
 });
@@ -121,8 +112,6 @@ test('Chromium MIDI permissions are denied, others untouched', () => {
   assert.equal(isDeniedPermission('midiSysex'), true);
   assert.equal(isDeniedPermission('clipboard-sanitized-write'), false);
 });
-
-// ── Controller (main) against a fake engine ───────────────────────────
 
 function harness() {
   const doc = newDoc();
@@ -186,7 +175,7 @@ test('controller: syncs the engine on start and arms with the record settings', 
   assert.deepEqual({ ...rec }, { cmd: 'setRecord', armed: true, midi: true, audio: true, countInBars: 2, dir: 'C:/proj/recordings', name: 'Song' });
   assert.ok(h.broadcasts.some((b) => b.channel === EVENT.recordStatus && (b.payload as { armed: boolean }).armed));
   h.ctl.setTarget('ch_x');
-  h.ctl.setTarget('ch_x'); // no duplicate request
+  h.ctl.setTarget('ch_x');
   assert.equal(h.requests.filter((x) => x.cmd === 'setMidiTarget' && x.channelId === 'ch_x').length, 1);
 });
 
@@ -206,7 +195,6 @@ test('controller: a pattern-mode take with several loop passes is ONE undo group
   const hist = h.doc.getHistory();
   assert.equal(hist.length, before + 1, 'one history entry for the whole take');
   assert.equal(hist[hist.length - 1].label, 'Record');
-  // Undo removes the whole take.
   assert.ok(h.doc.undo(USER).ok);
   assert.equal(Object.keys(h.doc.project.patterns[pid].notes[ch] ?? {}).length, 0);
   const st = h.ctl.status();
@@ -251,10 +239,8 @@ test('controller: MIDI + audio take lands as one group; the audio clip goes on a
   assert.equal(h.doc.getHistory().length, before + 1, 'notes + audio = one undo entry');
   const lt = h.ctl.status().lastTake!;
   assert.ok(lt.ok && /1 note/.test(lt.message) && /2\.0 s of audio/.test(lt.message), lt.message);
-  // A silent take is kept but flagged.
   h.take({ take: 4, mode: 'song', patternId: null, startTick: 0, final: true, audio: { path: 'C:/x/silent.wav', frames: 4800, sampleRate: 48000, channels: 1, startTick: 0, peak: 0 } });
   assert.ok(!h.ctl.status().lastTake!.ok && /silent/.test(h.ctl.status().lastTake!.message));
-  // An empty final report is reported, not silently dropped.
   h.take({ take: 5, final: true });
   assert.match(h.ctl.status().lastTake!.message, /nothing was recorded/i);
 });
@@ -275,10 +261,8 @@ test('controller: MIDI-learn stores a mapping; CCs then set the param, one undo 
   const spec = paramSpecFor(h.doc.project, CATALOG, ref)!;
   assert.ok(Math.abs((getParamValue(h.doc.project, CATALOG, ref) ?? -1) - fromNormalized(spec, 1)) < 1e-9);
   assert.equal(h.doc.getHistory().length, before + 1, 'a twist coalesces into one entry');
-  // Other channel / cc: ignored.
   h.emit({ event: 'midiCc', device: 'Keys', channel: 3, cc: 21, value: 0 });
   assert.ok(Math.abs((getParamValue(h.doc.project, CATALOG, ref) ?? -1) - fromNormalized(spec, 1)) < 1e-9);
-  // Re-linking the same CC to another param replaces the old link.
   const again = h.ctl.learn('transport/masterVolume', 'Master');
   h.emit({ event: 'midiCc', device: 'Keys', channel: 2, cc: 21, value: 0 });
   assert.ok((await again).ok);
@@ -286,7 +270,6 @@ test('controller: MIDI-learn stores a mapping; CCs then set the param, one undo 
   assert.deepEqual(maps.map((m) => m.paramRef), ['transport/masterVolume']);
   assert.ok((await h.ctl.removeMapping(maps[0].id)).ok);
   assert.equal(midiSettings(h.settings()).mappings.length, 0);
-  // Cancel + unknown params.
   const c = h.ctl.learn(ref);
   h.ctl.cancelLearn();
   assert.equal((await c).ok, false);

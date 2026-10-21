@@ -1,11 +1,3 @@
-// A pointer gesture (step paint, graph-lane drag, reorder) as ONE undo
-// entry. Commands run strictly in order; the group closes after the last
-// one lands.
-//
-//   const g = beginGesture('Paint steps');
-//   g.exec('notes.toggleStep', {...});   // on pointerdown / pointermove
-//   await g.end();                        // on pointerup
-
 import type { ExecResult } from '@shared/doc/DocHost';
 import { dispatch, withGroup } from './store';
 
@@ -24,7 +16,6 @@ export function beginGesture(label: string): Gesture {
     resolveGid(g);
     await done;
   }).catch((err) => {
-    // beginGroup failed: run ungrouped rather than hang.
     resolveGid('');
     console.warn('[gesture] group failed', err);
   });

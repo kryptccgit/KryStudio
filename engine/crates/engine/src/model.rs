@@ -1,18 +1,9 @@
-//! The engine's mirror of the Project document (shared/schema/project.ts).
-//!
-//! Parsing is deliberately liberal: every entity is deserialized on its own,
-//! with `#[serde(default)]` everywhere, so one malformed note / clip / slot is
-//! skipped with a warning instead of rejecting the whole project
-//! (docs/ENGINE_PROTOCOL.md §1: never crash on bad project data).
-
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 pub use crate::model_ext::{FollowRule, LaunchClip, RackDef, Scene, SessionCfg, SliceMarker, WarpMap};
-
-// ── Entities ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -41,7 +32,6 @@ pub struct Transport {
     pub bpm: f64,
     pub time_sig: TimeSig,
     pub swing: f64,
-    /// 'pattern' | 'song'
     pub mode: String,
     pub active_pattern_id: Option<String>,
     #[serde(rename = "loop")]
@@ -79,13 +69,9 @@ pub struct Generator {
     #[serde(deserialize_with = "de_num_map")]
     pub params: BTreeMap<String, f64>,
     pub sample_id: Option<String>,
-    /// Opaque third-party plugin state (base64), restored when the remote instance loads.
     pub state: Option<String>,
-    /// 'krypt.audioclip': warp markers + mode (Wave 12.2). None = Stretch params only.
     pub warp: Option<WarpMap>,
-    /// 'krypt.rack' / 'krypt.drumrack': chains + macros (Wave 12.2).
     pub rack: Option<Box<RackDef>>,
-    /// 'krypt.slicer': the slice markers (sorted by sec). None / empty = the whole sample is one slice.
     pub slices: Option<Vec<SliceMarker>>,
 }
 
@@ -150,8 +136,6 @@ pub struct Note {
     pub slide: bool,
     pub mod_x: f64,
     pub mod_y: f64,
-    /// Wave 2 (piano-roll mute tool): optional `mute` on a note. Muted notes stay in
-    /// the document but are never scheduled (skipped in compile.rs). Absent = false.
     pub mute: bool,
 }
 
@@ -177,9 +161,7 @@ impl Default for Note {
 #[derive(Debug, Clone, Default)]
 pub struct Pattern {
     pub id: String,
-    /// None (or <= 0) = auto length.
     pub length: Option<f64>,
-    /// notes[channelId] = notes (unsorted).
     pub notes: BTreeMap<String, Vec<Note>>,
 }
 
@@ -196,7 +178,6 @@ pub struct Track {
 pub struct Clip {
     pub id: String,
     pub track_id: String,
-    /// 'pattern' | 'audio' | 'automation'
     pub kind: String,
     pub start: f64,
     pub length: f64,
@@ -257,9 +238,7 @@ pub struct FxSlot {
     #[serde(deserialize_with = "de_num_map")]
     pub params: BTreeMap<String, f64>,
     pub sidechain_from: Option<String>,
-    /// Opaque third-party plugin state (base64), restored when the remote instance loads.
     pub state: Option<String>,
-    /// 'krypt.fxrack': parallel chains + macros (Wave 12.2).
     pub rack: Option<Box<RackDef>>,
 }
 
@@ -281,7 +260,6 @@ impl Default for FxSlot {
 #[derive(Debug, Clone)]
 pub struct Insert {
     pub id: String,
-    /// Display name (stem file names).
     pub name: String,
     pub volume: f64,
     pub pan: f64,
@@ -343,8 +321,6 @@ pub struct SampleRef {
     pub path: String,
 }
 
-// ── The mirror ───────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Default)]
 pub struct Model {
     pub transport: Transport,
@@ -354,18 +330,14 @@ pub struct Model {
     pub clips: BTreeMap<String, Clip>,
     pub automations: BTreeMap<String, Automation>,
     pub inserts: BTreeMap<String, Insert>,
-    /// Display order of inserts (master first). Only used for deterministic
-    /// graph edge ordering; inserts missing from it are appended.
     pub insert_order: Vec<String>,
     pub master_id: String,
     pub samples: BTreeMap<String, SampleRef>,
-    /// Clip launcher (Wave 12.2): scenes, launch clips and the session settings.
     pub scenes: BTreeMap<String, Scene>,
     pub launch_clips: BTreeMap<String, LaunchClip>,
     pub session: SessionCfg,
 }
 
-/// Collects warnings while parsing, capped so a corrupt project can't flood the log.
 #[derive(Default)]
 pub struct Warnings {
     pub list: Vec<String>,
@@ -404,7 +376,6 @@ fn obj<'a>(v: &'a Value, key: &str) -> Option<&'a Map<String, Value>> {
     v.get(key).and_then(|x| x.as_object())
 }
 
-/// Deserialize a JSON object of numbers, ignoring non-numeric values.
 fn de_num_map<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<String, f64>, D::Error> {
     let m = Option::<Map<String, Value>>::deserialize(d)?.unwrap_or_default();
     Ok(m.into_iter().filter_map(|(k, v)| v.as_f64().map(|x| (k, x))).collect())
@@ -491,7 +462,6 @@ fn parse_insert(id: &str, v: &Value, w: &mut Warnings) -> Option<Insert> {
 }
 
 impl Model {
-    /// Build from a full Project JSON value (loadProject / --render).
     pub fn from_project(v: &Value, w: &mut Warnings) -> Model {
         let mut m = Model::default();
         if let Some(t) = v.get("transport") {
@@ -571,7 +541,6 @@ impl Model {
         m
     }
 
-    /// Apply one entity upsert. `id` may be empty for singletons.
     pub fn upsert_entity(&mut self, kind: &str, id: &str, v: &Value, w: &mut Warnings) {
         let pick_id = |own: &str| if id.is_empty() { own.to_string() } else { id.to_string() };
         match kind {
@@ -727,7 +696,6 @@ impl Model {
         }
     }
 
-    /// Inserts in deterministic order: insert_order first, then any others by id.
     pub fn ordered_insert_ids(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::with_capacity(self.inserts.len());
         for id in &self.insert_order {

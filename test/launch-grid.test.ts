@@ -1,5 +1,3 @@
-// Grid controllers for the clip launcher (shared/live/launchGrid.ts): settings
-// validation and the setLaunchGrid note maps for each layout.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -8,7 +6,6 @@ import { CATALOG } from '@shared/plugins/catalog';
 import { DEFAULT_LAUNCH_GRID, gridLayout, launchGridMap, launchGridSettings, mergeLaunchGrid } from '@shared/live/launchGrid';
 import type { LaunchGridSettings } from '@shared/types';
 
-/** 3 tracks used, 2 scenes; clips at (T1, S1) and (T3, S2). */
 function rig() {
   const host = new DocHost(createDefaultProject('Grid'), CATALOG, { strict: true });
   const ex = <T = any>(cmd: string, args: unknown): T => {
@@ -59,7 +56,6 @@ test('launchpad: first scene on the top row (81..), scene buttons 89 → 19, emp
   assert.equal(m.notes['69'], undefined, 'no third scene');
   assert.equal(m.notes['61'], undefined);
   assert.deepEqual(m.notes['98'], { stopTrackId: null });
-  // 16 default tracks: the 8 visible columns per scene + 2 scene buttons + stop all
   assert.equal(Object.keys(m.notes).length, 8 * 2 + 2 + 1);
   assert.equal(gridLayout('launchpad').pad(7, 7), 18);
   assert.equal(gridLayout('launchpad').scene(7), 19);
@@ -99,7 +95,6 @@ test('offsets scroll the 8×8 window over tracks and scenes', () => {
   m = launchGridMap(host.project, on({ sceneOffset: 1 }));
   assert.deepEqual(m.notes['89'], { sceneId: s2 });
   assert.deepEqual(m.notes['83'], { clipId: b });
-  // with no scenes in view only stop-all remains
   m = launchGridMap(host.project, on({ sceneOffset: 5 }));
   assert.deepEqual(Object.keys(m.notes), ['98']);
   void ex;

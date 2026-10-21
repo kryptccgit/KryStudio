@@ -21,13 +21,12 @@ pub const MODEL_FILE: &str = "nmp.onnx";
 
 const SR: usize = 22_050;
 const FFT_HOP: usize = 256;
-/// Model input length: 2 s minus one hop.
-const AUDIO_N_SAMPLES: usize = SR * 2 - FFT_HOP; // 43 844
+const AUDIO_N_SAMPLES: usize = SR * 2 - FFT_HOP;
 const N_OVERLAP_FRAMES: usize = 30;
-const OVERLAP_LEN: usize = N_OVERLAP_FRAMES * FFT_HOP; // 7 680
-const HOP_SIZE: usize = AUDIO_N_SAMPLES - OVERLAP_LEN; // 36 164
+const OVERLAP_LEN: usize = N_OVERLAP_FRAMES * FFT_HOP;
+const HOP_SIZE: usize = AUDIO_N_SAMPLES - OVERLAP_LEN;
 const WINDOW_FRAMES: usize = 172;
-const KEEP_FRAMES: usize = WINDOW_FRAMES - N_OVERLAP_FRAMES; // 142
+const KEEP_FRAMES: usize = WINDOW_FRAMES - N_OVERLAP_FRAMES;
 const N_NOTES: usize = 88;
 const N_CONTOUR: usize = 264;
 const MIDI_OFFSET: usize = 21;
@@ -40,17 +39,12 @@ const OUT_ONSET: &str = "StatefulPartitionedCall:2";
 
 pub struct Activations {
     pub frames: usize,
-    /// frames × 88
     pub note: Vec<f32>,
-    /// frames × 88
     pub onset: Vec<f32>,
-    /// frames × 264 (3 bins per semitone; bin 3·(key−21)+1 is the key's centre)
     pub contour: Vec<f32>,
-    /// Time (s) of each frame.
     pub times: Vec<f32>,
 }
 
-/// Run the model over 22 050 Hz mono audio (overlapping 2 s windows).
 pub fn infer(model_dir: &Path, x: &[f32], ctx: &JobCtx, mut progress: impl FnMut(f32)) -> Result<Activations, JobError> {
     let mut model = RtenModel::load(&model_dir.join(MODEL_FILE), "Basic Pitch")?.with_ctx(ctx);
     let names = model.output_names();
@@ -61,7 +55,6 @@ pub fn infer(model_dir: &Path, x: &[f32], ctx: &JobCtx, mut progress: impl FnMut
     }
     let input = "serving_default_input_2:0";
     let orig_len = x.len();
-    // Prepend half the overlap so the first kept frame is t = 0.
     let pad = OVERLAP_LEN / 2;
     let padded_len = orig_len + pad;
     let starts: Vec<usize> = (0..padded_len).step_by(HOP_SIZE).collect();
@@ -106,7 +99,6 @@ pub fn infer(model_dir: &Path, x: &[f32], ctx: &JobCtx, mut progress: impl FnMut
                 note.extend_from_slice(&n_d[r * N_NOTES..(r + 1) * N_NOTES]);
                 onset.extend_from_slice(&o_d[r * N_NOTES..(r + 1) * N_NOTES]);
                 contour.extend_from_slice(&c_d[r * N_CONTOUR..(r + 1) * N_CONTOUR]);
-                // Window starts at padded sample `start`; frame j is j hops in.
                 times.push((start + j * FFT_HOP) as f32 / SR as f32 - pad as f32 / SR as f32);
             }
         }
@@ -118,19 +110,15 @@ pub fn infer(model_dir: &Path, x: &[f32], ctx: &JobCtx, mut progress: impl FnMut
 pub struct NoteParams {
     pub onset_thresh: f32,
     pub frame_thresh: f32,
-    /// Minimum length in frames (a note must be longer than this).
     pub min_note_len: usize,
-    /// Inclusive MIDI range.
     pub min_key: u8,
     pub max_key: u8,
 }
 
-/// Frames for a minimum note length in ms (reference rounding).
 pub fn min_len_frames(ms: f32) -> usize {
     (ms / 1000.0 * (SR as f32 / FFT_HOP as f32)).round().max(0.0) as usize
 }
 
-/// Note events (start frame, end frame (exclusive), MIDI key, amplitude).
 fn notes_polyphonic(act: &Activations, p: &NoteParams) -> Vec<(usize, usize, usize, f32)> {
     let n = act.frames;
     if n < 3 {
@@ -139,7 +127,6 @@ fn notes_polyphonic(act: &Activations, p: &NoteParams) -> Vec<(usize, usize, usi
     let frames = &act.note;
     let mut onsets = act.onset.clone();
     let mut frames_c = frames.clone();
-    // constrain_frequency (inclusive key range).
     let lo = (p.min_key as usize).saturating_sub(MIDI_OFFSET).min(N_NOTES);
     let hi = ((p.max_key as usize + 1).saturating_sub(MIDI_OFFSET)).min(N_NOTES);
     for t in 0..n {
@@ -149,7 +136,6 @@ fn notes_polyphonic(act: &Activations, p: &NoteParams) -> Vec<(usize, usize, usi
         }
     }
     let frames = &frames_c;
-    // get_infered_onsets (n_diff = 2).
     let mut diff = vec![0f32; n * N_NOTES];
     let mut dmax = 0f32;
     for t in 2..n {
@@ -169,7 +155,6 @@ fn notes_polyphonic(act: &Activations, p: &NoteParams) -> Vec<(usize, usize, usi
             *o = o.max(d * k);
         }
     }
-    // Peaks along time (strict local maxima, edges excluded) above threshold.
     let mut peaks: Vec<(usize, usize)> = Vec::new();
     for t in 1..n - 1 {
         for f in 0..N_NOTES {
@@ -190,7 +175,6 @@ fn notes_polyphonic(act: &Activations, p: &NoteParams) -> Vec<(usize, usize, usi
             rem[t * N_NOTES + f - 1] = 0.0;
         }
     };
-    // Backwards in time (reference order: time desc, then freq desc).
     for &(start, f) in peaks.iter().rev() {
         if start >= n - 1 {
             continue;
@@ -215,16 +199,14 @@ fn notes_polyphonic(act: &Activations, p: &NoteParams) -> Vec<(usize, usize, usi
         let amp = (start..i).map(|t| frames[t * N_NOTES + f]).sum::<f32>() / (i - start) as f32;
         notes.push((start, i, f + MIDI_OFFSET, amp));
     }
-    // Melodia trick: grow notes from the strongest leftover frames.
     let mut cells: Vec<(usize, f32)> = remaining.iter().enumerate().filter(|(_, &v)| v > p.frame_thresh).map(|(i, &v)| (i, v)).collect();
     cells.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
     for (idx, v) in cells {
         if remaining[idx] != v {
-            continue; // already consumed by an earlier note
+            continue;
         }
         let (i_mid, f) = (idx / N_NOTES, idx % N_NOTES);
         remaining[idx] = 0.0;
-        // forward
         let mut i = i_mid + 1;
         let mut k = 0usize;
         while i < n - 1 && k < ENERGY_TOL {
@@ -237,7 +219,6 @@ fn notes_polyphonic(act: &Activations, p: &NoteParams) -> Vec<(usize, usize, usi
             i += 1;
         }
         let i_end = i as i64 - 1 - k as i64;
-        // backward
         let mut i = i_mid as i64 - 1;
         let mut k = 0usize;
         while i > 0 && k < ENERGY_TOL {
@@ -264,9 +245,6 @@ fn notes_polyphonic(act: &Activations, p: &NoteParams) -> Vec<(usize, usize, usi
     notes
 }
 
-/// Mean pitch offset of a note in cents from the contour (±25 bins around the
-/// key's centre bin, Gaussian-weighted argmax as in the reference, refined by
-/// parabolic interpolation). None when the contour is too weak to tell.
 fn note_cents(act: &Activations, start: usize, end: usize, key: usize) -> Option<f32> {
     let centre = 3 * (key - MIDI_OFFSET) as i64 + 1;
     let tol = 25i64;

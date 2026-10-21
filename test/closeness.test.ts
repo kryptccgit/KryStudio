@@ -1,10 +1,3 @@
-// Wave 8a review-mix (research/15 §3.5): closeness to a studied reference
-// (electron/mcp/tools/closeness.ts + review_song's issues), match_mix
-// (electron/mcp/tools/matchMix.ts) on a fake engine whose render follows the
-// mixer, and check_originality against the reference's transcribed melody.
-// Synthetic reference: 32 bars at 128 bpm in A minor, Am F C G a bar each,
-// four-on-the-floor kick, snare on 2 and 4, off-beat hats; sections
-// A (quiet) B C (loud) D (quiet).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -35,8 +28,6 @@ const SPB = 60 / BPM;
 const BARS = 32;
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'kstudio-closeness-'));
 
-// ── The synthetic reference ─────────────────────────────────────────────
-
 const SECTIONS: Array<[string, number, number, number]> = [
   ['A', 0, 8, -16],
   ['B', 8, 16, -9],
@@ -50,7 +41,6 @@ const LOOP: Array<{ root: number; quality: 'min' | 'maj'; keys: number[]; bass: 
   { root: 7, quality: 'maj', keys: [55, 59, 62], bass: 31 },
 ];
 const REF_BANDS = { sub: -10, low: -12, lowMid: -14, mid: -20, highMid: -24, high: -30 };
-/** The reference vocal melody (beats, length, key). */
 const MELODY: Array<[number, number, number]> = [[0, 1, 62], [1, 0.5, 65], [1.5, 0.5, 69], [2, 1, 67], [3, 1.5, 64], [4.5, 0.5, 72], [5, 1, 70], [6, 0.5, 65], [6.5, 0.5, 67], [7, 1, 62], [8, 1, 69], [9, 2, 60]];
 
 const barSec = (bar: number) => bar * 4 * SPB;
@@ -121,8 +111,6 @@ function refAnalysis(file = 'C:/ref/Ref Song.wav'): AudioAnalysis {
 const REF = refAnalysis();
 const BRIEF: ReferenceBrief = referenceBrief(REF, { name: 'Ref Song', genre: 'house', playbooks: listPlaybooks() });
 
-// ── A project built through the commands ────────────────────────────────
-
 function build(opts: { bpm?: number; drums?: 'same' | 'halftime'; transpose?: number; markers?: boolean } = {}) {
   const doc = new DocHost(createDefaultProject('Closeness'), CATALOG, { strict: true });
   doc.exec('transport.set', { bpm: opts.bpm ?? BPM }, USER);
@@ -165,7 +153,6 @@ function build(opts: { bpm?: number; drums?: 'same' | 'halftime'; transpose?: nu
   return { doc, ch, tr };
 }
 
-/** The render of a project laid out like the reference: energy per second follows its sections. */
 function renderLike(bpm = BPM, over: Partial<Analysis> = {}): Analysis {
   const sec = (BARS * 4 * 60) / bpm;
   const curve: number[] = [];
@@ -193,8 +180,6 @@ function closenessOf(p: Project, over: Partial<ClosenessInput> = {}) {
 
 const dim = (c: ReturnType<typeof computeCloseness>, id: string) => c.dims.find((d) => d.id === id)!;
 
-// ── Pure helpers ────────────────────────────────────────────────────────
-
 test('helpers: tempo readings, reading factor, groove cosine, boundaries, chords, balance', () => {
   assert.equal(tempoScore(128, 128).score, 100);
   assert.equal(tempoScore(256, 128).score, 100, 'double time is the same pulse');
@@ -218,8 +203,6 @@ test('helpers: tempo readings, reading factor, groove cosine, boundaries, chords
   assert.deepEqual(stemGroupLevels({ drums: -12, vocals: -80, guitar: -20, other: -20 }), { drums: -12, other: -17 });
 });
 
-// ── Closeness ───────────────────────────────────────────────────────────
-
 test('closeness: a project laid out like the reference scores ~100 in every dimension', () => {
   const { doc } = build();
   const c = closenessOf(doc.project);
@@ -234,7 +217,6 @@ test('closeness: a project laid out like the reference scores ~100 in every dime
   assert.match(dim(c, 'sounds').note ?? '', /fingerprint/);
   assert.ok(c.overall! >= 95, `overall ${c.overall}`);
   assert.equal(c.topFixes.length, 0);
-  // Key estimates mix up relative keys: notes reading as C while the chords centre on Am is the same key.
   const rel = closenessOf(doc.project, { projectKey: 'C' });
   assert.equal(dim(rel, 'key').score, 100);
   assert.match(dim(rel, 'key').note ?? '', /centre on Am/);
@@ -292,7 +274,6 @@ test('closeness: another key costs the key score, not the harmony (compared afte
 
 test('closeness: missing section changes and an off balance are scored and fixed', () => {
   const { doc } = build({ markers: false });
-  // Markers in the wrong places: changes at bars 5 and 13 instead of 9, 17, 25.
   for (const [name, a] of [['Intro', 1], ['Verse', 5], ['Drop', 13]] as const) doc.exec('playlist.addMarker', { tick: (a - 1) * BAR, name }, USER);
   const c = closenessOf(doc.project, { balance: { project: { drums: -6, bass: -15, other: -14 }, reference: { drums: -12, bass: -15, other: -14 } } });
   const arr = dim(c, 'arrangement');
@@ -326,11 +307,7 @@ test('review_song: closeness issues join the ranked list; without a reference no
   console.log(`    closeness + review of 32 bars: ${ms.toFixed(1)} ms`);
 });
 
-// ── The tool rig: a fake engine whose render follows the mixer, a fake analyzer ──
-
-/** Each part's level before its fader (LUFS). */
 const BASE: Record<string, number> = { Kick: -24, Clap: -60, Hat: -32, Snare: -30, '808': -20, Keys: -22, Lead: -26 };
-/** The master's bands before any EQ (dB): too much sub / low / lowMid, far too little top. */
 const MIX_BANDS = { sub: -8, low: -10, lowMid: -12, mid: -20, highMid: -30, high: -40 };
 const BAND_PARAM: Record<string, string> = { sub: 'b2Gain', low: 'b3Gain', lowMid: 'b4Gain', highMid: 'b5Gain', high: 'b6Gain' };
 
@@ -364,7 +341,6 @@ async function rig(opts: { stems?: boolean; melody?: boolean; kickFp?: { index: 
   const root = path.join(TMP, `rig${++rigN}`);
   fs.mkdirSync(root, { recursive: true });
   const { doc, ch, tr } = build();
-  // The studied reference: a muted "Reference: Ref Song" audio track.
   const refPath = path.join(root, 'Ref Song.wav');
   fs.writeFileSync(refPath, 'RIFF fake');
   const lastTrack = doc.project.playlist.trackOrder[doc.project.playlist.trackOrder.length - 1];
@@ -403,7 +379,6 @@ async function rig(opts: { stems?: boolean; melody?: boolean; kickFp?: { index: 
       : {}),
   } as unknown as MainDeps['analyzer'];
   if (opts.kickFp) {
-    // The factory fingerprint index holds the project's kick sample.
     const kick = doc.project.channels[ch('Kick')];
     const kickPath = doc.project.samples[kick.generator.sampleId!].path;
     fs.writeFileSync(path.join(root, 'fingerprints.json'), JSON.stringify({ version: 1, generator: 'test', entries: [{ source: { kind: 'sample', path: kickPath, sampleKind: 'kick' }, fp: opts.kickFp.index }] }));
@@ -476,8 +451,6 @@ const meanAbs = (x: Record<string, number>) => {
   return v.reduce((s, d) => s + Math.abs(d), 0) / Math.max(1, v.length);
 };
 
-// ── match_mix ───────────────────────────────────────────────────────────
-
 test('match_mix: the gaps shrink round by round, the Match EQ is capped at ±6 dB, all in one undo step', async () => {
   const r = await rig();
   const before = r.doc.getHistory().length;
@@ -502,7 +475,6 @@ test('match_mix: the gaps shrink round by round, the Match EQ is capped at ±6 d
   const hist = r.doc.getHistory();
   assert.equal(hist.length, before + 1, 'one undo step');
   assert.match(hist[hist.length - 1].label, /match_mix/);
-  // Undo removes all of it.
   r.doc.undo({ kind: 'agent', clientId: 'claude-code', name: 'Claude Code' });
   assert.equal(masterSlots(r.doc.project).filter((s) => isMatchEq(s)).length, 0);
 });
@@ -526,13 +498,11 @@ test('match_mix: without engine stems it matches the full mix only and says so; 
   assert.match(out.message + (out.text ?? ''), /balance skipped/i);
   assert.equal((out.data as { stems: boolean }).stems, false);
   assert.ok(masterSlots(r.doc.project).some((s) => isMatchEq(s)));
-  // The reference unmuted: refused.
   const r2 = await rig();
   r2.doc.exec('playlist.setTrack', { id: r2.doc.project.playlist.trackOrder[r2.doc.project.playlist.trackOrder.length - 1], mute: false }, USER);
   const bad = await r2.call('match_mix', {});
   assert.equal(bad.ok, false);
   assert.match(bad.message, /isn't muted/);
-  // No reference at all.
   const r3 = await rig();
   r3.doc.exec('channels.set', { id: r3.refChannel, name: 'Some audio' }, USER);
   const none = await r3.call('match_mix', {});
@@ -546,8 +516,6 @@ test('nextEqGains: damped toward the gap, capped, small gaps left alone', () => 
   assert.equal(g.low, 0);
   assert.equal(g.high, 6);
 });
-
-// ── review_song + check_originality through the tools ───────────────────
 
 test('review_song with a studied reference: one stems render, closeness in the result, timings reported', async () => {
   const r = await rig();
@@ -589,7 +557,6 @@ test('check_originality flags a copied reference melody (transposed) and passes 
   assert.equal(out.ok, true, out.message);
   assert.match(out.message, /^COPIED from the studied reference "Ref Song"/);
   assert.match(out.text ?? '', /COPIED FROM THE REFERENCE: Pattern "Hook" · Lead from bar 1: 12 notes in a row follow the reference "Ref Song" vocal melody/);
-  // An original line: other intervals and rhythm.
   const mine = r.doc.exec<{ id: string }>('patterns.add', { name: 'Mine', select: false }, USER).data!.id;
   const own = [60, 67, 65, 64, 72, 71, 69, 62, 64, 57, 59, 60];
   r.doc.exec('notes.add', { patternId: mine, channelId: lead, notes: own.map((k, i) => ({ tick: i * 720, dur: 480, key: k, vel: 0.8 })) }, USER);

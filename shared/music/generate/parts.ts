@@ -1,7 +1,3 @@
-// Chord, arpeggio and bassline generators. Chords come from a progression
-// (preset or numerals) voiced with voice leading; the arp and the bass
-// follow the chords already in the pattern, or a progression.
-
 import type { ArpOptions, BassOptions, ChordOptions } from './options';
 import { RATE_TICKS } from './options';
 import { makeRng, type Rng } from './random';
@@ -21,9 +17,6 @@ import {
 } from './harmony';
 import { chordNames, chordTimeline, vel3, type GenContext, type GenNote, type GenOutput } from './context';
 
-// ── Chords ────────────────────────────────────────────────────────────
-
-/** Stab rhythms in 16th steps of a 16-step bar (cut to shorter bars). */
 const STABS = [
   [0, 3, 6],
   [0, 3, 6, 10],
@@ -104,9 +97,6 @@ export function generateChords(o: ChordOptions, ctx: GenContext): GenOutput {
   return { notes, chords: chordNames(events, ctx.start, ctx.end), chordSource: 'progression', detail: `${prog.label}, ${o.voicing} voicing, ${o.rhythm}` };
 }
 
-// ── Arpeggio ──────────────────────────────────────────────────────────
-
-/** One arp cycle over ascending keys. */
 export function arpCycle(keys: number[], style: Exclude<ArpOptions['style'], 'random'>): number[] {
   const up = [...keys].sort((a, b) => a - b);
   const down = [...up].reverse();
@@ -168,17 +158,13 @@ export function generateArp(o: ArpOptions, ctx: GenContext): GenOutput {
   return { notes, chords: chordNames(tl.events, ctx.start, ctx.end), chordSource: tl.source, detail: `${o.style} ${o.rate} over ${tl.label}` };
 }
 
-/** Tick of the next chord change after `t` (or `end`). */
 function nextChange(events: ChordEvent[], t: number, end: number): number {
   for (const e of events) if (e.tick > t + 10) return Math.min(e.tick, end);
   return end;
 }
 
-// ── Bassline ──────────────────────────────────────────────────────────
-
 type BassRhythm = Exclude<BassOptions['rhythm'], 'auto'>;
 
-/** [16th step, length in steps] in a 16-step bar; several takes per rhythm. */
 const BASS_RHYTHMS: Record<BassRhythm, Array<Array<[number, number]>>> = {
   whole: [[[0, 16]]],
   halves: [[[0, 8], [8, 8]]],
@@ -200,7 +186,6 @@ const BASS_RHYTHMS: Record<BassRhythm, Array<Array<[number, number]>>> = {
 
 const AUTO_RHYTHM: Record<BassOptions['style'], BassRhythm> = { root: 'eighths', rootFifth: 'quarters', octave: 'eighths', walking: 'quarters', glide808: 'trap' };
 
-/** The bass register: the pitch class within a fifth above / below the key root at `octave`. */
 function bassNote(pc: number, key: GenKey, octave: number): number {
   const base = (octave + 1) * 12 + key.root;
   const k = base + mod12(pc - key.root);
@@ -211,7 +196,6 @@ function fifthOf(ev: { tones: number[] }): number {
   return ev.tones.find((t) => t === 7) ?? ev.tones.find((t) => t === 6 || t === 8) ?? 7;
 }
 
-/** A note leading into `target`: a scale step above or below, or a half step below. */
 function approach(target: number, key: GenKey, rng: Rng): number {
   const steps = scaleSteps(key.scale);
   const d = midiToDegree(target, key, steps);
@@ -229,7 +213,6 @@ export function generateBass(o: BassOptions, ctx: GenContext): GenOutput {
   const rhythm = o.rhythm === 'auto' ? AUTO_RHYTHM[o.style] : o.rhythm;
   const step = ctx.beatTicks / 4;
   const barSteps = Math.max(1, Math.round(ctx.barTicks / step));
-  // hit positions: the rhythm per bar, plus every chord change
   const starts = new Set<number>();
   const lens = new Map<number, number>();
   for (let b = 0; ctx.start + b * ctx.barTicks < ctx.end; b++) {
@@ -287,7 +270,6 @@ export function generateBass(o: BassOptions, ctx: GenContext): GenOutput {
           key = approach(target, ctx.key, walk);
           break;
         }
-        // chord tones (and the octave) nearest a line from the root toward the next root
         const pcs = chordPcs(ev);
         const span = Math.max(1, (nextEv && nextEv !== ev ? nextEv.tick : ev.end) - ev.tick);
         const aim = root + ((target - root) * (t - ev.tick)) / span + walk.jitter(3);

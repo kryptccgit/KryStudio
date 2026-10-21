@@ -1,8 +1,3 @@
-// Auto Mashup planner (shared/mashup/plan.ts): grid maths, sections on
-// 4-bar phrases, the key decision (same / relative / Camelot ±1 / tritone,
-// who moves per anchor), tempo readings (half / double, least stretch),
-// role choice for vocalFrom 'auto', the structure for each style, problems,
-// score / reasons / suggestions and determinism.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import {
@@ -21,7 +16,6 @@ import {
 import type { MashupRequest } from '@shared/mashup/types';
 import { toKeyRef } from '@shared/music/keymatch';
 
-/** [label, bars, lufs, vocal activity (undefined = not measured)] */
 type Sec = [string, number, number, number?];
 
 function grid(bpm: number, bars: number, t0 = 0.5): SongGrid {
@@ -65,8 +59,6 @@ const K = (s: string) => toKeyRef(s)!;
 const VOCAL_SONG: Sec[] = [['I', 8, -16, 0], ['V', 16, -11, 1], ['H', 8, -7, 1], ['V', 16, -11, 1], ['H', 8, -7, 1], ['O', 8, -16, 0]];
 const BED_SONG: Sec[] = [['A', 8, -15, 0], ['B', 16, -10, 0], ['C', 16, -6, 0], ['D', 8, -14, 0], ['C', 16, -6, 0], ['A', 8, -15, 0]];
 
-// ── Grid ────────────────────────────────────────────────────────────────
-
 test('grid: song bars ↔ seconds through the beats, for each tempo reading', () => {
   const g = grid(120, 32);
   assert.equal(songBarToSec(g, 120, 1, 0), 0.5);
@@ -86,14 +78,11 @@ test('sections: snapped to 4-bar phrases from the first downbeat, energy 0..1, m
   assert.deepEqual(secs.map((x) => x.name), ['Intro', 'Verse', 'Chorus', 'Outro']);
   assert.equal(secs[2].energy, 1);
   assert.ok(secs[0].energy < secs[1].energy && secs[1].energy < secs[2].energy);
-  // Unmeasured: a song with vocals sings everywhere but a quiet intro / outro; an instrumental never.
   const um = songSections(song({ bpm: 120, vp: 0.8, vocalSource: 'name', secs: [['A', 8, -16], ['B', 16, -8], ['A', 8, -16]] }), 1);
   assert.deepEqual(um.map((x) => x.vocal), [false, true, false]);
   assert.ok(songSections(song({ bpm: 120, kind: 'instrumental', secs: BED_SONG }), 1).every((x) => !x.vocal));
   assert.deepEqual(songSections(song({ bpm: 120, kind: 'instrumental', secs: BED_SONG }), 1).map((x) => x.name), ['Intro', 'Build', 'Drop 1', 'Break', 'Drop 2', 'Outro']);
 });
-
-// ── Key ─────────────────────────────────────────────────────────────────
 
 test('key helpers: circle-of-fifths distance, Camelot codes, the best move', () => {
   assert.equal(fifthsDistance(K('C'), K('G')), 1);
@@ -135,8 +124,6 @@ test('key decision: same / relative / Camelot neighbour / move, and who moves fo
   assert.equal(weak.weak, true);
 });
 
-// ── Tempo ───────────────────────────────────────────────────────────────
-
 test('tempo: half / double readings stretch least; the anchor keeps its tempo; middle meets half way', () => {
   const v70 = song({ bpm: 70 });
   const b140 = song({ bpm: 140 });
@@ -160,28 +147,21 @@ test('tempo: half / double readings stretch least; the anchor keeps its tempo; m
   assert.deepEqual([noTempo.bpm, noTempo.a.srcBpm, noTempo.a.speed], [128, null, 1]);
 });
 
-// ── Roles ───────────────────────────────────────────────────────────────
-
 test('roles: auto picks the song with the vocal over the instrumental, either way round; the other way loses without stems', () => {
   const vocal = song({ name: 'Vocal Song', bpm: 120, vp: 0.9, secs: VOCAL_SONG });
   const inst = song({ name: 'Beat', bpm: 120, vp: 0.05, kind: 'instrumental', secs: BED_SONG });
   assert.equal(planMashup(req(), vocal, inst).build.vocalFrom, 'a');
   assert.equal(planMashup(req(), inst, vocal).build.vocalFrom, 'b');
-  // Neither measured: a tie goes to A; a key / tempo cost decides otherwise.
   const u1 = song({ bpm: 120, vp: 0.5, vocalSource: 'unknown' });
   const u2 = song({ bpm: 120, vp: 0.5, vocalSource: 'unknown' });
   assert.equal(planMashup(req(), u1, u2).build.vocalFrom, 'a');
-  // A can't give a vocal (no stems, no model, a full song): B's vocal on A.
   const stuck = song({ bpm: 120, vp: 0.9, stems: [], canSeparate: false });
   const acap = song({ bpm: 120, vp: 0.95, kind: 'acapella', stems: [], canSeparate: false });
   assert.equal(planMashup(req(), stuck, acap).build.vocalFrom, 'b');
-  // An explicit vocalFrom is kept, with a suggestion when the other way fits much better.
   const forced = planMashup(req({ vocalFrom: 'b' }), vocal, inst);
   assert.equal(forced.build.vocalFrom, 'b');
   assert.ok(forced.check.suggestions.some((s) => /Take the vocal from A instead/.test(s)), forced.check.suggestions.join(' | '));
 });
-
-// ── Structure ───────────────────────────────────────────────────────────
 
 test('vocalOverBeat: the hook over the bed\'s drops, verses over the build, an instrumental intro / break / outro, on 4-bar phrases', () => {
   const r = planMashup(req({ vocalFrom: 'a' }), song({ name: 'Vocal Song', bpm: 120, key: 'Gm', secs: VOCAL_SONG }), song({ name: 'Beat', bpm: 120, key: 'Am', vp: 0.6, secs: BED_SONG }));
@@ -194,12 +174,10 @@ test('vocalOverBeat: the hook over the bed\'s drops, verses over the build, an i
   const t = r.build.tracks;
   assert.deepEqual(t.map((x) => [x.role, x.part, x.warp, x.semitones, x.formant]), [['vocal', 'vocals', 'tones', 2, true], ['drums', 'drums', 'beats', 0, false], ['bass', 'bass', 'complex', 0, false], ['other', 'other', 'complex', 0, false]]);
   const vocal = t[0];
-  // The hook (8 bars at song bar 24) fills each 16-bar chorus twice; the verse plays the first verse in order.
   const hookAt = (start: number) => vocal.clips.filter((c) => c.startBar >= start && c.startBar < start + 16).map((c) => [c.startBar, c.bars, c.songBar]);
   assert.deepEqual(hookAt(25), [[25, 8, 24], [33, 8, 24]]);
   assert.deepEqual(hookAt(9), [[9, 16, 8]]);
   assert.ok(!vocal.clips.some((c) => c.startBar < 9 || (c.startBar >= 41 && c.startBar < 49) || c.startBar >= 65), 'no vocal in the intro, the break or the outro');
-  // The bed plays in its own order: mashup bar n = bed bar n−1.
   assert.ok(t[1].clips.every((c) => c.songBar === c.startBar - 1));
   assert.equal(r.build.tune, 'off', 'Krypt Tune only when asked: a finished vocal is in tune');
   assert.equal(r.build.tuneKey, 'Am');
@@ -254,8 +232,6 @@ test('stemBlend: picked stems from both songs; the other song\'s drums follow th
   assert.ok(none.check.problems.some((x) => /at least one stem/.test(x)));
 });
 
-// ── Problems, score, suggestions, determinism ──────────────────────────
-
 test('problems: stems needed without a stem model name the Model Manager; unreadable songs are listed', () => {
   const r = planMashup(req({ vocalFrom: 'a' }), song({ name: 'Hit', bpm: 120, stems: [], canSeparate: false }), song({ name: 'Other hit', bpm: 120, stems: [], canSeparate: false }));
   assert.equal(r.check.problems.length, 2);
@@ -275,13 +251,11 @@ test('score + reasons: a perfect fit scores high; a big stretch and a far key sc
   assert.match(good.check.reasons[1], /share their notes/);
   assert.match(good.check.reasons[2], /^Vocal: A has a clear lead vocal \(from its vocal stem\)/);
   assert.match(good.check.reasons[4], /^Structure:/);
-  // No anchor: 100 → 128 bpm would play the vocal ×1.28, so both meet half way (×1.13 / ×0.88, clean).
   const half = planMashup(req({ vocalFrom: 'a' }), song({ bpm: 100, key: 'Bbm', secs: VOCAL_SONG }), song({ bpm: 128, key: 'Em', secs: BED_SONG }));
   assert.equal(half.check.plan.bpm, 113);
   assert.match(half.check.reasons[0], /Met half way: keeping B's tempo would stretch the other song further\./);
   assert.ok(!half.build.notes.some((n) => /outside ×0\.85/.test(n)), half.build.notes.join(' | '));
   assert.ok(half.check.score < good.check.score, `${half.check.score} vs ${good.check.score}`);
-  // Anchor "beat" asked: the beat keeps its tempo, the stretch is audible and "middle" is suggested.
   const bad = planMashup(req({ vocalFrom: 'a', anchor: 'beat' }), song({ bpm: 100, key: 'Bbm', secs: VOCAL_SONG }), song({ bpm: 128, key: 'Em', secs: BED_SONG }));
   assert.equal(bad.check.plan.bpm, 128);
   assert.ok(bad.check.score < good.check.score - 20, `${bad.check.score} vs ${good.check.score}`);
@@ -291,7 +265,6 @@ test('score + reasons: a perfect fit scores high; a big stretch and a far key sc
   const forced = planMashup(req({ vocalFrom: 'a', factorA: 1, anchor: 'beat' }), song({ bpm: 70, secs: VOCAL_SONG }), song({ bpm: 140, secs: BED_SONG }));
   assert.ok(forced.check.suggestions.some((s) => s === 'Use A at double time: it plays ×1 instead of ×2.'), forced.check.suggestions.join(' | '));
   assert.equal(forced.check.plan.shiftA.stretch, 0.5, 'stretch = output ÷ input duration');
-  // C over E: the vocal moves −1 st onto B major, a Camelot neighbour of E, rather than +4 st.
   const near = planMashup(req({ vocalFrom: 'a' }), song({ bpm: 128, key: 'C', secs: VOCAL_SONG }), song({ bpm: 128, key: 'E', secs: BED_SONG }));
   assert.equal(near.check.plan.shiftA.semitones, -1);
   assert.match(near.check.reasons[1], /A moves −1 st \(C major → B major\) next to B's E major \(Camelot neighbours\)/);
@@ -310,14 +283,10 @@ test('readings: 1-based sections, tempo alternatives, the source path; determini
   assert.equal(r1.check.b.path, undefined);
   assert.equal(r1.check.a.sections[0].startBar, 1);
   assert.deepEqual(r1.check.b.bpmAlternatives, [45, 180]);
-  // Section order in the input doesn't matter.
   const shuffled = { ...b, sections: [...b.sections].reverse() };
   assert.deepEqual(planMashup(req(), a, shuffled).check.plan, r1.check.plan);
 });
 
-// ── Measured harmony, levels ─────────────────────────────────────────────
-
-/** A pitch profile: the scale of `tonic` (major / minor) with the tonic and fifth strongest. */
 function profileOf(tonic: number, minor: boolean): number[] {
   const steps = minor ? [0, 2, 3, 5, 7, 8, 10] : [0, 2, 4, 5, 7, 9, 11];
   const p = new Array<number>(12).fill(0.01);
@@ -329,7 +298,6 @@ function profileOf(tonic: number, minor: boolean): number[] {
 }
 
 test("key by the stems: the vocal stem's notes against the instrumental's decide the shift, not the songs' key labels", () => {
-  // A's mix reads G#m, but its vocal sings in Db; B's beat plays E major. Labels say "Camelot neighbours, no shift": the notes say +3.
   const a = { ...song({ name: 'A', bpm: 120, key: 'G#m', secs: VOCAL_SONG }), harmony: { vocal: { profile: profileOf(1, false), key: 'Db', keyConfidence: 0.86 } } };
   const b = { ...song({ name: 'B', bpm: 120, key: 'E', keyConf: 0.44, secs: BED_SONG }), harmony: { bed: { profile: profileOf(4, false), key: null, keyConfidence: 0 } } };
   const byLabel = planMashup(req({ vocalFrom: 'a' }), { ...a, harmony: undefined }, { ...b, harmony: undefined });
@@ -340,19 +308,16 @@ test("key by the stems: the vocal stem's notes against the instrumental's decide
   assert.match(r.check.reasons[1], /^Key: measured on the stems: A's vocal \(Db major\) moves \+3 st \(to E major\) to fit B's instrumental \(E major\): the notes match 100% \(unmoved: \d+%\)\./);
   assert.ok(r.check.score > byLabel.check.score - 10, 'a measured good fit is not penalised like a weak label reading');
   assert.equal(r.build.tracks.find((t) => t.role === 'vocal')!.semitones, 3);
-  // Anchor vocal: the instrumental moves instead (−3); middle splits (+2 / −1).
   const kv = planMashup(req({ vocalFrom: 'a', anchor: 'vocal' }), a, b);
   assert.deepEqual([kv.check.plan.shiftA.semitones, kv.check.plan.shiftB.semitones], [0, -3]);
   const mid = planMashup(req({ vocalFrom: 'a', anchor: 'middle' }), a, b);
   assert.deepEqual([mid.check.plan.shiftA.semitones, mid.check.plan.shiftB.semitones], [2, -1]);
-  // Already fitting: no move. Never fitting (a whole-tone line fits no major scale): a warning.
   const same = planMashup(req({ vocalFrom: 'a' }), { ...a, harmony: { vocal: { profile: profileOf(4, false), key: 'E', keyConfidence: 0.8 } } }, b);
   assert.equal(same.check.plan.shiftA.semitones, 0);
   assert.match(same.check.reasons[1], /fits B's instrumental \(E major\) as it is/);
   const wholeTone = Array.from({ length: 12 }, (_, i) => (i % 2 ? 0.001 : 1 / 6));
   const none = planMashup(req({ vocalFrom: 'a' }), { ...a, harmony: { vocal: { profile: wholeTone, key: null, keyConfidence: 0 } } }, b);
   assert.match(none.check.reasons[1], /may not fit/);
-  // An explicit key still wins over the measurement.
   assert.equal(planMashup(req({ vocalFrom: 'a', key: 'F' }), a, b).check.plan.key, 'F');
 });
 

@@ -1,5 +1,3 @@
-// Run a TypeScript script that imports @shared/* : bundles with esbuild, runs with node.
-// Usage: node scripts/run-script.mjs <file.ts> [args...]
 import { build } from 'esbuild';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';

@@ -1,25 +1,12 @@
-// ──────────────────────────────────────────────────────────────────────
-// Guides search and "Related" links. Pure (no React, no window); tested in
-// test/guides.test.ts.
-//
-// Search looks at the title, the summary, the ## / ### headings and the body
-// text with the markup stripped. Every word of the query must appear
-// somewhere; a word found in the title counts most, then a heading or the
-// summary, then the body. Each hit carries a short snippet around the first
-// body (or summary) match so the list shows WHY it matched.
-// ──────────────────────────────────────────────────────────────────────
-
 import { ARTICLES, GUIDE_GROUPS, type GuideArticle } from './articles';
 import { blockInlines, guideLinks, inlineText, parseGuide, type GuideBlock } from './markup';
 
-/** Sidebar order (by group): Previous / Next, the narrow picker and search ties follow it. */
 export function orderedArticles(list: readonly GuideArticle[] = ARTICLES): GuideArticle[] {
   return GUIDE_GROUPS.flatMap((g) => list.filter((a) => a.group === g));
 }
 
 const parsed = new Map<string, GuideBlock[]>();
 
-/** Parsed blocks of an article (cached by id + body, so tests with fixtures stay honest). */
 export function blocksOf(a: GuideArticle): GuideBlock[] {
   const key = `${a.id}\u0000${a.body.length}`;
   let b = parsed.get(key);
@@ -34,7 +21,6 @@ interface Indexed {
   title: string;
   summary: string;
   headings: string;
-  /** Body text as shown (original case, collapsed spaces): the snippet source. */
   body: string;
   bodyLower: string;
 }
@@ -65,13 +51,10 @@ export interface Snippet {
 export interface SearchHit {
   article: GuideArticle;
   score: number;
-  /** Where the best match was. */
   field: 'title' | 'heading' | 'summary' | 'body';
-  /** Around the first body match (or the summary when the body has none); null when only the title matched. */
   snippet: Snippet | null;
 }
 
-/** Lower-cased words of a query (quotes and punctuation at the edges dropped). */
 export function queryTerms(query: string): string[] {
   return query
     .toLowerCase()
@@ -85,7 +68,6 @@ const wordStart = (text: string, i: number): boolean => i === 0 || !/[\p{L}\p{N}
 function snippetAt(text: string, at: number, len: number, radius = 60): Snippet {
   let start = Math.max(0, at - radius);
   let end = Math.min(text.length, at + len + radius * 1.4);
-  // Trim to whole words.
   if (start > 0) {
     const sp = text.indexOf(' ', start);
     if (sp !== -1 && sp < at) start = sp + 1;
@@ -101,7 +83,6 @@ function snippetAt(text: string, at: number, len: number, radius = 60): Snippet 
   };
 }
 
-/** Ranked articles matching every word of the query (empty query → []). */
 export function searchGuides(query: string, list: readonly GuideArticle[] = ARTICLES): SearchHit[] {
   const terms = queryTerms(query);
   if (!terms.length) return [];
@@ -143,7 +124,6 @@ export function searchGuides(query: string, list: readonly GuideArticle[] = ARTI
         ok = false;
         break;
       }
-      // A little extra for words the article keeps coming back to (capped).
       if (bi !== -1) s += Math.min(8, ix.bodyLower.split(t).length - 1);
       score += s;
       if (rank > bestRank) {
@@ -167,14 +147,9 @@ export function searchGuides(query: string, list: readonly GuideArticle[] = ARTI
     }
     hits.push({ article: a, score, field: best, snippet });
   }
-  // Stable sort keeps the sidebar order for ties.
   return hits.sort((x, y) => y.score - x.score);
 }
 
-/**
- * "Related" at the end of an article: the articles it links to with [[guide:…]] (in order), then the others in its
- * group, without itself, Previous and Next (they have their own buttons). At most `max`.
- */
 export function relatedArticles(a: GuideArticle, max = 6, list: readonly GuideArticle[] = ARTICLES): GuideArticle[] {
   const order = orderedArticles(list);
   const i = order.findIndex((x) => x.id === a.id);

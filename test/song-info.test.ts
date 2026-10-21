@@ -1,9 +1,3 @@
-// Song info + cover art: the tag bytes (shared/audio/tags.ts: ID3v2.3, RIFF
-// LIST/INFO + id3 chunk) round-tripped through our own readers and, when
-// ffmpeg is installed, through ffprobe; tagging on disk (atomic, streamed);
-// the cover inside the .kstudio container (save → reopen, recovery); the
-// project.setInfo / setCover / clearCover commands and their undo; the cover
-// and export services; and the set_song_info / set_cover / export_audio tools.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -50,8 +44,6 @@ const tmpDir = (name: string): string => {
   return d;
 };
 
-// ── Synthetic files ─────────────────────────────────────────────────────
-
 const enc = new TextEncoder();
 const ascii = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 const u32le = (n: number) => Uint8Array.of(n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff);
@@ -81,10 +73,8 @@ function wav(parts: Uint8Array[]): Uint8Array {
   return concat([ascii('RIFF'), u32le(4 + body.length), ascii('WAVE'), body]);
 }
 
-/** Fake MPEG frames: what the engine writes (frames only, no tags). */
 const MP3_FRAMES = concat(Array.from({ length: 12 }, (_, i) => concat([Uint8Array.of(0xff, 0xfb, 0x90, 0x64), noise(413, i + 1)])));
 
-/** A tiny but real-looking JPEG / PNG header (assets check the magic numbers, not the pixels). */
 const FAKE_JPEG = concat([Uint8Array.of(0xff, 0xd8, 0xff, 0xe0), noise(2000, 3), Uint8Array.of(0xff, 0xd9)]);
 const FAKE_JPEG_2 = concat([Uint8Array.of(0xff, 0xd8, 0xff, 0xe0), noise(1500, 4), Uint8Array.of(0xff, 0xd9)]);
 const FAKE_PNG = concat([Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a), noise(900, 5)]);
@@ -101,8 +91,6 @@ function dataPayload(w: Uint8Array): Uint8Array {
   const c = scanRiff(memoryReader(w), w.length).find((x) => x.id === 'data')!;
   return w.subarray(c.offset + 8, c.offset + 8 + c.size);
 }
-
-// ── ID3v2.3 ─────────────────────────────────────────────────────────────
 
 test('ID3v2.3: header layout, every text frame, APIC front cover, Unicode titles in UTF-16', () => {
   const tag = buildId3v23({ ...TAGS, title: 'Café 夜 Run' }, { mime: 'image/jpeg', data: FAKE_JPEG });
@@ -139,16 +127,13 @@ test('ID3v2.3: MP3 extras: TLEN in ms and the iTunSMPB gapless COMM frame', () =
   const c = parseComm(f.get('COMM')!);
   assert.deepEqual([c.lang, c.description, c.text], ['eng', 'iTunSMPB', smpb], 'leading space and spacing kept');
   assert.equal(f.get('COMM')![0], 0, 'ISO-8859-1');
-  // From an engine RenderResult: samples / sampleRate.
   const r = { path: 'x.mp3', files: [], durationSec: 4, peakDb: -1, lufsIntegrated: -14, mp3: { sampleRate: 44100, kbps: 320, samples: 44100 * 3 + 441, encoderDelay: 672, endPadding: 100, itunSmpb: smpb } } as RenderResult;
   assert.deepEqual(mp3Tags(r), { lengthMs: 3010, gapless: smpb });
   assert.deepEqual(mp3Tags({ ...r, mp3: undefined }), {});
 });
 
-// ── WAV ─────────────────────────────────────────────────────────────────
-
 test('WAV: INFO + id3 chunks go after the audio; the audio bytes are identical; RIFF size and word alignment hold', () => {
-  const audio = noise(48_001, 9); // odd: the data chunk carries a pad byte
+  const audio = noise(48_001, 9);
   const src = wav([FMT, chunk('fact', u32le(12000)), chunk('data', audio), chunk('cue ', noise(25, 2))]);
   const out = tagWavBytes(src, TAGS, { mime: 'image/png', data: FAKE_PNG });
   const view = new DataView(out.buffer, out.byteOffset);
@@ -167,7 +152,7 @@ test('WAV: INFO + id3 chunks go after the audio; the audio bytes are identical; 
 });
 
 test('WAV: tagging twice replaces the old tags; other LIST types survive; a missing pad byte is added', () => {
-  const audio = noise(3001, 4); // odd and LAST: written without its pad byte, as some writers do
+  const audio = noise(3001, 4);
   const adtl = chunk('LIST', concat([ascii('adtl'), noise(10)]));
   const old = chunk('LIST', concat([ascii('INFO'), ascii('ISFT'), u32le(5), ascii('Lavf'), Uint8Array.of(0, 0)]));
   const src = concat([wav([FMT, old, adtl]), ascii('data'), u32le(audio.length), audio]);
@@ -187,13 +172,11 @@ test('WAV: RF64, broken chunk sizes and non-WAV files are refused (never guessed
   rf64.set(ascii('RF64'), 0);
   assert.throws(() => tagWavBytes(rf64, TAGS), (e: unknown) => e instanceof TagError && /RF64/.test((e as Error).message));
   const short = wav([FMT, chunk('data', noise(64))]);
-  new DataView(short.buffer).setUint32(12 + FMT.length + 4, 9999, true); // data claims more than the file holds
+  new DataView(short.buffer).setUint32(12 + FMT.length + 4, 9999, true);
   assert.throws(() => tagWavBytes(short, TAGS), /claims more bytes than the file has/);
   assert.throws(() => tagWavBytes(enc.encode('not a wav at all, honestly'), TAGS), /Not a WAV file/);
   assert.throws(() => tagWavBytes(wav([FMT]), TAGS), /no data chunk/);
 });
-
-// ── MP3 ─────────────────────────────────────────────────────────────────
 
 test('MP3: a fresh ID3v2.3 tag is prepended; an old ID3v2 (with footer) and a trailing ID3v1 are dropped; frames untouched', () => {
   const v24 = concat([ascii('ID3'), Uint8Array.of(4, 0, 0x10, 0, 0, 0, 20), new Uint8Array(20), ascii('3DI'), Uint8Array.of(4, 0, 0x10, 0, 0, 0, 20)]);
@@ -203,12 +186,9 @@ test('MP3: a fresh ID3v2.3 tag is prepended; an old ID3v2 (with footer) and a tr
   assert.equal(tag.major, 3);
   assert.deepEqual([...out.subarray(tag.size)], [...MP3_FRAMES], 'exactly the MPEG frames follow the tag');
   assert.equal(id3FrameText(frameMap(out.subarray(0, tag.size)).get('TIT2')!), 'Midnight Run');
-  // The engine's own files have no tag: the frames start right after ours.
   const plain = tagMp3Bytes(MP3_FRAMES, TAGS);
   assert.deepEqual([...plain.subarray(parseId3v2(plain)!.size)], [...MP3_FRAMES]);
 });
-
-// ── On disk (streamed, atomic) ──────────────────────────────────────────
 
 test('tagAudioFile: the streamed on-disk result equals the in-memory one; a broken file is left untouched', async () => {
   const dir = tmpDir('disk');
@@ -232,8 +212,6 @@ test('tagAudioFile: the streamed on-disk result equals the in-memory one; a brok
   assert.match((await tagAudioFile(path.join(dir, 'x.flac'), TAGS)).message, /only be written into WAV and MP3/);
 });
 
-// ── ffprobe (when ffmpeg is installed) ──────────────────────────────────
-
 function findTool(name: string): string | null {
   const exe = `${name}.exe`;
   const dirs = (process.env.PATH ?? '').split(path.delimiter);
@@ -243,7 +221,6 @@ function findTool(name: string): string | null {
       for (const sub of fs.readdirSync(path.join(winget, d))) dirs.push(path.join(winget, d, sub, 'bin'));
     }
   } catch {
-    /* no WinGet packages */
   }
   for (const d of dirs) {
     for (const f of [path.join(d, exe), path.join(d, name)]) if (d && fs.existsSync(f) && fs.statSync(f).isFile()) return f;
@@ -284,8 +261,6 @@ test('ffprobe reads the song info and the attached cover in our WAV and MP3 (ski
   }
 });
 
-// ── The cover in the project file ───────────────────────────────────────
-
 function projectWithCover(bytes = FAKE_JPEG): { project: Project; file: string } {
   const host = new DocHost(createDefaultProject('Cover'), CATALOG, { strict: true });
   const file = coverFileName(bytes, 'image/jpeg');
@@ -303,7 +278,6 @@ test('container: the cover is stored in the zip, only the referenced one is extr
   const p = validateProject(d.project, d.meta?.schemaVersion);
   assert.deepEqual(p.meta.cover, { file, mime: 'image/jpeg', width: 1400, height: 1400 });
   assert.throws(() => encodeContainer(project, '1', {}, { '../evil.jpg': FAKE_JPEG }), /Can't store/);
-  // Plain JSON projects have no assets.
   assert.deepEqual(decodeContainer(enc.encode(JSON.stringify(project))).assets, {});
 });
 
@@ -349,10 +323,10 @@ test('recovery: the snapshot carries the cover, and a cover set after the snapsh
   const first = assets.put(FAKE_JPEG, 'image/jpeg');
   host.exec('project.setCover', { file: first.file, mime: 'image/jpeg', width: 10, height: 10 }, { actor: USER });
   await store.snapshot(host.project, { docVersion: host.version, savedVersion: -1, projectPath: null }, assets.entriesFor(host.project));
-  const second = assets.put(FAKE_JPEG_2, 'image/jpeg'); // after the snapshot: only the mirror has it
+  const second = assets.put(FAKE_JPEG_2, 'image/jpeg');
   host.exec('project.setCover', { file: second.file, mime: 'image/jpeg', width: 12, height: 12 }, { actor: USER });
   await store.flush();
-  await new Promise((r) => setTimeout(r, 50)); // the mirror write is async
+  await new Promise((r) => setTimeout(r, 50));
   const s = await new RecoveryStore(dir, 'test', noLog).recover();
   assert.ok(s);
   assert.equal(s.project.meta.cover?.file, second.file);
@@ -384,7 +358,6 @@ test('ProjectService: the cover survives open → save → reopen; a missing cov
   const a = service(path.join(dir, 'ud1'));
   assert.equal((await a.svc.open(f)).ok, true);
   assert.deepEqual([...a.svc.coverImage()!.bytes], [...FAKE_JPEG]);
-  // Change the cover (undoable), save in place, reopen elsewhere.
   const ref = a.svc.storeCover(FAKE_PNG, 'image/png', 64, 64);
   a.doc.exec('project.setCover', ref, { actor: USER });
   a.doc.exec('project.setInfo', { title: 'Reopened', year: 2026 }, { actor: USER });
@@ -393,11 +366,9 @@ test('ProjectService: the cover survives open → save → reopen; a missing cov
   assert.equal((await b.svc.open(f)).ok, true);
   assert.equal(b.doc.project.meta.title, 'Reopened');
   assert.deepEqual([...b.svc.coverImage()!.bytes], [...FAKE_PNG]);
-  // Undo in the first session brings the first cover back, bytes and all.
   a.doc.undo(USER);
   a.doc.undo(USER);
   assert.deepEqual([...a.svc.coverImage()!.bytes], [...FAKE_JPEG]);
-  // A file whose zip lost the image: opens, without the cover, and says so.
   const lost = path.join(dir, 'lost.kstudio');
   fs.writeFileSync(lost, encodeContainer(project, 'test'));
   const c = service(path.join(dir, 'ud3'));
@@ -406,8 +377,6 @@ test('ProjectService: the cover survives open → save → reopen; a missing cov
   assert.match(r.message!, /cover image was missing or damaged/);
   assert.equal(c.doc.project.meta.cover, undefined);
 });
-
-// ── Commands ────────────────────────────────────────────────────────────
 
 test('commands: project.setInfo / setCover / clearCover, each one undo step', () => {
   const doc = new DocHost(createDefaultProject('Cmd'), CATALOG, { strict: true });
@@ -426,7 +395,7 @@ test('commands: project.setInfo / setCover / clearCover, each one undo step', ()
   assert.equal(doc.project.meta.cover, undefined);
   assert.match(doc.exec('project.clearCover', {}, { actor: USER }).message ?? '', /no cover image/);
   doc.undo(USER);
-  const coverNow = () => doc.project.meta.cover; // a getter: assert.equal narrowed the property above
+  const coverNow = () => doc.project.meta.cover;
   assert.equal(coverNow()?.file, file, 'undo brings the cover back');
   doc.undo(USER);
   assert.equal(doc.project.meta.cover, undefined);
@@ -434,8 +403,6 @@ test('commands: project.setInfo / setCover / clearCover, each one undo step', ()
   assert.equal(doc.project.meta.title, 'Title');
   assert.equal(checkIntegrity(doc.project).length, 0);
 });
-
-// ── Cover + export services, and the release tools ──────────────────────
 
 function fakeNormalize(bytes: Uint8Array) {
   if (bytes[0] !== 0xff && bytes[0] !== 0x89) throw new Error("That file isn't a PNG or JPEG image.");
@@ -521,7 +488,6 @@ function rig(opts: { folder?: 'music' | 'project'; projectPath?: string | null; 
   } as unknown as MainDeps;
   const caller: ToolCaller = { actor: { kind: 'agent', clientId: 'rel', name: 'Release Agent' }, session: newSession(), via: 'test' };
   const call = (name: string, args: unknown = {}) => callTool(deps, caller, name, args, { quiet: true });
-  /** Put the active pattern on the Playlist so "song" has something to render. */
   const arrange = () => {
     const p = doc.project;
     const r = doc.exec('playlist.addClip', { kind: 'pattern', trackId: p.playlist.trackOrder[0], start: 0, patternId: p.transport.activePatternId }, { actor: USER });

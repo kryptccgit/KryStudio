@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Krypt EQ magnitude response, computed exactly like the engine
-// (engine/crates/dsp/src/effects/eq.rs on the TPT SVF of blocks/filters.rs:
-// `Svf::design` + `Svf::magnitude`). Pure math + the curve's log-frequency
-// geometry; test/meters.test.ts checks it against reference values printed
-// by the Rust test `combined_response_reference_values`.
-// ──────────────────────────────────────────────────────────────────────
-
 export type SvfMode = 'lowpass' | 'highpass' | 'bell' | 'lowShelf' | 'highShelf';
 
 export interface SvfDesign {
@@ -16,7 +8,6 @@ export interface SvfDesign {
   m2: number;
 }
 
-/** Butterworth section Qs for cascaded 2nd-order cuts (12 / 24 / 48 dB/oct). */
 export const BUTTER_Q: readonly (readonly number[])[] = [
   [Math.SQRT1_2],
   [0.541196100146197, 1.3065629648763768],
@@ -53,7 +44,6 @@ export function designSvf(mode: SvfMode, fc: number, qIn: number, gainDb: number
   }
 }
 
-/** Linear magnitude of a designed section at `f` Hz (the digital response on the unit circle). */
 export function svfMagnitude(s: SvfDesign, f: number, fs: number): number {
   const w = (2 * Math.PI * Math.min(f, fs * 0.4999)) / fs;
   const sIm = Math.tan(w * 0.5) / s.g;
@@ -64,12 +54,9 @@ export function svfMagnitude(s: SvfDesign, f: number, fs: number): number {
   return Math.sqrt((reN * reN + imN * imN) / (reD * reD + imD * imD));
 }
 
-// ── The Krypt EQ's bands ──────────────────────────────────────────────
-
 export type EqBandKind = 'lowCut' | 'lowShelf' | 'bell' | 'highShelf' | 'highCut';
 
 export interface EqBand {
-  /** 1..7, as in the param ids (b1Freq …). */
   n: number;
   kind: EqBandKind;
   label: string;
@@ -90,10 +77,8 @@ export const EQ_BANDS: readonly EqBand[] = [
   { n: 7, kind: 'highCut', label: 'High cut', on: 'b7On', freq: 'b7Freq', slope: 'b7Slope' },
 ];
 
-/** Reads a plain param value (doc value or the catalog default). */
 export type EqParams = (id: string) => number;
 
-/** The sections one band contributes (none while it is off; a band at 0 dB is unity anyway). */
 export function bandSections(b: EqBand, p: EqParams, fs: number): SvfDesign[] {
   if (p(b.on) < 0.5) return [];
   const f = p(b.freq);
@@ -107,21 +92,17 @@ export function bandSections(b: EqBand, p: EqParams, fs: number): SvfDesign[] {
   }
 }
 
-/** One band's response in dB at `f`. */
 export function bandResponseDb(b: EqBand, p: EqParams, f: number, fs: number): number {
   let db = 0;
   for (const s of bandSections(b, p, fs)) db += 20 * Math.log10(svfMagnitude(s, f, fs));
   return db;
 }
 
-/** The EQ's combined response (all bands + output gain) in dB at each frequency. */
 export function eqResponseDb(p: EqParams, freqs: readonly number[], fs: number): number[] {
   const sections = EQ_BANDS.flatMap((b) => bandSections(b, p, fs));
   const out = p('output');
   return freqs.map((f) => sections.reduce((db, s) => db + 20 * Math.log10(svfMagnitude(s, f, fs)), out));
 }
-
-// ── Curve geometry (log frequency, linear dB) ─────────────────────────
 
 export const CURVE_MIN_HZ = 20;
 export const CURVE_MAX_HZ = 20000;
@@ -134,7 +115,6 @@ export function xToFreq(x: number, width: number): number {
   return CURVE_MIN_HZ * Math.pow(CURVE_MAX_HZ / CURVE_MIN_HZ, Math.min(1, Math.max(0, x / width)));
 }
 
-/** dB → y with ±range dB over the height (0 dB in the middle). */
 export function dbToY(db: number, height: number, range: number): number {
   return height / 2 - (Math.max(-range, Math.min(range, db)) / range) * (height / 2);
 }
@@ -143,12 +123,10 @@ export function yToDb(y: number, height: number, range: number): number {
   return Math.max(-range, Math.min(range, ((height / 2 - y) / (height / 2)) * range));
 }
 
-/** `n` log-spaced frequencies across the curve. */
 export function logFreqs(n: number): number[] {
   return Array.from({ length: n }, (_, i) => CURVE_MIN_HZ * Math.pow(CURVE_MAX_HZ / CURVE_MIN_HZ, i / Math.max(1, n - 1)));
 }
 
-/** Grid lines: 20, 50, 100, 200, 500, 1k, 2k, 5k, 10k, 20k. */
 export const FREQ_GRID: readonly number[] = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
 
 export function formatHz(f: number): string {

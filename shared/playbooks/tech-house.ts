@@ -1,4 +1,3 @@
-// Tech house: a rolling, funky bassline as the hook, dense percussion, minimal harmony.
 import type { Playbook } from './types';
 
 export const TECH_HOUSE: Playbook = {

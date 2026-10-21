@@ -1,12 +1,3 @@
-// Mastering upgrades (research/23 §1-2) over the real DocHost + commands, a fake engine (sampleInfo,
-// analyzeFile, render, previewFile) and a fake measurement that "renders" a song's range: its loudness follows its
-// insert's Krypt limiter input (slope 0.8) and fader, its tone follows its tone EQ, its width its imager.
-//
-//  - reference: read once (analyzeFile) then cached (memory + disk); a run matches its tone / loudness / width,
-//    reports closeness before → after; a bad reference changes nothing; the matched A/B preview gain
-//  - album: a new tab with one track + insert + marker per song, back to back; ONE mastering entry; a chain on
-//    every song's insert, only a safety limiter on the master; keep-dynamics offsets; Cancel rolls the mastering
-//    back; Export all writes one file per song without overwriting; auto_mix {files} / {reference}
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
@@ -35,7 +26,6 @@ const song = (name: string): string => {
 };
 const REF = song('Big Reference.wav');
 
-/** Per file name: loudness before mastering, seconds, tone vs mids. */
 const SONGS: Record<string, { lufs: number; sec: number; high: number }> = {
   'Intro.wav': { lufs: -20, sec: 40, high: -12 },
   'Single.wav': { lufs: -14, sec: 180, high: -8 },
@@ -60,7 +50,6 @@ const refAnalysis = (): Analysis => ({
   spectralCentroidHz: 2000,
 });
 
-/** A song's (or the whole project's master's) sound after its Krypt chain. */
 function chainSound(ins: { volume: number; slots: Record<string, { type: string; params: Record<string, number>; enabled: boolean }>; slotOrder: string[] }, base: { lufs: number; high: number }) {
   const lim = findKryptSlot(ins as never, 'limiter', true);
   const eq = findKryptSlot(ins as never, 'eq', true);
@@ -182,8 +171,6 @@ function rig(o: { gate?: (n: number) => Promise<void>; fromMix?: boolean } = {})
 const live = (doc: DocHost) => doc.getHistory().filter((h) => !h.undone);
 const ALBUM = () => [song('Intro.wav'), song('Single.wav'), song('Ballad.mp3')];
 
-// ── Reference ───────────────────────────────────────────────────────────
-
 test('reference: one light engine pass, then cached in memory and on disk', async () => {
   forgetReferences();
   const r = rig();
@@ -220,7 +207,6 @@ test('reference run (master): aims at its tone, loudness and width; closeness be
   assert.ok(o.after.truePeak <= -1 + 0.05, `the −1 dBTP default with a reference: ${o.after.truePeak}`);
   assert.ok(o.notes.some((n) => /^Matching "Big Reference"/.test(n)), o.notes.join(' | '));
   assert.ok(o.changes.some((c) => /Imager/.test(c.target) && /toward the reference's width/.test(c.what)), o.changes.map((c) => c.what).join(' | '));
-  // a quieter reference really moves the target
   const q = rig({ fromMix: true });
   const quiet = await q.svc.run({ mode: 'master', preset: 'pop-polish', reference: REF, targetLufs: -14 }, { actor: USER });
   assert.ok(Math.abs(quiet.data!.after.lufs - -14) <= 0.5, 'your target wins over the reference');
@@ -243,8 +229,6 @@ test('reference: a bad file changes nothing; vocals mode ignores it and says so;
   assert.ok(Math.abs(r.calls.previews[0].gain - Math.pow(10, -3 / 20)) < 1e-9);
   assert.match(p.message!, /3\.0 dB quieter/);
 });
-
-// ── Album ───────────────────────────────────────────────────────────────
 
 test('album: a new tab with the songs back to back, ONE mastering entry, a chain per song, only a safety limiter on the master', async () => {
   const r = rig();
@@ -271,14 +255,12 @@ test('album: a new tab with the songs back to back, ONE mastering entry, a chain
     assert.equal(types[types.length - 1], 'krypt.limiter', `${s.name}: limiter last`);
     assert.ok(s.after.truePeak <= o.truePeak + 0.05);
   }
-  // keep the album's dynamics: the loudest (Single, −14) on target, Intro (−20) 4 LU under, Ballad 3 under
   assert.deepEqual(o.songs.map((s) => s.targetLufs), [-15, -11, -14]);
   for (const s of o.songs) assert.ok(Math.abs(s.after.lufs - s.targetLufs) <= 0.5, `${s.name} ${s.after.lufs} vs ${s.targetLufs}`);
   assert.ok(o.passes >= 1 && o.passes <= 3);
   assert.ok(r.sim.calls() <= 3 + 3 * 3 + 3, `renders ${r.sim.calls()} (each song once per pass)`);
   assert.ok(o.notes.some((n) => /^Loudness: .* LU between the loudest and the quietest/.test(n)));
   assert.match(out.message!, /One undo step removes the mastering/);
-  // A/B: the whole mastering toggles as one entry
   const after = JSON.stringify(p.mixer);
   assert.equal(r.doc.toggleEntry(o.entryId!, USER).ok, true);
   assert.equal(r.doc.project.mixer.inserts[r.doc.project.mixer.masterId].slotOrder.length, 0, 'Before: no chains');
@@ -308,7 +290,7 @@ test('album: bad lists are refused before anything opens; Cancel rolls the maste
   const gate = new Promise<void>((res) => (release = res));
   let entered!: () => void;
   const inside = new Promise<void>((res) => (entered = res));
-  const c = rig({ gate: async (n) => { if (n === 4) { entered(); await gate; } } }); // after the 3 before-renders + 1 refine render
+  const c = rig({ gate: async (n) => { if (n === 4) { entered(); await gate; } } });
   const job = c.svc.masterAlbum({ paths: ALBUM(), preset: 'balanced' }, USER);
   await inside;
   assert.equal(c.svc.busy, 'Master an album');

@@ -1,9 +1,3 @@
-// "Make something like this song" (shared/reference): the brief study_reference
-// builds from one analysis (tempo reading, section plan in 4-bar phrases with
-// energy, drum feel per 16th, chord loop, mix numbers), the genre guess
-// against every playbook's own drum patterns, the playbook adapted to the
-// reference (get_playbook / review_song), the recipe text, and review_song's
-// checks against the reference. Pure: synthetic analyses, no analyzer.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import type { AudioAnalysis, DrumHit } from '@shared/analyzer/protocol';
@@ -18,7 +12,6 @@ import { FACTORY_PRESETS } from '@shared/sounds/factory';
 
 const PBS = listPlaybooks();
 
-/** A synthetic analysis: `bars` bars at `bpm` (downbeat at 0.1 s), sections [label, startBar, endBar, lufs], hits at beats. */
 function song(o: { bpm: number; bars: number; sections?: Array<[string, number, number, number]>; hits?: Array<{ beat: number; role: DrumHit['role'] }>; key?: string; swing?: number | null; chords?: Array<[number, 'maj' | 'min', number]>; lufs?: number }): AudioAnalysis {
   const spb = 60 / o.bpm;
   const t = (beat: number) => 0.1 + beat * spb;
@@ -52,7 +45,6 @@ function song(o: { bpm: number; bars: number; sections?: Array<[string, number, 
   };
 }
 
-/** Drum hits (in beats) of a playbook's own main drum pattern, repeated over `bars` bars. */
 function playbookHits(pb: Playbook, bars: number): Array<{ beat: number; role: DrumHit['role'] }> {
   const pat = pb.patterns.find((x) => x.for.some((f) => ['drop', 'hook', 'chorus'].includes(f.toLowerCase()))) ?? pb.patterns[0];
   const r = parse(pat.kpn, { requireHeader: true });
@@ -68,8 +60,6 @@ function playbookHits(pb: Playbook, bars: number): Array<{ beat: number; role: D
   return out;
 }
 
-// ── Genre guess ─────────────────────────────────────────────────────────
-
 test('genre guess: each playbook\'s own drums at its own tempo come back as that genre (or its family) near the top', () => {
   let top1 = 0;
   let top3 = 0;
@@ -84,7 +74,6 @@ test('genre guess: each playbook\'s own drums at its own tempo come back as that
     else misses.push(`${pb.id} → ${g.map((x) => `${x.id} ${x.score}`).join(', ')}`);
     if (g[0] && (g[0].id === pb.id || sameFamily(g[0].id, pb.id))) family++;
   }
-  // Measured 2026-10-12: exact 16/18, top 3 17/18, family 17/18 (future bass reads as trap-family half-time).
   assert.ok(top3 >= PBS.length - 2, `in the top 3 for ${top3}/${PBS.length}; misses: ${misses.join(' | ')}`);
   assert.ok(family >= PBS.length - 2, `top guess in the right family for ${family}/${PBS.length}`);
   assert.ok(top1 >= PBS.length - 4, `top guess exact for ${top1}/${PBS.length}`);
@@ -92,7 +81,6 @@ test('genre guess: each playbook\'s own drums at its own tempo come back as that
 
 test('genre guess: half / double-time readings; no tempo → no guess; reasons in words', () => {
   const trap = playbookFor('trap')!;
-  // A trap beat that the detector read at half its tempo still reads as trap at the playbook's tempo.
   const r = readingFor(trap, trap.bpm.typical / 2);
   assert.deepEqual([r.bpm, r.factor, r.inRange], [trap.bpm.typical, 2, true]);
   assert.equal(readingFor(trap, 400).inRange, false);
@@ -102,11 +90,8 @@ test('genre guess: half / double-time readings; no tempo → no guess; reasons i
   assert.ok(['house', 'tech-house', 'deep-house', 'techno', 'edm'].includes(g[0].id), JSON.stringify(g));
   assert.ok(g[0].why.some((w) => /tempo 128 in/.test(w)), g[0].why.join());
   assert.deepEqual(guessGenres({ detectedBpm: null, swing: null, grid: null }, PBS), []);
-  // Without drums the tempo alone keeps every score modest.
   assert.ok(guessGenres({ detectedBpm: 128, swing: null, grid: null }, PBS, 1)[0].score <= 0.6);
 });
-
-// ── Drum feel ───────────────────────────────────────────────────────────
 
 test('drum feel: four on the floor, backbeat, hat density, per 16th at each tempo reading', () => {
   const hits = Array.from({ length: 64 }, (_, b) => [{ beat: b, role: 'kick' as const }, ...(b % 4 === 1 || b % 4 === 3 ? [{ beat: b, role: 'snare' as const }] : []), { beat: b, role: 'hat' as const }, { beat: b + 0.5, role: 'hat' as const }]).flat();
@@ -115,18 +100,13 @@ test('drum feel: four on the floor, backbeat, hat density, per 16th at each temp
   const f = drumFeel(grid, 1, 124, 4);
   assert.deepEqual([f.fourOnFloor, f.backbeat, f.hats, f.bars], [true, 'two-four', '8ths', 16]);
   assert.deepEqual(f.steps.kick, [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
-  // Read at double time, one analysed bar is two bars here: the kick lands on every other beat, the snare on 3.
   const d = gridSteps16(grid, 2);
   assert.deepEqual(d.kick, [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]);
   assert.equal(drumFeel(grid, 2, 124, 4).backbeat, 'three');
-  // Half time: two analysed bars per bar here.
   assert.equal(gridSteps16(grid, 0.5).kick!.filter((x) => x > 0).length, 8);
-  // A playbook's own drums measure the same way.
   const house = playbookDrums(playbookFor('house')!)!;
   assert.ok(house.bars >= 2 && (house.steps.kick?.[0] ?? 0) > 0.9 && (house.steps.kick?.[4] ?? 0) > 0.9, JSON.stringify(house.steps.kick));
 });
-
-// ── Section plan ────────────────────────────────────────────────────────
 
 const EDM_SECTIONS: Array<[string, number, number, number]> = [
   ['A', 0, 8, -16],
@@ -150,16 +130,12 @@ test('section plan: 4-bar phrases, energy against the loudest, tiny sections mer
   ]);
   assert.equal(b.totalBars, 64);
   assert.equal(b.form, 'A B C D C A');
-  // Read at double time (detected 64 for a 128 genre), every section doubles in bars.
   const half = song({ bpm: 64, bars: 32, sections: EDM_SECTIONS.map(([l, s, e, v]) => [l, s / 2, e / 2, v] as [string, number, number, number]) });
   const p2 = sectionPlan(referenceBrief(half, { name: 'x', playbooks: [] }), 128);
   assert.deepEqual(p2.map((p) => p.bars), [8, 8, 16, 8, 16, 8]);
-  // A section that snaps onto its neighbour's phrase merges into it.
   const blip = song({ bpm: 128, bars: 32, sections: [['A', 0, 8, -14], ['B', 8, 9, -9], ['C', 9, 24, -8], ['D', 24, 32, -15]] });
   assert.deepEqual(sectionPlan(referenceBrief(blip, { name: 'x', playbooks: [] }), 128).map((p) => [p.startBar, p.bars]), [[1, 8], [9, 16], [25, 8]]);
-  // Fewer than 3 sections: no plan.
   assert.deepEqual(referenceBrief(song({ bpm: 128, bars: 16, sections: [['A', 0, 8, -10], ['B', 8, 16, -9]] }), { name: 'x', playbooks: PBS }).plan, []);
-  // A 7-minute song caps at 256 bars.
   const long = song({ bpm: 174, bars: 300, sections: [['A', 0, 100, -12], ['B', 100, 200, -8], ['C', 200, 300, -12]] });
   const pl = sectionPlan(referenceBrief(long, { name: 'x', playbooks: [] }), 174);
   assert.equal(pl[pl.length - 1].startBar + pl[pl.length - 1].bars - 1, 256);
@@ -173,19 +149,14 @@ test('section kinds in each playbook\'s words: peaks are its drops / choruses, d
   assert.equal(pop[0], 'intro');
   assert.ok(['chorus', 'hook'].includes(pop[2]) && pop[2] === pop[4], pop.join());
   assert.equal(pop[5], 'outro');
-  // A mastered EDM track (w6 end to end, "Night Drive"): a drum-heavy intro nearly as loud as the drops, loud 8-bar
-  // builds before each drop, a breakdown without the kick: intro, breakdown, build, drop, breakdown, build, drop, outro.
   const P = (label: string, bars: number, energy: number) => ({ label, startBar: 0, bars, lufs: -7, energy });
   const night = [P('A', 16, 0.95), P('B', 16, 0.4), P('C', 8, 1), P('D', 16, 0.95), P('E', 16, 0.6), P('C', 8, 1), P('D', 16, 0.95), P('A', 16, 0.9)];
   assert.deepEqual(planKinds(night, playbookFor('edm')!), ['intro', 'breakdown', 'build', 'drop', 'breakdown', 'build', 'drop', 'outro']);
-  // A pop song that opens on its chorus (the first section's material is a peak mid-song) keeps it a chorus.
   const cold = [P('A', 8, 1), P('B', 16, 0.75), P('A', 8, 1), P('B', 16, 0.75), P('A', 8, 1), P('C', 8, 0.5)];
   const ck = planKinds(cold, playbookFor('pop')!);
   assert.ok(['chorus', 'hook'].includes(ck[0]) && ck[0] === ck[2], ck.join());
   assert.equal(ck[5], 'outro');
 });
-
-// ── Harmony, brief text ─────────────────────────────────────────────────
 
 test('chord loop: the most repeated 4-chord window as roman numerals; unclear chords give none', () => {
   const a = song({ bpm: 120, bars: 16, chords: [[9, 'min', 0], [5, 'maj', 0], [0, 'maj', 0], [7, 'maj', 0]] });
@@ -205,13 +176,10 @@ test('the brief: numbers, closest genres, sections, drum feel, loop and mix in p
   assert.deepEqual(b.mix.bandsVsMid, { sub: 7, low: 6, lowMid: 2, highMid: -4, high: -11 });
   const text = briefText(b);
   for (const s of ['REFERENCE — "Night Drive"', 'Tempo 128 bpm', 'key Am', 'Closest genres (estimated):', 'Form: A B C D C A', 'Sections (bars at 128 bpm', '17-32', 'four-on-the-floor kick', 'kick     9... 9... 9... 9...', 'Harmony: Am F C G (i VI III VII) loop', 'Mix: -8 LUFS']) assert.ok(text.includes(s), `${s}\n${text}`);
-  // A genre the user named wins over the guess and lays the plan out in its words.
   const asked = referenceBrief(a, { name: 'Night Drive', genre: 'pop', playbooks: PBS });
   assert.deepEqual([asked.genre, asked.genreSource], ['pop', 'given']);
   assert.match(briefText(asked), /You asked for Pop: the plan below uses it/);
 });
-
-// ── The adapted playbook ────────────────────────────────────────────────
 
 test('adaptPlaybook: the reference\'s tempo reading, key, swing, section plan, loudness and contrast; the playbook\'s parts', () => {
   const edm = playbookFor('edm')!;
@@ -239,7 +207,6 @@ test('adaptPlaybook: the reference\'s tempo reading, key, swing, section plan, l
   assert.deepEqual(x.playbook.targets.contrastLu, [5, 12]);
   assert.equal(x.playbook.keys.common[0], 'Am');
   assert.equal(x.playbook.bpm.typical, 126);
-  // The same song for a genre whose tempo no reading fits: that genre's tempo, the sections keep their durations.
   const dnb = playbookFor('dnb')!;
   const y = adaptPlaybook(dnb, referenceBrief(a, { name: 'Song', genre: 'dnb', playbooks: PBS }));
   assert.equal(y.bpm, readingFor(dnb, 126).inRange ? readingFor(dnb, 126).bpm : dnb.bpm.typical);
@@ -247,7 +214,6 @@ test('adaptPlaybook: the reference\'s tempo reading, key, swing, section plan, l
     assert.match(y.bpmWhy, /outside/);
     assert.equal(y.swing, dnb.swing, 'no swing from another tempo');
   }
-  // Two sections: the playbook's arrangement scaled to the reference's length; an unsure key stays the playbook's.
   const short = song({ bpm: 128, bars: 96, sections: [['A', 0, 48, -10], ['B', 48, 96, -9]] });
   const sb = referenceBrief(short, { name: 's', genre: 'edm', playbooks: PBS });
   sb.keyConfidence = 0.2;
@@ -258,8 +224,6 @@ test('adaptPlaybook: the reference\'s tempo reading, key, swing, section plan, l
   assert.equal(z.key, null);
   assert.deepEqual(z.playbook.keys, edm.keys);
 });
-
-// ── get_playbook's recipe with a reference ──────────────────────────────
 
 test('recipe: the reference wins over the playbook and the focus, the user\'s words win over the reference', () => {
   const edm = playbookFor('edm')!;
@@ -282,8 +246,6 @@ test('recipe: the reference wins over the playbook and the focus, the user\'s wo
   assert.doesNotMatch(both.text, /YOUR REFERENCES SAY/);
 });
 
-// ── Real-song lessons (w6 end to end) ───────────────────────────────────
-
 test('kick-aware energy: a mastered breakdown nearly as loud as the drop still reads as a dip when its kick drops out', () => {
   const secs: Array<[string, number, number, number]> = [['A', 0, 8, -9], ['B', 8, 24, -8], ['C', 24, 40, -8.4], ['B', 40, 56, -8], ['D', 56, 64, -10]];
   const kicked = new Set([1, 3]);
@@ -298,7 +260,6 @@ test('kick-aware energy: a mastered breakdown nearly as loud as the drop still r
   assert.equal(loudOnly.kinds[2], 'drop', 'by loudness alone the breakdown looks like a drop');
   assert.deepEqual(withKicks.kinds, ['intro', 'drop', 'breakdown', 'drop', 'outro']);
   assert.deepEqual(withKicks.sections.map((s) => s.kickRate), [0, 4, 0, 4, 0]);
-  // A song with no kick at all keeps the loudness reading.
   const noKick = referenceBrief(song({ bpm: 128, bars: 64, sections: secs, hits: hits.filter((h) => h.role === 'hat') }), { name: 'x', genre: 'edm', playbooks: PBS });
   assert.deepEqual(noKick.plan.map((p) => p.energy), loudOnly.plan.map((p) => p.energy));
 });

@@ -1,24 +1,3 @@
-// File access for agents: Settings ▸ Agents ▸ File access (settings.mcp.fileAccess).
-//
-//   tool call with a path ─▶ realUserPath(): UNC / device / ADS / relative /
-//   non-audio / missing paths are REFUSED outright in every mode, never asked
-//     ─▶ inside the Browser folders, a file the open project already uses, or
-//        allowed earlier? carry on
-//     ─▶ 'anywhere' (the default; local pipe clients + the built-in agent):
-//        any other local file / folder is used without a prompt (logged)
-//     ─▶ 'browser': refused with the reason (no prompts in this mode)
-//     ─▶ 'ask' (and the HTTP endpoint, which is capped at 'ask'): ASK the
-//        user, one prompt at a time:
-//          • in the agent's own client when it declared MCP elicitation
-//            (form mode: an enum, see consentSchema), or
-//          • in Krypt Studio: a native dialog parented to the main window
-//            (main.ts injects it; this module never imports Electron).
-//   "Allow this file" lasts until Krypt Studio quits. "Allow this folder"
-//   adds the folder to the Browser folders (settings.browserRoots: persisted,
-//   visible and removable in the Browser panel). Identical requests made at
-//   the same time share one prompt; no answer within 120 s is a clear error.
-//   Every answer is logged and shown in the agent activity feed.
-
 import crypto from 'node:crypto';
 import path from 'node:path';
 import type { AgentActivity, Settings } from '@shared/types';
@@ -28,36 +7,26 @@ import { fail } from './tools/types';
 import { accessAllows, isDriveRoot, pathAccess, realUserPath, safeName, unquotePath, type PathGrants, type UserPathKind } from './tools/util';
 
 export type ConsentChoice = 'file' | 'folder' | 'deny';
-/** 'allowed': nothing to ask (another prompt already covered it); 'unavailable': nobody could be asked. */
 export type ConsentOutcome = ConsentChoice | 'timeout' | 'unavailable' | 'allowed';
 
-/** An outcome and where the question was answered ("Claude Code", "Krypt Studio"). */
 export interface ConsentResult {
   outcome: ConsentOutcome;
   where: string;
 }
 
 export interface ConsentRequest {
-  /** Canonical absolute path (realpath). */
   path: string;
   isDir: boolean;
-  /** The client's display name, e.g. "Claude Code". */
   client: string;
   clientId: string;
   tool: string;
 }
 
-/** Puts the question to the user somewhere and resolves with the answer (null = it couldn't ask). */
 export interface ConsentAsker {
-  /** Where the question appears, for messages: "Claude Code", "Krypt Studio". */
   where: string;
   ask(req: ConsentRequest, signal: AbortSignal): Promise<ConsentChoice | null>;
 }
 
-/**
- * Thrown by an asker that hands the question to the client instead of waiting for it (MCP 2026-07-28
- * multi-round-trip `input_required`): the tool call returns, and the client retries it with the answer.
- */
 export class ConsentPending extends Error {
   constructor(
     readonly request: ConsentRequest,
@@ -83,13 +52,11 @@ const PURPOSE: Record<string, string> = {
 
 const pathKey = (p: string): string => path.resolve(p).toLowerCase().replace(/[\\/]+$/, '');
 
-/** The folder "Allow this folder" would add, or null for a drive root (never offered: that would be a whole drive). */
 export function grantFolder(req: Pick<ConsentRequest, 'path' | 'isDir'>): string | null {
   const dir = path.resolve(req.isDir ? req.path : path.dirname(req.path));
   return dir.toLowerCase() === path.parse(dir).root.toLowerCase() ? null : dir;
 }
 
-/** The words of the question, shared by the dialog and the elicitation form. */
 export function consentText(req: ConsentRequest): { title: string; message: string; detail: string; name: string; folder: string; choices: Array<{ value: ConsentChoice; label: string; hint: string }> } {
   const name = safeName(path.basename(req.path) || req.path, 120);
   const folder = req.isDir ? req.path : path.dirname(req.path);
@@ -108,7 +75,6 @@ export function consentText(req: ConsentRequest): { title: string; message: stri
   return { title: 'File access', message, detail, name, folder, choices };
 }
 
-/** The form-mode elicitation for a request: one enum field `access`. */
 export function consentElicitation(req: ConsentRequest): { mode: 'form'; message: string; requestedSchema: { type: 'object'; properties: Record<string, unknown>; required: string[] } } {
   const t = consentText(req);
   return {
@@ -129,7 +95,6 @@ export function consentElicitation(req: ConsentRequest): { mode: 'form'; message
   };
 }
 
-/** Reads the `access` choice out of an elicitation result (decline / cancel / anything odd = deny). */
 export function choiceFromElicitResult(r: unknown): ConsentChoice {
   const o = (r ?? {}) as { action?: unknown; content?: { access?: unknown } };
   if (o.action !== 'accept') return 'deny';
@@ -137,7 +102,6 @@ export function choiceFromElicitResult(r: unknown): ConsentChoice {
   return v === 'file' || v === 'folder' ? v : 'deny';
 }
 
-/** Stable per path: the multi-round-trip retry carries the answer under this key. */
 export function consentKey(req: Pick<ConsentRequest, 'path' | 'isDir'>): string {
   return `krypt-file-access-${crypto.createHash('sha256').update(`${req.isDir ? 'd' : 'f'}:${pathKey(req.path)}`).digest('hex').slice(0, 16)}`;
 }
@@ -146,9 +110,7 @@ export interface PathConsentDeps {
   getSettings(): Settings;
   updateSettings(patch: Partial<Settings>): Settings;
   log(level: 'info' | 'warn' | 'error', message: string): void;
-  /** The agent activity feed (mcp:activity). */
   broadcast?(channel: string, payload: unknown): void;
-  /** Krypt Studio's own prompt (main.ts: a native dialog), used when the client can't ask. */
   dialog?: ConsentAsker;
   timeoutMs?: number;
 }
@@ -165,7 +127,6 @@ export class PathConsent implements PathGrants {
     return this.deps.timeoutMs ?? CONSENT_TIMEOUT_MS;
   }
 
-  /** Allowed for this app session ("Allow this file" / "Allow once"). */
   granted(real: string, isDir: boolean): boolean {
     const k = pathKey(real);
     if (!isDir && this.files.has(k)) return true;
@@ -173,15 +134,10 @@ export class PathConsent implements PathGrants {
     return false;
   }
 
-  /** What this session allowed, newest last (files and folders). */
   sessionGrants(): string[] {
     return [...this.files, ...this.folders];
   }
 
-  /**
-   * Ask about one path: identical requests made while one is open share it, different ones wait their turn.
-   * `covered` re-checks the Browser folders right before asking (an earlier answer may have added the folder).
-   */
   request(req: ConsentRequest, asker?: ConsentAsker, covered?: () => boolean): Promise<ConsentResult> {
     const k = `${req.isDir ? 'd' : 'f'}:${pathKey(req.path)}`;
     const open = this.inflight.get(k);
@@ -218,7 +174,6 @@ export class PathConsent implements PathGrants {
         choice = ac.signal.aborted ? 'timeout' : null;
         if (choice === null) this.deps.log('warn', `File access: couldn't ask in ${first.where}: ${(e as Error)?.message ?? e}`);
       }
-      // The client couldn't ask (its elicitation failed): ask in Krypt Studio instead.
       if (choice === null && this.deps.dialog && first !== this.deps.dialog) {
         where = this.deps.dialog.where;
         choice = await Promise.race([this.deps.dialog.ask(req, ac.signal).catch(() => null), expired]);
@@ -258,12 +213,10 @@ export class PathConsent implements PathGrants {
     try {
       this.deps.broadcast?.(MCP_CHANNELS.activity, activity);
     } catch {
-      /* the activity feed is best-effort */
     }
     return outcome;
   }
 
-  /** Add a folder to the Browser folders unless one already covers it. True when added. */
   private addRoot(dir: string): boolean {
     const s = this.deps.getSettings();
     const k = pathKey(dir);
@@ -278,14 +231,6 @@ export class PathConsent implements PathGrants {
   }
 }
 
-// ── The helper every path-taking tool goes through ─────────────────────
-
-/**
- * Make sure the agent may read `input` before the tool runs, under the File access setting: paths the policy
- * covers pass (Browser folders, the project's own files, session grants, or anything local in 'anywhere'); in
- * 'ask' mode a local file / folder outside them is put to the user; unsafe paths are refused in every mode.
- * `factory:` and `pack:` paths pass (the tool checks them). In 'browser' mode the tool itself refuses with the reason.
- */
 export async function ensurePathAccess(deps: MainDeps, caller: ToolCaller, tool: string, input: string, kind: UserPathKind, asker?: ConsentAsker): Promise<void> {
   const raw = unquotePath(input);
   if ((raw.startsWith('factory:') || raw.startsWith('pack:')) && kind !== 'image' && kind !== 'midi') return;
@@ -298,9 +243,9 @@ export async function ensurePathAccess(deps: MainDeps, caller: ToolCaller, tool:
     return;
   }
   if (isDir && isDriveRoot(real)) fail(`For safety, agents can't read a whole drive (${safeName(real, 20)}). Ask the user for the folder that holds the songs.`);
-  if (acc.mode !== 'ask') return; // 'browser': no prompts; the tool refuses with the reason
+  if (acc.mode !== 'ask') return;
   const covered = () => accessAllows(pathAccess(deps, caller), real, isDir);
-  if (!deps.consent) return; // no consent service (tests, tools-only hosts): the tool refuses with the allow-list message
+  if (!deps.consent) return;
   const req: ConsentRequest = { path: real, isDir, client: caller.actor.name, clientId: caller.actor.clientId, tool };
   const { outcome, where } = await deps.consent.request(req, asker, covered);
   const name = safeName(path.basename(real) || real, 120);

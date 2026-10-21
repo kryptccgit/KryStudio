@@ -1,8 +1,3 @@
-//! krypt.delay — tempo-synced stereo / ping-pong delay. 100% wet output
-//! (echoes only; the slot mix sets the blend). Feedback runs through a
-//! high-pass, a low-pass and a gentle saturator; delay time glides smoothly
-//! (tape-like) on changes, with optional wow modulation.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::delay::DelayLine;
 use crate::blocks::filters::{Svf, SvfMode};
@@ -40,7 +35,6 @@ const MAX_SECONDS: f32 = 16.0;
 
 pub struct Delay {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     lines: [DelayLine; 2],
@@ -147,7 +141,7 @@ impl Effect for Delay {
             self.time.reset(self.time.target);
             self.fb.reset(self.fb.target);
         }
-        let depth = self.mod_depth * 0.0025 * self.sr; // up to ±2.5 ms
+        let depth = self.mod_depth * 0.0025 * self.sr;
         let lfo_inc = 0.55 / self.sr;
         for i in 0..n {
             let t = self.time.next();
@@ -165,14 +159,12 @@ impl Effect for Delay {
             let dl = self.lines[0].read_frac((t + ml + depth).max(1.0));
             let dr = self.lines[1].read_frac((t + mr + depth).max(1.0));
             let (inl, inr) = if self.ping {
-                // mono in → left line; left echoes feed the right line; right feeds back left
                 (0.5 * (xl + xr) + dr * fb, dl)
             } else {
                 (xl + dl * fb, xr + dr * fb)
             };
             let wl = self.lp[0].tick(self.hp[0].tick(inl as f64)) as f32;
             let wr = self.lp[1].tick(self.hp[1].tick(inr as f64)) as f32;
-            // soft saturation keeps runaway feedback musical
             let wl = if wl.abs() > 0.5 { tanh_fast(wl) } else { wl };
             let wr = if wr.abs() > 0.5 { tanh_fast(wr) } else { wr };
             self.lines[0].push(crate::blocks::flush(wl));

@@ -1,6 +1,3 @@
-// The Session view guide (Wave 12.2, research/16 §2.1). Kept in its own file;
-// articles.ts lists it after the Playlist guide. Pure data.
-
 import type { GuideArticle } from './articles';
 
 export const SESSION_ARTICLE: GuideArticle = {

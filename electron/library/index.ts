@@ -1,7 +1,3 @@
-// Reference library wiring (Electron side): the service over the analyzer's
-// shared sidecar + Model Manager, with native folder / file pickers.
-// main.ts creates it after the analyzer and stops it before the analyzer.
-
 import type { DocHost } from '@shared/doc/DocHost';
 import type { SampleInfo } from '@shared/engine/protocol';
 import type { LibraryState } from '@shared/library/types';

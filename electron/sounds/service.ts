@@ -1,21 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// SoundsService: presets (factory + user) and the factory sample index, for
-// the MCP tools (SoundsAccess) and the renderer (window.krypt.sounds, IPC).
-//
-//   factory presets  shared/sounds/factory (compiled in; may be empty)
-//   user presets     userData/presets/*.json, one preset per file, validated
-//                    with zPreset (invalid files are skipped with a logged
-//                    warning). Written atomically. Files changed outside the
-//                    app are picked up on the next read (cheap signature
-//                    check, at most once a second).
-//   factory index    <factoryDir>/index.json (null when missing / invalid)
-//   sample folders   a capped, time-boxed look at the user's profile for
-//                    folders that look like sample libraries
-//
-// Loading a preset is a doc command (shared/commands/presets.ts); this
-// service never edits the document. Node-only (no Electron import).
-// ──────────────────────────────────────────────────────────────────────
-
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -34,22 +16,14 @@ import { factoryIndexReader, type IndexReader } from './factoryIndex';
 import type { SoundsAccess } from './types';
 
 export interface SoundsServiceDeps {
-  /** Read for capture; exec only labels a saved channel with its new preset (presets.markChannel, actor user). */
   doc: Pick<DocHost, 'project' | 'catalog' | 'exec'>;
   userDataDir: string;
   factoryDir: string;
   getSettings(): Pick<Settings, 'browserRoots'>;
-  /** EVENT.soundsState to every window. */
   broadcast(state: SoundsState): void;
   log(level: 'info' | 'warn' | 'error', message: string): void;
-  /**
-   * Wave 7b: installed sound packs' samples ('pack:<id>/…', PacksService.samples), merged into factoryIndex() after
-   * the factory's own so factory sounds win ties. Default: none.
-   */
   packSamples?: () => readonly PackSample[];
-  /** Factory presets (default: shared/sounds/factory). Tests pass fixtures. */
   factoryPresets?: readonly Preset[];
-  /** Folders suggestSampleFolders looks in (default: Documents, Music, Desktop, Downloads under the user's home). */
   profileDirs?: () => string[];
   now?: () => number;
 }
@@ -60,9 +34,7 @@ export interface SampleFolderSuggestion {
   inBrowser: boolean;
 }
 
-/** Folder names that suggest a sample library. */
 const SAMPLE_DIR_RE = /(sample|pack|kit|loop|one[\s_-]?shot|drum|808|sounds?\b|stems?\b|splice|producer|beats?\b)/i;
-/** Profile sub-folders that are sample libraries by convention. */
 const KNOWN_LIBRARY_DIRS = [
   ['Documents', 'Samples'],
   ['Music', 'Samples'],
@@ -79,7 +51,6 @@ const USER_RESCAN_MS = 1000;
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** 'user:chain/club-bus' → 'chain.club-bus' (slugs never contain dots, so names can't collide). */
 function fileStem(id: string): string {
   return id.replace(/^user:/, '').replace(/\//g, '.');
 }
@@ -92,7 +63,6 @@ function cleanName(s: unknown, max = 64): string {
   return c.length > max ? c.slice(0, max).trim() : c;
 }
 
-/** Metadata from IPC / agents, checked field by field. */
 export function cleanMeta(raw: unknown): SavePresetMeta & { role?: string; withFx?: boolean; author?: string; targetLufs?: number } {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const genres: GenreId[] = [];
@@ -139,8 +109,6 @@ export class SoundsService implements SoundsAccess {
     this.refreshUser(true);
   }
 
-  // ── SoundsAccess ────────────────────────────────────────────────────
-
   presets(): readonly Preset[] {
     this.refreshUser();
     if (!this.all) this.all = [...this.factory, ...[...this.user.values()].map((u) => u.preset)];
@@ -152,10 +120,6 @@ export class SoundsService implements SoundsAccess {
     return this.factoryById.get(id) ?? this.user.get(id)?.preset;
   }
 
-  /**
-   * The sound library's sample index: resources/factory/index.json plus the samples of installed sound packs (after
-   * the factory's, deduplicated by path). Null only when neither has any.
-   */
   factoryIndex(): FactoryIndex | null {
     const factory = this.index.read();
     let packs: readonly PackSample[] = [];
@@ -184,7 +148,6 @@ export class SoundsService implements SoundsAccess {
     const prefix = p.kind === 'chain' ? 'user:chain/' : 'user:';
     let id = `${prefix}${slug}`;
     for (let n = 2; this.user.has(id) || fs.existsSync(this.fileFor(id)); n++) id = `${prefix}${slug.slice(0, 44)}-${n}`;
-    // A sound saved from a sound-pack instrument needs that pack too (kept out of agents' defaults without it).
     const packId = p.kind === 'instrument' && !p.requires && p.sample ? parsePackPath(p.sample)?.packId : undefined;
     const candidate = { ...p, id, name, ...(packId ? { requires: packId } : {}) };
     const v = zPreset.safeParse(candidate);
@@ -219,8 +182,6 @@ export class SoundsService implements SoundsAccess {
     return { ok: true, message: `Deleted preset "${u.preset.name}".` };
   }
 
-  // ── Renderer surface (IPC) ──────────────────────────────────────────
-
   state(): SoundsState {
     const presets = this.presets();
     return { presets: presets.map(summarizePreset), factoryCount: this.factory.length, userCount: this.user.size, userDir: this.userDir() };
@@ -231,7 +192,6 @@ export class SoundsService implements SoundsAccess {
     return p ? { ok: true, data: p } : { ok: false, message: 'That preset no longer exists.' };
   }
 
-  /** Save a channel's current sound as a user preset. */
   saveChannel(channelId: string, rawMeta: unknown): ActionResult<PresetSummary> {
     const meta = cleanMeta(rawMeta);
     const ch = this.deps.doc.project.channels[channelId];
@@ -251,14 +211,12 @@ export class SoundsService implements SoundsAccess {
     }
     const r = this.saveUser(preset);
     if (r.ok && r.data) {
-      // The channel now plays that preset: its preset bar shows the saved name.
       const m = this.deps.doc.exec('presets.markChannel', { channelId, preset: { id: r.data.id, name: r.data.name } }, { actor: USER });
       if (!m.ok) this.deps.log('warn', `[sounds] saved "${r.data.name}" but couldn't label the channel with it: ${m.message}`);
     }
     return r;
   }
 
-  /** Save a mixer insert's effect chain as a user chain preset. */
   saveChain(insertId: string, rawMeta: unknown): ActionResult<PresetSummary> {
     const meta = cleanMeta(rawMeta);
     const p = this.deps.doc.project;
@@ -294,31 +252,22 @@ export class SoundsService implements SoundsAccess {
     return { ok: true, message: `Renamed "${u.preset.name}" to "${name}".`, data: summarizePreset(next) };
   }
 
-  /** userData/presets (not created until needed). */
   userDir(): string {
     return path.join(this.deps.userDataDir, 'presets');
   }
 
-  /** The folder, created if missing (Reveal in Explorer). */
   ensureUserDir(): string {
     return ensureDir(this.userDir());
   }
 
-  /** The factory index only (the renderer's Factory sounds; pack samples come from window.krypt.packs.samples). */
   factorySamples(): FactorySample[] {
     return this.index.read()?.samples ?? [];
   }
 
-  /** Re-read user presets now and tell the windows (e.g. after an import). */
   reload(): void {
     this.refreshUser(true);
   }
 
-  /**
-   * Folders under the user's profile that look like sample libraries, with ≥ 20 audio files each. Looks only at
-   * Documents / Music / Desktop / Downloads (two levels of folder names + a few conventional library folders), never
-   * whole drives; stops after ~2 s.
-   */
   async suggestSampleFolders(): Promise<SampleFolderSuggestion[]> {
     const deadline = this.now() + SCAN_BUDGET_MS;
     const late = () => this.now() > deadline;
@@ -346,7 +295,6 @@ export class SoundsService implements SoundsAccess {
         for (const grand of await subdirs(child)) if (SAMPLE_DIR_RE.test(path.basename(grand))) add(grand);
       }
     }
-    // Outer folders first, so a library's own sub-folders aren't suggested separately.
     candidates.sort((a, b) => a.length - b.length);
     const roots = this.deps.getSettings().browserRoots.map((r) => r.path);
     const out: SampleFolderSuggestion[] = [];
@@ -360,8 +308,6 @@ export class SoundsService implements SoundsAccess {
     return out.sort((a, b) => Number(a.inBrowser) - Number(b.inBrowser) || b.audioFiles - a.audioFiles).slice(0, MAX_SUGGESTIONS);
   }
 
-  // ── Internals ───────────────────────────────────────────────────────
-
   private fileFor(id: string): string {
     return path.join(this.userDir(), `${fileStem(id)}.json`);
   }
@@ -372,7 +318,6 @@ export class SoundsService implements SoundsAccess {
     try {
       this.deps.broadcast(this.state());
     } catch {
-      /* a window mid-teardown */
     }
   }
 
@@ -396,7 +341,6 @@ export class SoundsService implements SoundsAccess {
       .join('|');
   }
 
-  /** Reload userData/presets when its files changed (throttled), or now when forced. */
   private refreshUser(force = false): void {
     const t = this.now();
     if (!force && t - this.lastUserCheck < USER_RESCAN_MS) return;
@@ -445,7 +389,6 @@ export class SoundsService implements SoundsAccess {
       try {
         this.deps.broadcast(this.state());
       } catch {
-        /* best effort */
       }
     }
   }
@@ -473,7 +416,6 @@ async function subdirs(dir: string): Promise<string[]> {
   }
 }
 
-/** Audio files under `root` (capped, stops when `late()`). */
 async function countAudio(root: string, late: () => boolean): Promise<number> {
   let n = 0;
   const stack = [root];

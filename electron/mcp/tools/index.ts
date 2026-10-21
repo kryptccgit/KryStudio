@@ -1,12 +1,3 @@
-// The tool registry shared by the MCP server and the built-in agent panel.
-//
-// callTool(deps, caller, name, args):
-//   zod-validate ─▶ (mutating) serialize + open a DocHost group labelled
-//   "<tool>: <summary>" with the agent actor ─▶ run ─▶ changed ids come from
-//   the PATCHES the call produced (never from the tool's own claims) ─▶ a
-//   mutating call that changed nothing is reported as ok:false ("No change")
-//   ─▶ failures roll back partial edits ─▶ broadcast AgentActivity.
-
 import { z } from 'zod';
 import type { Patch } from 'immer';
 import { actorKey, type ExecResult } from '@shared/doc/DocHost';
@@ -52,7 +43,6 @@ export * from './types';
 export { projectOverview } from './overview';
 export { patternKpn } from './compose';
 
-/** Deterministic order (spec-recommended; keeps client and panel prompt caches warm). */
 export const TOOLS: ToolDef[] = [
   ...DISCOVERY_TOOLS,
   ...COMPOSE_TOOLS,
@@ -104,15 +94,12 @@ export function newSession(): EditSession {
   return { group: null };
 }
 
-/** JSON Schema for a tool's input (Anthropic tools / manifest). */
 export function inputJsonSchema(def: ToolDef): Record<string, unknown> {
   const s = z.toJSONSchema(def.input, { io: 'input', unrepresentable: 'any' }) as Record<string, unknown>;
   delete s.$schema;
   return s;
 }
 
-// One mutating call at a time: tool bodies may await (sample info, engine),
-// and the changed-id bookkeeping relies on no interleaving writes.
 let queue: Promise<unknown> = Promise.resolve();
 function serialize<T>(fn: () => Promise<T>): Promise<T> {
   const run = queue.then(fn, fn);
@@ -121,25 +108,16 @@ function serialize<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export interface CallOptions {
-  /** Return a refusal message to block the call (MCP kill switch). */
   gate?: () => string | null;
-  /** Skip the activity broadcast (tests). */
   quiet?: boolean;
-  /** MCP progress notifications for long calls (the client sent a progressToken). */
   onProgress?(fraction: number, message: string): void;
-  /** The client cancelled the request. */
   signal?: AbortSignal;
-  /**
-   * Asks the user about a file outside the Browser folders in the client (MCP elicitation). Without it,
-   * deps.consent asks in Krypt Studio (a dialog).
-   */
   consent?: ConsentAsker;
 }
 
 export interface CallResult extends ToolResult {
   tool: string;
   summary: string;
-  /** The call is waiting for the user's answer about a file, which the client collects (MCP input_required). */
   pending?: { request: ConsentRequest; key: string };
 }
 
@@ -175,8 +153,6 @@ export async function callTool(deps: MainDeps, caller: ToolCaller, name: string,
     summary = '';
   }
 
-  // Files outside the Browser folders: refuse what is unsafe, ask the user about the rest — before the mutation
-  // queue and the history group, so a person taking their time blocks nobody else's edits.
   if (def.paths) {
     try {
       for (const p of def.paths(args as never)) {
@@ -255,7 +231,6 @@ async function runMutating(deps: MainDeps, caller: ToolCaller, def: ToolDef, arg
     if (declared) declared.calls++;
   }
   let changed = idsFromPatches(patches);
-  // What an open begin_edit group touched (commit_edit's originality check looks at its patterns).
   if (declared && changed.length) declared.touched = [...new Set([...(declared.touched ?? []), ...changed])];
 
   if (error !== null || (r && !r.ok)) {
@@ -296,14 +271,12 @@ function finish(deps: MainDeps, caller: ToolCaller, result: CallResult, opts: Ca
     try {
       deps.broadcast(MCP_CHANNELS.activity, activity);
     } catch {
-      /* the activity feed is best-effort */
     }
     if (def && def.kind !== 'read') deps.log(result.ok ? 'info' : 'warn', `[agent] ${caller.actor.name} ${result.tool}${result.summary ? ` (${result.summary})` : ''}: ${result.ok ? 'ok' : 'failed'} — ${result.message.slice(0, 240)}`);
   }
   return result;
 }
 
-/** The text a client / model sees for a result. */
 export function resultText(r: ToolResult, kind?: string): string {
   const parts = [r.message];
   if (r.warnings?.length) parts.push(`Warnings:\n${r.warnings.map((w) => `- ${w}`).join('\n')}`);
@@ -313,7 +286,6 @@ export function resultText(r: ToolResult, kind?: string): string {
   return parts.join('\n\n');
 }
 
-/** MCP tool annotations by kind. */
 export function annotationsFor(def: ToolDef): { title: string; readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean } {
   return {
     title: def.title,

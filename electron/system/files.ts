@@ -1,9 +1,3 @@
-// Filesystem wrappers. Everything that reads or writes disk goes through
-// here (kryptguidelines §4.3: electron/system is the only OS-touching code).
-// Writes are atomic: tmp file → fsync → rename over the target, retried a
-// few times because antivirus / cloud-sync clients briefly lock files on
-// Windows (EPERM / EBUSY on rename).
-
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -12,7 +6,6 @@ import { AUDIO_EXTENSIONS } from '@shared/audio/formats';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Turn a Node fs error into a sentence a user can act on. */
 export function describeFsError(err: unknown, target: string): string {
   const e = err as NodeJS.ErrnoException;
   switch (e?.code) {
@@ -48,7 +41,6 @@ async function renameWithRetry(from: string, to: string): Promise<void> {
   throw lastErr;
 }
 
-/** Crash-safe write: a crash mid-write never truncates the existing file. */
 export async function writeFileAtomic(target: string, data: string | Uint8Array): Promise<void> {
   await fsp.mkdir(path.dirname(target), { recursive: true });
   const tmp = `${target}.${process.pid}.${Date.now().toString(36)}.tmp`;
@@ -67,10 +59,6 @@ export async function writeFileAtomic(target: string, data: string | Uint8Array)
   }
 }
 
-/**
- * Atomic write of a file too big to hold in memory: `fill` writes into a temp file next to the target, which is
- * fsynced and renamed over it. A failure leaves the target as it was.
- */
 export async function writeFileAtomicWith(target: string, fill: (fh: fsp.FileHandle) => Promise<void>, beforeRename?: () => Promise<void>): Promise<void> {
   await fsp.mkdir(path.dirname(target), { recursive: true });
   const tmp = `${target}.${process.pid}.${Date.now().toString(36)}.tmp`;
@@ -82,7 +70,6 @@ export async function writeFileAtomicWith(target: string, fill: (fh: fsp.FileHan
     } finally {
       await fh.close();
     }
-    // e.g. close the handle the fill read from: Windows won't replace a file that is still open.
     await beforeRename?.();
     await renameWithRetry(tmp, target);
   } catch (err) {
@@ -91,7 +78,6 @@ export async function writeFileAtomicWith(target: string, fill: (fh: fsp.FileHan
   }
 }
 
-/** Synchronous atomic write for tiny files that must land before exit (settings, locks). */
 export function writeFileAtomicSync(target: string, data: string | Uint8Array): void {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const tmp = `${target}.${process.pid}.tmp`;
@@ -176,11 +162,9 @@ export function removeFileSync(p: string): void {
   try {
     fs.rmSync(p, { force: true });
   } catch {
-    /* ignore */
   }
 }
 
-/** Size of a regular file, or null (missing, a folder, unreadable). */
 export function fileSize(p: string): number | null {
   try {
     const st = fs.statSync(p);
@@ -190,15 +174,10 @@ export function fileSize(p: string): number | null {
   }
 }
 
-/** Delete a file only if it is empty (an export placeholder whose render failed). */
 export function removeIfEmptySync(p: string): void {
   if (fileSize(p) === 0) removeFileSync(p);
 }
 
-/**
- * A file name in dir that doesn't exist yet: "Song.wav", "Song (2).wav", … The file is created empty right away
- * (flag 'wx' fails if it exists), so two exports can never pick the same name and nothing is overwritten.
- */
 export function reserveUniquePath(dir: string, stem: string, ext: string): string {
   fs.mkdirSync(dir, { recursive: true });
   for (let i = 1; i < 10_000; i++) {
@@ -218,14 +197,12 @@ export async function copyFile(from: string, to: string): Promise<void> {
   await fsp.copyFile(from, to);
 }
 
-/** Copy `from` → `to` if `to` is missing or older (dev shadow copies). */
 export function copyIfNewerSync(from: string, to: string): void {
   if (mtimeMs(to) >= mtimeMs(from) && exists(to)) return;
   fs.mkdirSync(path.dirname(to), { recursive: true });
   fs.copyFileSync(from, to);
 }
 
-/** Delete all but the newest `keep` files in a directory (best effort). */
 export async function pruneDir(dir: string, keep: number, pattern: RegExp = /./): Promise<void> {
   try {
     const names = (await fsp.readdir(dir)).filter((n) => pattern.test(n));
@@ -233,11 +210,8 @@ export async function pruneDir(dir: string, keep: number, pattern: RegExp = /./)
     stats.sort((a, b) => b.t - a.t);
     for (const s of stats.slice(keep)) await fsp.rm(path.join(dir, s.n), { force: true });
   } catch {
-    /* best effort */
   }
 }
-
-// ── Browser listing ───────────────────────────────────────────────────
 
 export const AUDIO_EXT = new Set(AUDIO_EXTENSIONS);
 export const MIDI_EXT = new Set(['mid', 'midi', 'smf']);
@@ -254,11 +228,6 @@ export function classify(name: string, dir: boolean): BrowserEntry['kind'] {
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
-/**
- * List one directory for the browser panel: folders, audio, MIDI and
- * project files (dirs first, natural sort). Hidden/system entries and
- * unrelated file types are left out.
- */
 export async function listDirectory(dir: string): Promise<BrowserEntry[]> {
   const dirents = await fsp.readdir(dir, { withFileTypes: true });
   const out: BrowserEntry[] = [];
@@ -274,7 +243,6 @@ export async function listDirectory(dir: string): Promise<BrowserEntry[]> {
       try {
         entry.size = (await fsp.stat(full)).size;
       } catch {
-        /* unreadable: still list it */
       }
     }
     out.push(entry);
@@ -283,7 +251,6 @@ export async function listDirectory(dir: string): Promise<BrowserEntry[]> {
   return out;
 }
 
-/** Full paths of the regular files in `dir` ending in `ext` (".js"); [] when the folder doesn't exist. */
 export async function listFilesWithExt(dir: string, ext: string): Promise<string[]> {
   let dirents: fs.Dirent[];
   try {
@@ -297,7 +264,6 @@ export async function listFilesWithExt(dir: string, ext: string): Promise<string
     .sort((a, b) => collator.compare(a, b));
 }
 
-/** Case-insensitive (Windows) "is `child` inside or equal to `root`". */
 export function isInside(root: string, child: string): boolean {
   const norm = (p: string) => path.resolve(p).normalize('NFC').toLowerCase();
   const r = norm(root);

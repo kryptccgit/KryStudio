@@ -1,6 +1,3 @@
-// Playlist Cut / Copy / Paste: the clip clipboard keeps snapshots (src/editors/clipboard.ts), so playlist.pasteClips
-// can put clips back after Cut deleted the originals, onto another track and at another time, as one undo step;
-// a clip whose pattern / audio channel / automation is gone refuses with a readable message.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -33,7 +30,7 @@ test('clipboard snapshots survive the originals being cut', () => {
   const cb = getClipClipboard()!;
   assert.equal(cb.minStart, 3840);
   assert.ok(cb.clips.every((c) => !('id' in c)), 'snapshots carry no ids');
-  ok('playlist.removeClips', { ids: [a.id, b.id] }); // Cut
+  ok('playlist.removeClips', { ids: [a.id, b.id] });
 
   const before = Object.keys(doc.project.playlist.clips).length;
   const { ids } = ok<{ ids: string[] }>('playlist.pasteClips', { clips: cb.clips, shift: 15360 - cb.minStart });

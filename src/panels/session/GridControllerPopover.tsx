@@ -1,9 +1,3 @@
-// The grid-controller settings popover (Session toolbar): a MIDI pad grid
-// (Launchpad-style, APC mini-style or any 8×8 note layout) launches clips and
-// scenes. Settings live in main (window.krypt.session.gridSettings). The pads
-// light up (Wave 12.2b): main sends the LED map to the output paired with the
-// grid's input by name (shared/live/gridLeds.ts), or the one picked here.
-
 import { useEffect, useRef, useState } from 'react';
 import { Info, RefreshCw, Usb, X } from 'lucide-react';
 import type { MidiInputInfo, MidiOutputInfo } from '@shared/engine/protocol';
@@ -50,7 +44,7 @@ export function GridControllerPopover({ onClose }: { onClose: () => void }) {
     window.krypt.midi
       .outputs()
       .then((r) => alive && r.ok && setOutputs(r.data ?? []))
-      .catch(() => undefined); // the LED picker then offers Automatic / Off only
+      .catch(() => undefined);
     const off = window.krypt.midi.onOutputs((list) => alive && setOutputs(list));
     return () => {
       alive = false;
@@ -59,7 +53,6 @@ export function GridControllerPopover({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Close on outside pointerdown / Escape (in the window that owns the popover: works in popouts).
   useEffect(() => {
     const el = ref.current;
     const doc = el?.ownerDocument ?? document;
@@ -80,7 +73,7 @@ export function GridControllerPopover({ onClose }: { onClose: () => void }) {
 
   const patch = async (p: Partial<LaunchGridSettings>): Promise<void> => {
     if (!s) return;
-    setS({ ...s, ...p }); // optimistic; the reply (or a failure) settles it
+    setS({ ...s, ...p });
     setBusy(true);
     try {
       const r = await window.krypt.session.setGridSettings(p);
@@ -88,7 +81,7 @@ export function GridControllerPopover({ onClose }: { onClose: () => void }) {
         if (r.data) setS(r.data);
       } else {
         report(r);
-        setS(s); // back to what main has
+        setS(s);
       }
     } catch (err) {
       setS(s);
@@ -100,7 +93,6 @@ export function GridControllerPopover({ onClose }: { onClose: () => void }) {
 
   const devices = [{ value: '', label: 'Any enabled MIDI input' }, ...(inputs ?? []).map((i) => ({ value: i.id, label: `${i.name}${i.enabled ? '' : ' (disabled)'}` }))];
   if (s?.device && !devices.some((d) => d.value === s.device)) devices.push({ value: s.device, label: `${s.device} (not connected)` });
-  // LEDs: '' = automatic (paired by name), '-' = off, else an output id.
   const paired = s ? pairLedOutput(s.device, s.layout, outputs) : null;
   const leds = [
     { value: '', label: paired ? `Automatic (${paired})` : 'Automatic (no match yet)' },

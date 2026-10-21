@@ -1,18 +1,5 @@
-// Minimal Standard MIDI File reader for the groove extractor (scripts/grooves/extract.mjs).
-// Reads note-ons with absolute ticks, the time division, tempo and time-signature events.
-// Formats 0 and 1, running status, sysex and meta events skipped safely. Input is treated as
-// untrusted data: every read is bounds-checked and a malformed file throws, never hangs.
-//
-// The app's full reader/writer is shared/midi/smf.ts; this one stays a dependency-free .mjs so
-// the extractor runs with plain `node`.
-
 export class SmfError extends Error {}
 
-/**
- * @param {Uint8Array} bytes
- * @returns {{ format: number, ppq: number, hits: Array<{tick:number,key:number,vel:number,channel:number}>,
- *            tempos: Array<{tick:number,bpm:number}>, timeSigs: Array<{tick:number,num:number,den:number}> }}
- */
 export function readMidi(bytes) {
   let pos = 0;
   const need = (n, end = bytes.length) => {
@@ -66,7 +53,7 @@ export function readMidi(bytes) {
         if (type === 0x51 && n === 3) tempos.push({ tick, bpm: 60e6 / ((bytes[pos] << 16) | (bytes[pos + 1] << 8) | bytes[pos + 2]) });
         else if (type === 0x58 && n >= 2) timeSigs.push({ tick, num: bytes[pos], den: 2 ** bytes[pos + 1] });
         pos += n;
-        if (type === 0x2f) break; // end of track
+        if (type === 0x2f) break;
         continue;
       }
       if (b === 0xf0 || b === 0xf7) {

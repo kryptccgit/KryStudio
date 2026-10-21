@@ -1,9 +1,3 @@
-// Vocals & mashups tools: bring audio in (a file from the user's folders,
-// or the bytes themselves), match a clip's key and tempo to the project or
-// to another clip, and auto-tune a vocal with Krypt Tune. The work happens
-// in electron/vocals (the clip menu calls the same service through IPC);
-// every call is one undo group under the agent.
-
 import { z } from 'zod';
 import type { MainDeps, VocalsAccess } from '../types';
 import type { AudioTarget } from '@shared/types';
@@ -26,12 +20,9 @@ function runOpts(ctx: RunCtx) {
 
 const apply = (ctx: RunCtx) => <T>(cmd: string, args: unknown): T => ctx.exec<T>(cmd, args);
 
-/** An audio clip id, or an audio channel's name / id when it has exactly one clip. */
 function clipOf(deps: MainDeps, ref: string): string {
   return findAudioClip(deps.doc.project, ref).id;
 }
-
-// ── import_audio ────────────────────────────────────────────────────────
 
 export const importAudio = defineTool({
   name: 'import_audio',
@@ -77,8 +68,6 @@ export const importAudio = defineTool({
   },
 });
 
-// ── match_clip ──────────────────────────────────────────────────────────
-
 export const matchClip = defineTool({
   name: 'match_clip',
   title: 'Match a clip to the key and tempo',
@@ -105,8 +94,6 @@ export const matchClip = defineTool({
     return { ok: true, message: r.message ?? 'Matched', changed: [], data: r.data };
   },
 });
-
-// ── tune_vocal ──────────────────────────────────────────────────────────
 
 const STYLE_TEXT = (Object.keys(TUNE_STYLES) as TuneStyle[]).map((k) => `${k} (retune ${TUNE_STYLES[k].speed} ms, humanize ${Math.round(TUNE_STYLES[k].humanize * 100)}%)`).join(', ');
 

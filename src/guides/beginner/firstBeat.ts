@@ -1,4 +1,3 @@
-// Start here (step by step) · 3: the first beat, click by click.
 import type { GuideArticle } from '../articles';
 
 export const FIRST_BEAT: GuideArticle = {

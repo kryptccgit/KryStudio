@@ -1,6 +1,3 @@
-//! krypt.drumsynth — one synthesized drum voice per channel (see drums.rs).
-//! One-shot (note length ignored), key-tracked relative to C4 (MIDI 60).
-
 use super::drums::{DrumHit, DrumKind, DrumParams};
 use super::sampler::sanitize_sr;
 use super::{instrument_process, NoteStart, OutStage, Voice, VoiceManager, CHOKE_MS};
@@ -202,7 +199,6 @@ impl Instrument for DrumSynth {
     }
 
     fn note_on(&mut self, offset: usize, key: u8, pitch: f32, velocity: f32, extras: NoteExtras) {
-        // drums never slide
         let extras = NoteExtras { slide: false, ..extras };
         self.vm.note_on(offset, key, pitch, velocity, extras);
     }

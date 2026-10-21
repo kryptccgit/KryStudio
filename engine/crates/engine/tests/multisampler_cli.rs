@@ -1,6 +1,3 @@
-//! End to end: `krypt-studio-engine --render` of a project whose channel plays
-//! a small generated SFZ kit through `pack:` paths and `--packs-dir`.
-
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,11 +24,9 @@ fn write_wav(path: &Path, sr: u32, ch: u16, f: impl Fn(usize) -> f32, frames: us
     w.finalize().unwrap();
 }
 
-/// packs/test-kit/{krypt/kit.sfz, samples/*.wav}
 fn make_pack(root: &Path) -> PathBuf {
     let packs = root.join("packs");
     let pack = packs.join("test-kit");
-    // a C4 sine (44.1 kHz, stereo) and a short noise-free "kick" (a decaying 60 Hz sine)
     write_wav(&pack.join("samples").join("tone c4.wav"), 44_100, 2, |i| 0.5 * (std::f64::consts::TAU * 261.625_565_3 * i as f64 / 44_100.0).sin() as f32, 88_200);
     write_wav(
         &pack.join("samples").join("kick.wav"),
@@ -75,7 +70,6 @@ fn project(sample_path: &str) -> Value {
             "poly": { "mono": false, "glideMs": 0, "cutGroup": 0, "cutBy": 0 } } },
         "channelOrder": ["ms"],
         "patterns": { "pa": { "id": "pa", "name": "A", "color": "#fff", "length": 7680, "notes": { "ms": {
-            // A4 for one second (beat 0..2 at 120 bpm), then the kick at beat 3
             "n1": note("n1", 0.0, 1920.0, 69),
             "n2": note("n2", 2880.0, 240.0, 36)
         } } } },
@@ -144,13 +138,10 @@ fn renders_a_pack_sfz_kit_through_packs_dir() {
     assert!(r.ok, "render failed: {}", r.stderr);
     assert!(r.stderr.contains("Loaded kit.sfz: 2 regions, 2 samples"), "load report: {}", r.stderr);
     let sr = 48_000.0;
-    // A4 from a C4 sample (44.1 kHz source): 440 Hz
     let f = freq(&r.left[(0.2 * sr) as usize..(0.9 * sr) as usize], sr);
     assert!((f - 440.0).abs() < 0.5, "{f} Hz");
     assert!(peak(&r.left[..(0.9 * sr) as usize]) > 0.2);
-    // released after 1 s (50 ms release): silence before the kick at 1.5 s
     assert!(peak(&r.left[(1.2 * sr) as usize..(1.45 * sr) as usize]) < 1e-3);
-    // the kick (key 36, one-shot) at 1.5 s
     assert!(peak(&r.left[(1.5 * sr) as usize..(1.7 * sr) as usize]) > 0.2);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -159,17 +150,14 @@ fn renders_a_pack_sfz_kit_through_packs_dir() {
 fn pack_paths_without_packs_dir_or_pack_warn_and_stay_silent() {
     let dir = temp("missing");
     let packs = make_pack(&dir);
-    // no --packs-dir: the render still succeeds, silent, with a clear warning
     let r = render(&dir, "pack:test-kit/krypt/kit.sfz", None);
     assert!(r.ok, "{}", r.stderr);
     assert!(r.stderr.contains("Sound pack test-kit isn't installed or the packs folder is unknown"), "{}", r.stderr);
     assert!(peak(&r.left) < 1e-6);
-    // a pack that isn't installed
     let r = render(&dir, "pack:grand-piano/krypt/grand.sfz", Some(&packs));
     assert!(r.ok, "{}", r.stderr);
     assert!(r.stderr.contains("Sound pack grand-piano isn't installed"), "{}", r.stderr);
     assert!(peak(&r.left) < 1e-6);
-    // an absolute path to the .sfz works without --packs-dir
     let abs = packs.join("test-kit").join("krypt").join("kit.sfz");
     let r = render(&dir, &abs.to_string_lossy(), None);
     assert!(r.ok && peak(&r.left) > 0.2, "{}", r.stderr);
@@ -183,11 +171,6 @@ fn usage_mentions_packs_dir() {
     assert_eq!(s.matches("--packs-dir <dir>").count(), 2, "{s}");
 }
 
-/// Live-engine behaviour main relies on: a `--packs-dir` that doesn't exist yet
-/// is fine, a missing pack only warns when used, and loading the project again
-/// after the pack is installed brings the channel to life (failures are not
-/// cached forever: the cache is keyed by file mtime). Covers both `pack:`
-/// paths and the absolute paths main sends in stdio mode.
 #[test]
 fn a_pack_installed_later_plays_after_the_project_is_loaded_again() {
     use krypt_studio_dsp::{NoteExtras, ProcessContext};
@@ -198,7 +181,7 @@ fn a_pack_installed_later_plays_after_the_project_is_loaded_again() {
     use std::sync::Arc;
 
     let dir = temp("later");
-    let packs = dir.join("packs"); // not created yet
+    let packs = dir.join("packs");
     let abs = packs.join("test-kit").join("krypt").join("kit.sfz");
     for path in ["pack:test-kit/krypt/kit.sfz".to_string(), abs.to_string_lossy().into_owned()] {
         let _ = std::fs::remove_dir_all(&packs);

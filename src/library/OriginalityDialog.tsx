@@ -1,9 +1,3 @@
-// Originality check report: the project's melodic lines (or one pattern's)
-// against the deep-analysed references. Summary (with the production-aid
-// disclaimer), then each match: line, reference track, notes matched,
-// bar, similarity, with "Open pattern" and "Show reference". Without deep
-// references it explains how to enable the check.
-
 import { useEffect, useState, type ReactNode } from 'react';
 import { CircleCheck, Layers, Loader2, LocateFixed, Piano, RotateCcw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import type { OriginalityReport } from '@shared/library/types';

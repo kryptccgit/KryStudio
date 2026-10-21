@@ -1,17 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Browser: Presets (src/sounds/PresetTree), the factory sounds by kind
-// (from the factory index, sounds.factorySamples()), the Sound packs section
-// (installed sample packs' sounds by pack and kind from packs.samples(), and a
-// "Download in Home ▸ Sounds" row per pack that isn't installed), then roots + a lazy
-// folder tree via window.krypt.browser. Click an audio file to preview it
-// (click again to stop), drag it onto the Channel Rack, a sampler or the
-// Playlist (dataTransfer `application/x-krypt-sample`). Double-click opens
-// projects / imports MIDI. Without a factory index (an older install) the
-// factory kit shows as its plain folder, as before. Right-click a sound or
-// a preset → "More like this" swaps the tree for the closest sounds by
-// timbre (./SimilarList.tsx) until Back.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AudioLines, ChevronRight, Download, FileAudio, FileMusic, Folder, FolderOpen, FolderPlus, Loader2, Music, Package, RefreshCw, ScanSearch, Search, Square, SwatchBook, X } from 'lucide-react';
 import type { BrowserEntry, BrowserRoot } from '@shared/types';
@@ -48,7 +34,6 @@ function MatchHeader({ label, count }: { label: string; count: number }) {
   );
 }
 
-/** Section header (PRESETS / FACTORY SOUNDS): the same look as the root rows. */
 function SectionHeader({
   label,
   open,
@@ -131,8 +116,6 @@ export function BrowserPanel() {
     void loadRoots();
   }, [loadRoots]);
 
-  // "Show presets in the Browser" (Home, toasts): open the section and scroll to it. A request from the last few
-  // seconds also counts on mount (the panel may have just been opened for it).
   const revealSeen = useRef(0);
   useEffect(() => {
     if (!reveal || reveal.nonce === revealSeen.current || Date.now() - reveal.nonce > 5000) return;
@@ -143,7 +126,6 @@ export function BrowserPanel() {
     return () => clearTimeout(t);
   }, [reveal]);
 
-  // Folders added elsewhere (a user's "Allow this folder" answer to an agent) show up here, removable as usual.
   const rootsRef = useRef(roots);
   rootsRef.current = roots;
   useEffect(
@@ -172,7 +154,6 @@ export function BrowserPanel() {
     try {
       await window.krypt.engine.stopPreview();
     } catch {
-      /* ignore */
     }
   };
 
@@ -210,7 +191,6 @@ export function BrowserPanel() {
   const entryMenu = (ev: React.MouseEvent, e: BrowserEntry): void => {
     ev.preventDefault();
     const items: MenuItem[] = [];
-    // Factory and sound-pack sounds ('factory:' / 'pack:' paths) aren't files Explorer or the analyzer can open by that name.
     const bundled = e.path.startsWith('factory:') || e.path.startsWith('pack:');
     if (e.kind === 'audio') {
       items.push(
@@ -259,12 +239,10 @@ export function BrowserPanel() {
   };
 
   const q = query.trim().toLowerCase();
-  // With a factory index, the factory folder is shown by kind instead of as a raw root.
   const hiddenRoot = hasIndex ? ((roots ?? []).find((r) => r.id === FACTORY_ROOT_ID)?.path ?? null) : null;
   const visibleRoots = useMemo(() => (roots ? roots.filter((r) => !(hasIndex && r.id === FACTORY_ROOT_ID)) : null), [roots, hasIndex]);
   const sampleGroups = useMemo(() => (hasIndex ? groupFactorySamples(factorySamples ?? []) : []), [hasIndex, factorySamples]);
 
-  // Search: flat list of every loaded entry that matches (presets and factory sounds are listed above it).
   const matches = useMemo(() => {
     if (!q) return null;
     const out: BrowserEntry[] = [];
@@ -278,7 +256,6 @@ export function BrowserPanel() {
   const presetMatches = usePresetMatches(q);
   const presetTotal = presetList(useSounds((x) => x.state)).length;
   const sampleMatchList = useMemo(() => (q && hasIndex ? (factorySamples ?? []).filter((x) => sampleMatches(x, q)).slice(0, 200) : []), [q, hasIndex, factorySamples]);
-  // Sound packs: each installed pack's sounds by kind; packs that aren't installed get a download row.
   const packGroups = useMemo(
     () =>
       (packInfo?.packs ?? [])
@@ -291,7 +268,6 @@ export function BrowserPanel() {
   const packSampleCount = packInfo?.samples.length ?? 0;
   const packMatchList = useMemo(() => (q && packInfo ? packInfo.samples.filter((x) => sampleMatches(x, q)).slice(0, 200) : []), [q, packInfo]);
 
-  /** `detail`: a factory sound's root note / length in bars, shown on the right. */
   const renderEntry = (e: BrowserEntry, depth: number, detail?: string) => {
     const Icon = e.kind === 'dir' ? (open[e.path] ? FolderOpen : Folder) : ICONS[e.kind];
     const isPrev = previewing === e.path;

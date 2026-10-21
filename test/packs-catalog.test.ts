@@ -1,7 +1,3 @@
-// The sound-pack catalog (shared/packs/catalog.ts + the generated shared/packs/data/*.gen.ts) and the presets that
-// use it (shared/sounds/factory/instruments/packs.ts): pinned downloads, install-safe paths, licences, and our SFZ
-// mappings checked with an independent little SFZ parser (only krypt.multisampler's opcodes, every sample present,
-// no key/velocity holes, complete round-robin cycles, trims inside the files, RAM recomputed from the audio facts).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import raw from '../shared/plugins/catalog.gen.json';
@@ -38,21 +34,14 @@ const GEN: Record<string, Gen> = {
   'retro-game': RETRO,
 };
 
-/** Download caps per pack (research/12 §3): pianos ≤ ~300 MB, drums ≤ ~200 MB, the rest ≤ ~250 MB; sample packs ≤ 150 MB (research/14 §2.2). */
 const MAX_MB: Record<string, number> = { 'grand-piano': 300, 'upright-piano': 300, 'live-drums': 200, 'keys-mallets': 250, orchestral: 250, 'perc-extras': 150, 'hits-whooshes': 150, 'foley-field': 150, 'retro-game': 150 };
-/** All Wave 7b sample packs together stay around 400 MB (research/14 §2.2). */
 const SAMPLE_PACKS_MAX_MB = 400;
-/** Commit-pinned raw GitHub URLs (instrument packs and GitHub-hosted sample packs). */
 const GITHUB_RAW = /^https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[0-9a-f]{40}\/\S+$/;
-/** Direct downloads a sample pack may use: the sources' own stable file URLs (research/14 §2.2). */
 const DIRECT_URL = /^https:\/\/(opengameart\.org\/sites\/default\/files\/|kenney\.nl\/media\/pages\/assets\/[a-z0-9-]+\/[0-9a-f]{10}-\d+\/)[^\s?#]+$/;
 const isSamplePack = (p: { samples?: unknown[] }) => (p.samples?.length ?? 0) > 0;
-/** Every audio file a pack installs: plain files and archive members (the archives themselves are deleted). */
 const installed = (p: (typeof PACKS)[number]) => p.files.flatMap((f) => (f.archive ? f.archive.members.map((m) => m.path) : [f.path]));
 const RAM_CAP_MB = 250;
 const RESERVED_ROOT = new Set(['pack.json', 'license.txt', '.krypt-partial.json']);
-
-// ── a small independent SFZ reader ────────────────────────────────────
 
 interface Region {
   line: number;
@@ -113,7 +102,6 @@ const hikey = (r: Region) => num(r, 'hikey', 127);
 const lovel = (r: Region) => num(r, 'lovel', 0);
 const hivel = (r: Region) => num(r, 'hivel', 127);
 
-/** The velocity-crossfade gain of a region at a velocity (0..1). */
 function xfGain(r: Region, vel: number): number {
   let g = 1;
   if (r.op.xfin_lovel !== undefined) {
@@ -140,7 +128,6 @@ function joinPath(sfzPath: string, rel: string): string {
 
 const sample = (control: Record<string, string>, r: Region) => (control.default_path ?? '') + r.op.sample;
 
-/** Install-safety problems of one path inside a pack dir (Windows rules included). */
 function pathProblems(p: string): string[] {
   const out: string[] = [];
   if (!p || p.startsWith('/') || p.includes('\\')) out.push('absolute or backslashed');
@@ -155,8 +142,6 @@ function pathProblems(p: string): string[] {
   if (!p.includes('/') && RESERVED_ROOT.has(p.toLowerCase())) out.push('a file name the installer reserves');
   return out;
 }
-
-// ── catalog ───────────────────────────────────────────────────────────
 
 test('3-9 packs with unique, valid ids, a version and a card', () => {
   assert.ok(PACKS.length >= 3 && PACKS.length <= 9, `${PACKS.length} packs`);
@@ -189,7 +174,6 @@ test('licences: known SPDX id, https source, a credit line; informal public-doma
     const githubOnly = p.files.every((f) => GITHUB_RAW.test(f.url));
     if (l.spdx === 'CC0-1.0' && githubOnly) assert.match(l.url, /\/blob\/[0-9a-f]{40}\/LICENSE$/, `${p.id}: CC0 is evidenced by the LICENSE file at the pinned commit`);
     if (!githubOnly) {
-      // files from the sources' own sites: the statement archives where each source states its licence, and when it was read
       assert.ok(l.statement && /CC0/.test(l.statement), `${p.id}: licence.statement must quote each source's licence`);
       const pages = new Set(p.files.map((f) => (/opengameart\.org/.test(f.url) ? 'opengameart.org/content/' : /kenney\.nl/.test(f.url) ? 'kenney.nl/assets/' : 'github.com/')));
       for (const h of pages) assert.ok(l.statement!.includes(h), `${p.id}: the statement cites no ${h} source page`);
@@ -216,7 +200,6 @@ test('every file: commit-pinned https URL + mirrors, 64-hex sha256, bytes > 0, a
         assert.ok(f.mirrors?.length, `${where}: a mirror`);
         for (const m of f.mirrors ?? []) assert.match(m, /^https:\/\/cdn\.jsdelivr\.net\/gh\/[^/]+\/[^/@]+@[0-9a-f]{40}\/\S+$/, `${where}: mirror ${m}`);
       } else {
-        // only sample packs may download from a source's own site, and only from its stable direct file URLs
         assert.ok(isSamplePack(p), `${where}: url must be a raw GitHub URL pinned to a commit`);
         assert.match(f.url, DIRECT_URL, `${where}: ${f.url} is not a stable direct URL on an allowed host`);
         for (const m of f.mirrors ?? []) assert.match(m, /^https:\/\//, `${where}: mirror ${m}`);
@@ -225,7 +208,7 @@ test('every file: commit-pinned https URL + mirrors, 64-hex sha256, bytes > 0, a
       assert.ok(Number.isInteger(f.bytes) && f.bytes > 0, `${where}: bytes`);
       assert.deepEqual(pathProblems(f.path), [], `${where}`);
       assert.ok(parsePackPath(`pack:${p.id}/${f.path}`), `${where}: parsePackPath`);
-      const key = f.path.toLowerCase(); // Windows: case-insensitive
+      const key = f.path.toLowerCase();
       assert.ok(!paths.has(key), `${where}: duplicate path`);
       paths.add(key);
       if (f.archive) {
@@ -235,7 +218,6 @@ test('every file: commit-pinned https URL + mirrors, 64-hex sha256, bytes > 0, a
         const froms = new Set<string>();
         for (const m of f.archive.members) {
           const at = `${where} → ${m.from}`;
-          // exact entry names, plain ASCII, nothing absolute / backslashed / traversing (the installer matches them byte for byte)
           assert.match(m.from, /^[\x20-\x7e]+$/, `${at}: entry name is not plain ASCII`);
           assert.ok(!m.from.startsWith('/') && !m.from.includes('\\') && !m.from.split('/').includes('..'), `${at}: unsafe entry name`);
           assert.ok(!froms.has(m.from), `${at}: listed twice`);
@@ -267,8 +249,6 @@ test('the generated audio facts cover exactly the files', () => {
     assert.deepEqual(Object.keys(g.COVERAGE).sort(), p.sfz.map((s) => s.path).sort(), `${p.id}: COVERAGE keys`);
   }
 });
-
-// ── our SFZ mappings ──────────────────────────────────────────────────
 
 test('every SFZ uses only the opcodes krypt.multisampler supports, with sane values', () => {
   const allowed = new Set<string>(SFZ_OPCODES);
@@ -302,7 +282,7 @@ test('every SFZ uses only the opcodes krypt.multisampler supports, with sane val
 
 test('every referenced sample is a file of the pack, every file is used, trims sit inside the files', () => {
   for (const p of PACKS) {
-    if (isSamplePack(p)) continue; // sample packs: see the sample-pack tests below
+    if (isSamplePack(p)) continue;
     const files = new Set(p.files.map((f) => f.path));
     const audio = GEN[p.id].AUDIO;
     const used = new Set<string>();
@@ -338,7 +318,6 @@ test('mappings cover their playable keys at every velocity, with complete round-
             holes.push(`key ${key} vel ${vel}`);
             continue;
           }
-          // every round-robin step of every cycle length plays something
           const byLen = new Map<number, Set<number>>();
           for (const g of hit) {
             const L = num(g, 'seq_length', 1);
@@ -369,7 +348,7 @@ test('RAM: recomputed from the SFZ and the audio facts, each mapping under the c
         const frames = audio[path][2];
         const offset = num(g, 'offset', 0);
         const end = num(g, 'end', frames - 1);
-        seen.set(`${path}|${offset}|${end}`, (end - offset + 1) * 4); // 16-bit stereo
+        seen.set(`${path}|${offset}|${end}`, (end - offset + 1) * 4);
       }
       const mb = [...seen.values()].reduce((a, b) => a + b, 0) / 1e6;
       assert.ok(Math.abs(mb - GEN[p.id].RAM_MB[s.path]) < 0.2, `${p.id}/${s.path}: RAM ${mb.toFixed(1)} MB vs recorded ${GEN[p.id].RAM_MB[s.path]}`);
@@ -381,9 +360,6 @@ test('RAM: recomputed from the SFZ and the audio facts, each mapping under the c
   }
 });
 
-// ── presets ───────────────────────────────────────────────────────────
-
-/** krypt.multisampler's params (research/12 §2, in the catalog's plain units), used until the engine's catalog lists it. */
 const MULTISAMPLER_PARAMS: Pick<ParamSpec, 'id' | 'min' | 'max' | 'step'>[] = [
   { id: 'gain', min: -24, max: 12 },
   { id: 'attack', min: 0, max: 2000 },
@@ -417,13 +393,12 @@ test('pack presets: schema-valid, require an existing pack and play one of its S
     assert.ok(covered.has(lo) && covered.has(hi), `${p.id}: range ${lo}-${hi} outside what ${pp.path} maps`);
     for (const g of p.defaultFor ?? []) assert.ok(p.genres.includes(g), `${p.id}: default for ${g} but not in its genres`);
   }
-  // any preset that plays a pack sample says so
   for (const p of INSTRUMENT_PRESETS) if (p.sample?.startsWith('pack:')) assert.equal(p.requires, parsePackPath(p.sample)?.packId, `${p.id}: plays ${p.sample} without requires`);
 });
 
 test('every instrument pack has presets, and every mapping is played by at least one preset', () => {
   for (const pack of PACKS) {
-    if (!pack.sfz.length) continue; // sample packs add samples, not instruments
+    if (!pack.sfz.length) continue;
     const played = new Set(PACK_PRESETS.filter((p) => p.requires === pack.id).map((p) => parsePackPath(p.sample!)!.path));
     assert.ok(played.size > 0, `${pack.id}: no presets`);
     assert.deepEqual(pack.sfz.map((s) => s.path).filter((s) => !played.has(s)), [], `${pack.id}: mappings no preset plays`);
@@ -445,8 +420,6 @@ test('pack preset params are on-spec for krypt.multisampler (the engine catalog 
   }
   assert.deepEqual(problems, []);
 });
-
-// ── sample packs (Wave 7b, research/14 §2.2) ──────────────────────────
 
 test('sample packs: 2-4 of them, no SFZ, every sample is a real file or archive member of its pack, every file is used', () => {
   const sp = PACKS.filter(isSamplePack);

@@ -1,7 +1,3 @@
-// Piano roll tools as app commands: the keymap (context 'pianoRoll'), the
-// Shortcuts editor and the toolbar Tools menu all reach them by id. Loaded
-// at boot (App.tsx) so they are rebindable before the editor is first opened.
-
 import { registerCommands } from '../../input/commands';
 import { flashHint } from '../../app/hints';
 import { openPanel } from '../../editors/selection';

@@ -1,22 +1,3 @@
-//! Audio file decoding to planar f32 at the file's native rate (at most 2
-//! channels, at most [`MAX_FRAMES`] frames). Shared by the engine's sample
-//! cache and the analyzer sidecar. Behind the `decode` feature so DSP-only
-//! users don't pull in symphonia.
-//!
-//! * symphonia (MPL-2.0, royalty-free formats only): wav, aiff, flac, mp3,
-//!   ogg/vorbis.
-//! * Windows Media Foundation (feature `mediafoundation`, Windows only): the
-//!   operating system's own licensed decoders for AAC / ALAC / MP4 / M4A /
-//!   WMA and friends. Krypt ships no codec code for these. The DLLs are
-//!   loaded at run time, so the exes still start on Windows "N" editions
-//!   without the Media Feature Pack (those files then fail with a sentence
-//!   that says so).
-//!
-//! Order: files with a Media Foundation extension ([`MF_EXTENSIONS`]) go to
-//! Media Foundation first and to symphonia if that fails; everything else
-//! goes to symphonia first and falls back to Media Foundation when symphonia
-//! can't read it (an mp3 symphonia rejects, an m4a named .bin).
-
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -30,19 +11,14 @@ use symphonia::core::meta::MetadataOptions;
 
 use crate::SampleData;
 
-/// Hard cap on decoded length (frames) so a 3-hour file can't eat all RAM.
 pub const MAX_FRAMES: usize = 48_000 * 60 * 30;
 
-/// Extensions that Windows Media Foundation decodes and symphonia (with our
-/// royalty-free feature set) does not. Lower case, without the dot.
 pub const MF_EXTENSIONS: &[&str] = &["m4a", "m4b", "mp4", "m4v", "aac", "adts", "3gp", "3g2", "wma", "asf", "wmv", "mov", "ac3", "ec3", "amr"];
 
-/// Does `path` have a Media Foundation extension ([`MF_EXTENSIONS`])?
 pub fn is_mf_extension(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).map(|e| MF_EXTENSIONS.iter().any(|m| m.eq_ignore_ascii_case(e))).unwrap_or(false)
 }
 
-/// Probe and open a file's container (format detection by content, extension as a hint).
 pub fn open_format(path: &Path) -> Result<Box<dyn symphonia::core::formats::FormatReader>, String> {
     let file = File::open(path).map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
@@ -55,9 +31,6 @@ pub fn open_format(path: &Path) -> Result<Box<dyn symphonia::core::formats::Form
         .map_err(|e| format!("Unsupported or corrupt audio file {}: {e}", path.display()))
 }
 
-/// Decode a whole file to planar f32 at its native rate (symphonia, then
-/// Media Foundation where available; see the module docs for the order).
-/// Errors are sentences that name the file.
 pub fn decode_file(path: &Path) -> Result<SampleData, String> {
     decode_any(path)
 }
@@ -70,7 +43,6 @@ fn decode_any(path: &Path) -> Result<SampleData, String> {
         }
         return match mf::decode(path) {
             Ok(d) => Ok(d),
-            // Content sniffing: an mp3 / wav that carries an m4a name.
             Err(mf_err) => decode_symphonia(path).map_err(|_| mf_err),
         };
     }
@@ -93,7 +65,6 @@ fn decode_any(path: &Path) -> Result<SampleData, String> {
     decode_symphonia(path)
 }
 
-/// Decode with symphonia only.
 pub fn decode_symphonia(path: &Path) -> Result<SampleData, String> {
     let mut format = open_format(path)?;
     let track = format.default_track(TrackType::Audio).ok_or_else(|| format!("No audio track in {}", path.display()))?;
@@ -120,7 +91,7 @@ pub fn decode_symphonia(path: &Path) -> Result<SampleData, String> {
                 if channels.first().map(|c| c.is_empty()).unwrap_or(true) {
                     return Err(format!("Failed to read {}: {e}", path.display()));
                 }
-                break; // keep what we decoded
+                break;
             }
         };
         if packet.track_id != track_id {
@@ -155,7 +126,6 @@ pub fn decode_symphonia(path: &Path) -> Result<SampleData, String> {
     if channels.is_empty() || sample_rate == 0 {
         return Err(format!("{} contains no decodable audio", path.display()));
     }
-    // Equalize lengths, cap at 2 channels kept (the engine is stereo).
     let len = channels.iter().map(|c| c.len()).min().unwrap_or(0).min(MAX_FRAMES);
     for c in channels.iter_mut() {
         c.truncate(len);
@@ -167,7 +137,6 @@ pub fn decode_symphonia(path: &Path) -> Result<SampleData, String> {
     Ok(SampleData { sample_rate: sample_rate as f32, channels, root_key })
 }
 
-/// MIDI unity note from a RIFF/WAVE `smpl` chunk, if any.
 pub fn read_wav_root_key(path: &Path) -> Option<u8> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     if ext != "wav" && ext != "wave" {
@@ -179,7 +148,6 @@ pub fn read_wav_root_key(path: &Path) -> Option<u8> {
     if &hdr[0..4] != b"RIFF" || &hdr[8..12] != b"WAVE" {
         return None;
     }
-    // Scan at most 64 chunks.
     for _ in 0..64 {
         let mut ch = [0u8; 8];
         if f.read_exact(&mut ch).is_err() {
@@ -198,41 +166,24 @@ pub fn read_wav_root_key(path: &Path) -> Option<u8> {
     None
 }
 
-/// Codecs [`mf_encode`] can write (tests and tooling; the OS's own encoders).
 #[cfg(all(windows, feature = "mediafoundation"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MfCodec {
-    /// AAC-LC at 128 kbit/s (MPEG-4 container for .m4a / .mp4, ADTS for .aac).
     Aac,
-    /// Apple Lossless in MPEG-4 (.m4a).
     Alac,
-    /// Windows Media Audio 8 in ASF (.wma).
     Wma,
 }
 
-/// Encode planar f32 audio with Media Foundation's own encoders (16-bit PCM
-/// in). For tests and tooling: it lets the decoder be checked against real
-/// AAC / ALAC / WMA files without shipping any. The container follows the
-/// file extension.
 #[cfg(all(windows, feature = "mediafoundation"))]
 pub fn mf_encode(path: &Path, channels: &[Vec<f32>], sample_rate: u32, codec: MfCodec) -> Result<(), String> {
     mf::encode(path, channels, sample_rate, codec)
 }
 
-/// Decode with Windows Media Foundation only, skipping symphonia (tests and
-/// tooling: e.g. reading back an MP3 export the way Windows players do).
 #[cfg(all(windows, feature = "mediafoundation"))]
 pub fn decode_mf(path: &Path) -> Result<SampleData, String> {
     mf::decode(path)
 }
 
-/// Windows Media Foundation: Source Reader → PCM float (decode) and Sink
-/// Writer (test encoder, and the MP3 export in [`crate::mp3`]). mfplat.dll /
-/// mfreadwrite.dll / mf.dll are loaded from System32 at run time (never
-/// import-linked), so a missing Media Feature Pack only fails these formats.
-/// Every call runs inside a [`Session`] that initialises COM (MTA) and Media
-/// Foundation on the calling thread and undoes both afterwards, so decoding
-/// and encoding are safe on any worker thread.
 #[cfg(all(windows, feature = "mediafoundation"))]
 pub(crate) mod mf {
     use std::ffi::c_void;
@@ -272,9 +223,7 @@ pub(crate) mod mf {
         source_reader: FnSourceReader,
         sink_writer: FnSinkWriter,
         create_attributes: FnAttributes,
-        /// MFTEnumEx (Windows 7+): is there an MP3 encoder at all?
         tenum_ex: Option<FnTEnumEx>,
-        /// mf.dll: encoder output types (WMA encoding in tests only).
         audio_types: Option<FnAudioTypes>,
     }
 
@@ -285,15 +234,11 @@ pub(crate) mod mf {
         API.get_or_init(load).as_ref().map_err(|e| e.clone())
     }
 
-    /// SAFETY: `m` is a loaded module.
     unsafe fn sym(m: HMODULE, name: PCSTR) -> Result<RawFn, String> {
         unsafe { GetProcAddress(m, name) }.ok_or_else(|| NOT_INSTALLED.to_string())
     }
 
     fn load() -> Result<Api, String> {
-        // SAFETY: System32 DLLs that are never unloaded; each symbol is
-        // transmuted to its documented signature (mfapi.h, mfreadwrite.h,
-        // mfidl.h).
         unsafe {
             let plat = LoadLibraryExW(w!("mfplat.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32).map_err(|_| NOT_INSTALLED.to_string())?;
             let rw = LoadLibraryExW(w!("mfreadwrite.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32).map_err(|_| NOT_INSTALLED.to_string())?;
@@ -313,9 +258,6 @@ pub(crate) mod mf {
         }
     }
 
-    /// COM (MTA) + Media Foundation on the current thread, undone on drop. A
-    /// thread that is already a COM STA (RPC_E_CHANGED_MODE) is used as it
-    /// is: the Source Reader in synchronous mode works in either apartment.
     struct Session {
         api: &'static Api,
         com: bool,
@@ -324,7 +266,6 @@ pub(crate) mod mf {
     impl Session {
         fn start() -> Result<Session, String> {
             let api = api()?;
-            // SAFETY: plain Win32 calls, balanced in Drop.
             let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok();
             let hr = unsafe { (api.startup)(MF_VERSION, MFSTARTUP_LITE) };
             if hr.is_err() {
@@ -339,8 +280,6 @@ pub(crate) mod mf {
 
     impl Drop for Session {
         fn drop(&mut self) {
-            // SAFETY: the session's MF objects were all released before (they
-            // live in the inner functions' scopes).
             unsafe {
                 let _ = (self.api.shutdown)();
                 if self.com {
@@ -354,7 +293,6 @@ pub(crate) mod mf {
         path.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
     }
 
-    /// A human sentence for an HRESULT met while reading `path`.
     fn describe(path: &Path, hr: HRESULT) -> String {
         let p = path.display();
         let code = hr.0 as u32;
@@ -401,7 +339,6 @@ pub(crate) mod mf {
 
     fn media_type(api: &Api) -> windows::core::Result<IMFMediaType> {
         let mut raw = null_mut();
-        // SAFETY: the out-pointer receives an owned reference on success.
         unsafe {
             (api.create_media_type)(&mut raw).ok()?;
             Ok(IMFMediaType::from_raw(raw))
@@ -409,12 +346,9 @@ pub(crate) mod mf {
     }
 
     const FIRST_AUDIO: u32 = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
-    /// At most this much decoded tail (frames) beyond the container's stated
-    /// length is packet padding (two of the largest common packets).
     const TAIL_PADDING_MAX: usize = 2 * 4096;
 
     fn current_format(reader: &IMFSourceReader) -> windows::core::Result<Format> {
-        // SAFETY: COM calls on a live reader.
         unsafe {
             let t = reader.GetCurrentMediaType(FIRST_AUDIO)?;
             let sub = t.GetGUID(&MF_MT_SUBTYPE)?;
@@ -435,10 +369,7 @@ pub(crate) mod mf {
         }
     }
 
-    /// The container's stated duration in frames at `rate`, if any.
     fn stated_frames(reader: &IMFSourceReader, rate: u32) -> Option<usize> {
-        // SAFETY: COM call on a live reader; the PROPVARIANT is read by its
-        // tag and cleared.
         unsafe {
             let mut pv = reader.GetPresentationAttribute(MF_SOURCE_READER_MEDIASOURCE.0 as u32, &MF_PD_DURATION).ok()?;
             let v = &pv.Anonymous.Anonymous;
@@ -448,10 +379,7 @@ pub(crate) mod mf {
         }
     }
 
-    /// Select the first audio stream and ask for PCM float (integer PCM if
-    /// float is refused) at its native rate and channel count.
     fn configure(api: &Api, reader: &IMFSourceReader) -> windows::core::Result<Format> {
-        // SAFETY: COM calls on live objects.
         unsafe {
             let _ = reader.SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false);
             reader.SetStreamSelection(FIRST_AUDIO, true)?;
@@ -468,8 +396,6 @@ pub(crate) mod mf {
         current_format(reader)
     }
 
-    /// Append one interleaved buffer to the planar output (the first
-    /// `out.len()` channels).
     fn append(bytes: &[u8], f: &Format, out: &mut [Vec<f32>]) {
         let width = match f.kind {
             Sample::F32 | Sample::I32 => 4,
@@ -480,7 +406,6 @@ pub(crate) mod mf {
         };
         let frame = width * f.channels.max(1);
         if f.kind == Sample::F32 {
-            // The common case (decoders hand out float): no per-sample match.
             for fr in bytes.chunks_exact(frame) {
                 for (c, dst) in out.iter_mut().enumerate() {
                     let o = c * 4;
@@ -508,7 +433,6 @@ pub(crate) mod mf {
     fn read_all(api: &Api, path: &Path) -> Result<SampleData, String> {
         let w = wide(path);
         let mut raw = null_mut();
-        // SAFETY: NUL-terminated path; the out-pointer is owned on success.
         let hr = unsafe { (api.source_reader)(PCWSTR(w.as_ptr()), null_mut(), &mut raw) };
         if hr.is_err() || raw.is_null() {
             return Err(describe(path, hr));
@@ -518,21 +442,18 @@ pub(crate) mod mf {
         if fmt.channels == 0 || fmt.rate == 0 {
             return Err(format!("{} contains no decodable audio", path.display()));
         }
-        // Reserve for the stated length, at most 10 minutes (a corrupt header
-        // can't force a huge allocation; longer files just grow).
         let cap = stated_frames(&reader, fmt.rate).unwrap_or(0).min(fmt.rate as usize * 600) + TAIL_PADDING_MAX;
         let mut chans: Vec<Vec<f32>> = vec![Vec::with_capacity(cap); fmt.channels.min(2)];
         loop {
             let mut flags = 0u32;
             let mut sample: Option<IMFSample> = None;
-            // SAFETY: synchronous read on a live reader.
             let r = unsafe { reader.ReadSample(FIRST_AUDIO, 0, None, Some(&mut flags), None, Some(&mut sample)) };
             let have = chans[0].len();
             if let Err(e) = r {
                 if have == 0 {
                     return Err(describe(path, e.code()));
                 }
-                break; // keep what was decoded, as the symphonia path does
+                break;
             }
             if flags & MF_SOURCE_READERF_ERROR.0 as u32 != 0 {
                 if have == 0 {
@@ -543,7 +464,7 @@ pub(crate) mod mf {
             if flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED.0 as u32 != 0 {
                 let nf = current_format(&reader).map_err(err(path))?;
                 if have > 0 && (nf.channels.min(2) != chans.len() || nf.rate != fmt.rate) {
-                    break; // the format changed mid-stream: keep the first part
+                    break;
                 }
                 if have == 0 {
                     chans = vec![Vec::new(); nf.channels.min(2)];
@@ -551,7 +472,6 @@ pub(crate) mod mf {
                 fmt = nf;
             }
             if let Some(s) = sample {
-                // SAFETY: the buffer is locked only while its bytes are copied.
                 unsafe {
                     let buf = s.ConvertToContiguousBuffer().map_err(err(path))?;
                     let mut ptr: *mut u8 = null_mut();
@@ -571,9 +491,6 @@ pub(crate) mod mf {
         if len == 0 {
             return Err(format!("{} contains no decodable audio", path.display()));
         }
-        // Decoders emit whole packets (AAC 1024, ALAC 4096, WMA 2048 frames);
-        // the container states the real length. Media Foundation already
-        // removes the encoder delay at the start, so only the tail is cut.
         if let Some(stated) = stated_frames(&reader, fmt.rate) {
             if stated < len && len - stated <= TAIL_PADDING_MAX {
                 len = stated;
@@ -590,11 +507,8 @@ pub(crate) mod mf {
         read_all(session.api, path)
     }
 
-    // ── encoder (tests / tooling) ──────────────────────────────────────
-
     fn pcm_type(api: &Api, rate: u32, channels: u32) -> windows::core::Result<IMFMediaType> {
         let t = media_type(api)?;
-        // SAFETY: setters on a fresh media type.
         unsafe {
             t.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)?;
             t.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_PCM)?;
@@ -609,7 +523,6 @@ pub(crate) mod mf {
 
     fn output_type(api: &Api, codec: MfCodec, rate: u32, channels: u32) -> Result<IMFMediaType, String> {
         let s = |e: windows::core::Error| e.to_string();
-        // SAFETY: COM calls on fresh or enumerated media types.
         unsafe {
             match codec {
                 MfCodec::Aac | MfCodec::Alac => {
@@ -652,13 +565,10 @@ pub(crate) mod mf {
         let frames = channels.iter().map(|c| c.len()).min().unwrap_or(0);
         let w = wide(path);
         let mut raw = null_mut();
-        // SAFETY: NUL-terminated path; the out-pointer is owned on success.
         unsafe { (api.sink_writer)(PCWSTR(w.as_ptr()), null_mut(), null_mut(), &mut raw) }.ok().map_err(|e| format!("Cannot create {}: {e}", path.display()))?;
         let writer = unsafe { IMFSinkWriter::from_raw(raw) };
         let out = output_type(api, codec, rate, ch)?;
         let input = pcm_type(api, rate, ch).map_err(s)?;
-        // SAFETY: COM calls on live objects; each buffer is locked only while
-        // it is filled.
         unsafe {
             let stream = writer.AddStream(&out).map_err(|e| format!("{codec:?} encoder unavailable: {e}"))?;
             writer.SetInputMediaType(stream, &input, None).map_err(|e| format!("{codec:?} encoder rejects 16-bit PCM input: {e}"))?;
@@ -706,30 +616,17 @@ pub(crate) mod mf {
         write_all(session.api, path, channels, rate, codec)
     }
 
-    // ── MP3 export (crate::mp3) ────────────────────────────────────────
-
-    /// Why an MP3 encode failed.
     pub enum Mp3Error {
-        /// Media Foundation or its MP3 encoder MFT is not on this Windows.
         EncoderMissing,
-        /// The caller's `fill` asked to stop.
         Cancelled,
-        /// Anything else, as a sentence.
         Other(String),
     }
 
-    /// Frames per sample handed to the Sink Writer (≈ 0.34 s at 48 kHz).
     const MP3_BLOCK: usize = 16_384;
-    /// At most this much PCM waits in the Sink Writer's queue (≈ 44 s of
-    /// 48 kHz stereo). The writer's own throttling is off: it blocks every
-    /// WriteSample for a timer tick (≈ 8 ms), which made a 3-minute encode
-    /// take 4.5 s instead of 0.7 s.
     const MP3_MAX_QUEUED: u32 = 8 << 20;
 
     fn mp3_output_type(api: &Api, rate: u32, kbps: u32) -> windows::core::Result<IMFMediaType> {
         let t = media_type(api)?;
-        // SAFETY: setters on a fresh media type. The MP3 encoder MFT takes the
-        // bitrate as bytes per second (constant bitrate).
         unsafe {
             t.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)?;
             t.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_MP3)?;
@@ -740,16 +637,14 @@ pub(crate) mod mf {
         Ok(t)
     }
 
-    /// The encoder can't be set up: missing (or refusing) codec vs. other.
     fn mp3_setup_error(e: windows::core::Error) -> Mp3Error {
         match e.code() {
             MF_E_TOPO_CODEC_NOT_FOUND | MF_E_INVALIDMEDIATYPE | MF_E_UNSUPPORTED_FORMAT | MF_E_TRANSFORM_TYPE_NOT_SET => Mp3Error::EncoderMissing,
-            c if c.0 as u32 == 0x8004_0154 => Mp3Error::EncoderMissing, // REGDB_E_CLASSNOTREG
+            c if c.0 as u32 == 0x8004_0154 => Mp3Error::EncoderMissing,
             c => Mp3Error::Other(format!("Windows' MP3 encoder could not be set up (0x{:08X})", c.0 as u32)),
         }
     }
 
-    /// A human sentence for an error met while writing `path`.
     fn write_error(path: &Path, what: &str, e: windows::core::Error) -> Mp3Error {
         let p = path.display();
         let code = e.code().0 as u32;
@@ -769,10 +664,6 @@ pub(crate) mod mf {
         })
     }
 
-    /// Is Windows' MP3 encoder installed? Media Foundation must load, and
-    /// MFTEnumEx must not come back empty for PCM → MP3 audio encoders (if
-    /// the enumeration itself fails, the encode is left to decide). A yes is
-    /// remembered; a no is asked again next time.
     pub fn mp3_encoder_available() -> bool {
         static FOUND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if FOUND.load(std::sync::atomic::Ordering::Relaxed) {
@@ -785,8 +676,6 @@ pub(crate) mod mf {
         let output = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Audio, guidSubtype: MFAudioFormat_MP3 };
         let mut list: *mut *mut c_void = null_mut();
         let mut n = 0u32;
-        // SAFETY: documented MFTEnumEx contract: the array and every
-        // activation object in it are owned by the caller and released here.
         let hr = unsafe {
             let hr = enum_ex(MFT_CATEGORY_AUDIO_ENCODER, MFT_ENUM_FLAG_ALL.0 as u32, &input, &output, &mut list, &mut n);
             if !list.is_null() {
@@ -807,12 +696,6 @@ pub(crate) mod mf {
         ok
     }
 
-    /// Encode `frames` frames of interleaved 16-bit stereo PCM at `rate`
-    /// (32 / 44.1 / 48 kHz) to a constant-bitrate MP3 at `path`, with the
-    /// OS's MP3 encoder MFT behind a Sink Writer. The container is forced to
-    /// MP3 (MF_TRANSCODE_CONTAINERTYPE), so `path` may have any extension
-    /// (the atomic writer passes a `.part` name). `fill(first_frame, out)`
-    /// writes `out.len() / 2` frames and returns false to cancel.
     pub fn encode_mp3(path: &Path, rate: u32, kbps: u32, frames: usize, fill: &mut dyn FnMut(usize, &mut [i16]) -> bool) -> Result<(), Mp3Error> {
         if api().is_err() {
             return Err(Mp3Error::EncoderMissing);
@@ -820,8 +703,6 @@ pub(crate) mod mf {
         let session = Session::start().map_err(Mp3Error::Other)?;
         let api = session.api;
         let s = |e: windows::core::Error| write_error(path, "Writing", e);
-        // SAFETY: COM calls on live objects created here; each media buffer is
-        // locked only while it is filled.
         unsafe {
             let mut araw = null_mut();
             (api.create_attributes)(&mut araw, 2).ok().map_err(s)?;
@@ -834,7 +715,6 @@ pub(crate) mod mf {
             if hr.is_err() || raw.is_null() {
                 let e = windows::core::Error::from_hresult(hr);
                 return Err(match hr {
-                    // No MP3 file sink (pre-Windows 8, or a stripped Media Foundation).
                     MF_E_UNSUPPORTED_BYTESTREAM_TYPE | MF_E_TOPO_CODEC_NOT_FOUND => Mp3Error::EncoderMissing,
                     _ => write_error(path, "Creating", e),
                 });
@@ -870,8 +750,6 @@ pub(crate) mod mf {
                 sample.SetSampleDuration(hns(at + n) - hns(at)).map_err(s)?;
                 writer.WriteSample(stream, &sample).map_err(s)?;
                 at += n;
-                // Bounded queue: the encoder runs on Media Foundation's work
-                // queue while this thread converts the next blocks.
                 loop {
                     let mut st = MF_SINK_WRITER_STATISTICS { cb: std::mem::size_of::<MF_SINK_WRITER_STATISTICS>() as u32, ..Default::default() };
                     if writer.GetStatistics(stream, &mut st).is_err() || st.dwByteCountQueued <= MP3_MAX_QUEUED {
@@ -898,14 +776,12 @@ mod tests {
         d
     }
 
-    /// Stereo test tone: `hz` on the left, `hz * 1.5` on the right, 0.5 peak.
     fn tone(hz: f32, sr: u32, secs: f32) -> Vec<Vec<f32>> {
         let n = (secs * sr as f32) as usize;
         let ch = |f: f32| (0..n).map(|i| 0.5 * (2.0 * std::f32::consts::PI * f * i as f32 / sr as f32).sin()).collect::<Vec<f32>>();
         vec![ch(hz), ch(hz * 1.5)]
     }
 
-    /// Frequency from the zero-crossing rate over the middle half.
     fn freq(x: &[f32], sr: f32) -> f32 {
         let mid = &x[x.len() / 4..x.len() * 3 / 4];
         let crossings = mid.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
@@ -958,8 +834,6 @@ mod tests {
     mod media_foundation {
         use super::*;
 
-        /// Encode with the OS encoder, or None (with a note) when this
-        /// Windows has no such encoder.
         fn encoded(dir: &Path, name: &str, codec: MfCodec, ch: &[Vec<f32>], sr: u32) -> Option<PathBuf> {
             let p = dir.join(name);
             match mf_encode(&p, ch, sr, codec) {
@@ -975,11 +849,7 @@ mod tests {
             assert_eq!(d.sample_rate, sr as f32, "{what}: rate");
             assert_eq!(d.channels.len(), 2, "{what}: channels");
             let want = (secs * sr as f32) as usize;
-            // Never shorter; at most one packet (≤ 4096 frames) of silent tail
-            // padding, which Media Foundation's own writer records as length.
             assert!(d.frames() >= want - 1 && d.frames() <= want + 4096, "{what}: {} frames, want {want}", d.frames());
-            // Past the end: a lossy codec's last transform block rings out,
-            // then silence.
             assert!(d.channels[0].iter().skip(want + 2048).all(|v| v.abs() < 0.02), "{what}: the tail past the end is padding");
             assert!((freq(&d.channels[0], sr as f32) - 1000.0).abs() < 10.0, "{what}: left {} Hz", freq(&d.channels[0], sr as f32));
             assert!((freq(&d.channels[1], sr as f32) - 1500.0).abs() < 15.0, "{what}: right {} Hz", freq(&d.channels[1], sr as f32));
@@ -1005,8 +875,6 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
         }
 
-        /// Media Foundation removes the encoder delay: an onset at 0.25 s
-        /// decodes at 0.25 s (sample-accurate audio clips).
         #[test]
         fn decoded_audio_is_sample_aligned() {
             let dir = temp_dir("align");
@@ -1023,7 +891,6 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
         }
 
-        /// Decode time of a 3-minute stereo AAC file (run with --ignored, release).
         #[test]
         #[ignore]
         fn perf_three_minute_aac() {
@@ -1064,15 +931,12 @@ mod tests {
             let sr = 44_100;
             let t = tone(1000.0, sr, 1.0);
             let Some(p) = encoded(&dir, "tone.m4a", MfCodec::Aac, &t, sr) else { return };
-            // An m4a under an unknown extension: symphonia fails, MF reads it.
             let renamed = dir.join("tone.bin");
             std::fs::copy(&p, &renamed).unwrap();
             check_tone(&decode_file(&renamed).unwrap(), sr, 1.0, "tone.bin");
-            // A WAV named .m4a still decodes (MF reads WAV, symphonia sniffs).
             let wav_as_m4a = dir.join("wave.m4a");
             write_wav(&wav_as_m4a, &[&t[0], &t[1]], sr, WavFormat::Pcm16).unwrap();
             assert_eq!(decode_file(&wav_as_m4a).unwrap().frames(), t[0].len());
-            // A truncated m4a: a clean error naming the file, or the part that decodes.
             let bytes = std::fs::read(&p).unwrap();
             let cut = dir.join("cut.m4a");
             std::fs::write(&cut, &bytes[..bytes.len() / 3]).unwrap();
@@ -1080,7 +944,6 @@ mod tests {
                 Ok(d) => assert!(d.frames() > 0),
                 Err(e) => assert!(e.contains("cut.m4a"), "{e}"),
             }
-            // Garbage after a valid header.
             let mut junk = bytes[..64.min(bytes.len())].to_vec();
             junk.extend(std::iter::repeat_n(0xA5u8, 4096));
             let bad = dir.join("bad.m4a");
@@ -1088,7 +951,6 @@ mod tests {
             let e = decode_file(&bad).unwrap_err();
             assert!(e.contains("bad.m4a"), "{e}");
             eprintln!("bad.m4a: {e}");
-            // Worker threads decode concurrently (COM / MF per thread).
             let hs: Vec<_> = (0..4).map(|_| {
                 let p = p.clone();
                 std::thread::spawn(move || decode_file(&p).map(|d| d.frames()))

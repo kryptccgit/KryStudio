@@ -1,7 +1,3 @@
-// Shared bits of the Home hub and Guides: status pills, screen headers,
-// buttons and glass panels in the Krypt UI kit (no backdrop blur: the
-// background animates, and re-blurring it every frame isn't free).
-
 import { useEffect, useRef, type ReactNode } from 'react';
 import { ArrowLeft, Loader2, type LucideIcon } from 'lucide-react';
 import { cls } from '../utils/format';
@@ -31,7 +27,6 @@ export function PillBadge({ pill, className }: { pill: Pill | null; className?: 
   );
 }
 
-/** Rounded icon tile (top-left of every card). */
 export function IconTile({ icon: Icon, size = 'md', accent = false }: { icon: LucideIcon; size?: 'sm' | 'md'; accent?: boolean }) {
   return (
     <span
@@ -99,7 +94,6 @@ export function HomeButton({
   );
 }
 
-/** Header of a Home sub-screen: Back, icon, title, one line of plain words. */
 export function ScreenHeader({ icon, title, subtitle, onBack, backLabel = 'Home', right }: { icon: LucideIcon; title: string; subtitle: string; onBack: () => void; backLabel?: string; right?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
@@ -132,7 +126,6 @@ export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="rounded border border-white/10 bg-black/40 px-1.5 py-0.5 font-mono text-[10.5px] text-white/80">{children}</kbd>;
 }
 
-/** Scrolling page for a Home sub-screen; takes focus when shown so Tab starts here. */
 export function ScreenFrame({ children, label }: { children: ReactNode; label: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {

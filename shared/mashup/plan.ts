@@ -1,41 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Auto Mashup planner (research/18-auto-mashup.md §3). Pure: no I/O.
-//
-// electron/mashup reads both songs (analysis, stems, per-section vocal
-// activity) into SongInputs, then planMashup decides everything the build
-// does and says why:
-//
-//   roles      vocalFrom 'auto': both directions are scored (donor vocal
-//              presence, bed instrumental or separable, tempo and key cost)
-//   tempo      each song's reading (×1 / ×0.5 / ×2) that stretches least
-//              towards the anchor's tempo; ×0.85–×1.18 is the clean band.
-//              No anchor asked and the beat's tempo would stretch the vocal
-//              out of it: both meet half way (the key still follows the beat)
-//   key        measured when the stems were read: the vocal stem's pitch
-//              profile against the instrumental's (bass + other), shifted
-//              −6..+6 st, against the cost of shifting (what the vocal sings
-//              vs what the beat plays, not two key labels: a mashup's vocal
-//              can sit in another key than its own song). Otherwise the
-//              key labels: the mover's shift that minimises (key clash +
-//              shift cost): relative major / minor = same notes = 0; a
-//              Camelot neighbour (±1, a fifth apart) is compatible at a
-//              small cost; vocals prefer ≤ ±3 st; 'middle' splits the move
-//   levels     every song played at the same loudness (MIX_LUFS): a
-//              mastered bed no longer slams the master chain
-//   structure  sections on 4-bar phrases; the vocal's hook over the bed's
-//              highest-energy sections, verses over the rest, an
-//              instrumental intro / break / outro; backAndForth trades
-//              8 / 16-bar sections of both songs, best energy first
-//   score      0..100 with one plain-language reason per factor and
-//              concrete suggestions (re-planned with the alternative)
-//
-// Bars: MashupSongReading / MashupPlanSummary sections are 1-BASED (bar 1 =
-// the song's first downbeat / the start of the mashup). The internal build
-// plan keeps `songBar` 0-based (bars from the song's first downbeat at its
-// tempo reading) because the builder turns it into seconds with
-// songBarToSec.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { MashupAnchor, MashupCheck, MashupPlanSummary, MashupRequest, MashupSongReading, MashupStem, MashupStyle, StemPick } from './types';
 import type { WarpMode } from '../schema/warp';
 import type { TransitionKind } from '../playbooks/types';
@@ -44,83 +6,59 @@ import { KEY_WEAK } from '../vocals/plan';
 import { snapBpm } from '../analyzer/tempo';
 import { estimateKey } from '../kpn/symbolic';
 
-/** Measured vocal presence below this = no lead vocal (an instrumental, or a vocal stem of bleed only). */
 const NO_VOCAL = 0.1;
 
 export type Side = 'a' | 'b';
 export type Factor = 1 | 0.5 | 2;
 
-/** The beat grid of a song (seconds), from the analyzer. */
 export interface SongGrid {
   beats: number[];
   downbeats: number[];
   beatsPerBar: number;
 }
 
-/** Everything the planner knows about one song (filled by electron/mashup from the analysis + stems). */
 export interface SongInput {
   name: string;
-  /** The file it was read from (absent for a project clip). */
   path?: string;
   durationSec: number;
   bpm: number | null;
   bpmAlternatives: number[];
-  /** "F#m", "Eb" … */
   key: string | null;
   keyConfidence: number;
-  /** 0..1 */
   vocalPresence: number;
-  /** Where vocalPresence came from: a vocal stem, the file name / stem origin, or nothing (a neutral guess). */
   vocalSource: 'stems' | 'name' | 'unknown';
-  /** acapella = vocals only; instrumental = no lead vocal (no stems needed for that role). */
   kind: 'song' | 'acapella' | 'instrumental';
-  /** Stems available now (separated earlier or this run). */
   stems: MashupStem[];
-  /** A stem model is installed, so the build can separate it. */
   canSeparate: boolean;
   grid: SongGrid | null;
-  /** The analyzer's sections (seconds) with loudness; `vocal` = measured vocal activity 0..1 (null = not measured). */
   sections: Array<{ startSec: number; endSec: number; label: string; lufs: number; vocal?: number | null }>;
-  /** Set when the song couldn't be read at all (missing / unreadable file …): a blocking problem. */
   problem?: string;
-  /**
-   * What the parts the mashup plays actually contain, when their stems were read: `vocal` = the vocal stem (or the
-   * a cappella), `bed` = the bass + other stems (or the instrumental). Absent = not measured: the key labels decide.
-   */
   harmony?: { vocal?: StemHarmony | null; bed?: StemHarmony | null };
-  /** Integrated loudness of the whole song (LUFS), for level matching; absent = not known. */
   lufs?: number | null;
 }
 
-/** A part's notes: the analyzer's pitch profile (12 shares C..B) and its key reading. */
 export interface StemHarmony {
   profile: number[];
   key: string | null;
   keyConfidence: number;
 }
 
-/** One clip of a planned track: `bars` bars at mashup bar `startBar` (1-based), playing the song from `songBar` (0-based). */
 export interface PlannedClip {
   startBar: number;
   bars: number;
   songBar: number;
-  /** Crossfade in / out (beats). */
   fadeIn?: number;
   fadeOut?: number;
 }
 
 export interface PlannedTrack {
   song: Side;
-  /** Which stem, or 'mix' = the whole file. */
   part: MashupStem | 'mix';
-  /** What it does in the mashup (drives the warp mode, the vocal chain and the carve). */
   role: 'vocal' | 'drums' | 'bass' | 'other' | 'mix';
   name: string;
   warp: WarpMode;
   semitones: number;
-  /** Keep formants (voices). */
   formant: boolean;
-  /** Level match (dB on the channel): the song at MIX_LUFS, the vocal a little over the bed. */
   gainDb: number;
   clips: PlannedClip[];
 }
@@ -135,12 +73,9 @@ export interface PlannedSection {
 
 export interface SongDecision {
   factor: Factor;
-  /** The song's tempo at its reading (null: no steady tempo). */
   srcBpm: number | null;
-  /** Playback speed (target ÷ srcBpm), 1 = unchanged. */
   speed: number;
   semitones: number;
-  /** Stems the build needs from this song (to separate when not there yet). */
   needStems: MashupStem[];
 }
 
@@ -153,13 +88,9 @@ export interface BuildPlan {
   songs: Record<Side, SongDecision>;
   tracks: PlannedTrack[];
   sections: PlannedSection[];
-  /** Section boundaries (1-based bars) with the transition to put there. */
   transitions: Array<{ bar: number; kind: TransitionKind; prevBars: number }>;
-  /** Krypt Tune style for the vocal track ('off' = none). */
   tune: 'off' | 'natural' | 'pop' | 'hard';
-  /** The key Krypt Tune corrects to (the vocal's key after its shift). */
   tuneKey: string | null;
-  /** Honest limits for the outcome. */
   notes: string[];
 }
 
@@ -168,18 +99,11 @@ export interface MashupPlanResult {
   build: BuildPlan;
 }
 
-// ── Constants ─────────────────────────────────────────────────────────
-
-/** Playback speeds outside this band are audible stretches. */
 export const CLEAN_STRETCH = [0.85, 1.18] as const;
-/** Vocals pitched further than this (semitones) start to sound processed. */
 export const VOCAL_SHIFT_COMFORT = 3;
 export const MAX_BARS = 512;
-/** Every song is brought to this loudness before the master chain (a mastered bed at -6 LUFS otherwise slams it). */
 export const MIX_LUFS = -14;
-/** The vocal sits this much over its own song's level (its bed is gone: the new one is a little louder around it). */
 export const VOCAL_LIFT_DB = 1;
-/** A shift whose notes match the bed at least this well (Pearson r of the pitch profiles) sounds in key. */
 export const HARMONY_GOOD = 0.6;
 export const DEFAULT_MAX_BARS = 128;
 const FACTORS: Factor[] = [1, 0.5, 2];
@@ -192,8 +116,6 @@ const clamp01 = (x: number): number => clamp(x, 0, 1);
 const other = (s: Side): Side => (s === 'a' ? 'b' : 'a');
 const short = (s: string, n = 28): string => (s.length > n ? `${s.slice(0, n - 1).trim()}…` : s);
 const letter = (s: Side): string => s.toUpperCase();
-
-// ── Grid maths (song bars ↔ seconds) ──────────────────────────────────
 
 function median(xs: number[]): number {
   if (!xs.length) return 0;
@@ -228,7 +150,6 @@ function trackOf(grid: SongGrid | null, bpm: number | null): Track {
   return { beats: [], d: 0, period: 60 / (bpm && bpm > 0 ? bpm : 120) };
 }
 
-/** Seconds of fractional tracked-beat index f (linear between beats, the median period beyond the ends). */
 function secOfIndex(t: Track, f: number): number {
   const n = t.beats.length;
   if (!n) return f * t.period;
@@ -253,32 +174,23 @@ function indexOfSec(t: Track, sec: number): number {
   return lo + (sec - t.beats[lo]) / (t.beats[hi] - t.beats[lo]);
 }
 
-/**
- * Seconds where song bar `bar` (0-based from the first downbeat, 4 quarter notes at the tempo reading) starts.
- * `factor` = quarter notes per tracked beat (2 = the tracker heard half time).
- */
 export function songBarToSec(grid: SongGrid | null, bpm: number | null, factor: Factor, bar: number): number {
   const t = trackOf(grid, bpm);
   return secOfIndex(t, t.d + (4 * bar) / factor);
 }
 
-/** The song bar (fractional, 0-based from the first downbeat) at `sec`. */
 export function secToSongBar(grid: SongGrid | null, bpm: number | null, factor: Factor, sec: number): number {
   const t = trackOf(grid, bpm);
   return ((indexOfSec(t, sec) - t.d) * factor) / 4;
 }
 
-/** Whole bars from the first downbeat to the end of the file. */
 export function songBars(s: SongInput, factor: Factor): number {
   return Math.max(0, Math.floor(secToSongBar(s.grid, s.bpm, factor, s.durationSec) + 1e-6));
 }
 
-// ── Sections ──────────────────────────────────────────────────────────
-
 export interface SongSection {
   name: string;
   label: string;
-  /** 0-based song bar. */
   startBar: number;
   bars: number;
   energy: number;
@@ -287,7 +199,6 @@ export interface SongSection {
 
 const snap4 = (bar: number): number => Math.round(bar / 4) * 4;
 
-/** The song's sections on 4-bar phrases of its own grid (0-based), with energy 0..1, a vocal flag and a name. */
 export function songSections(s: SongInput, factor: Factor): SongSection[] {
   const total = songBars(s, factor);
   if (total < 1) return [];
@@ -301,7 +212,6 @@ export function songSections(s: SongInput, factor: Factor): SongSection[] {
     if (start >= total) continue;
     const prev = cuts[cuts.length - 1];
     if (prev && start <= prev.start) {
-      // Collapsed onto the previous phrase: keep the louder reading of the two.
       if (x.lufs > prev.lufs) Object.assign(prev, { label: x.label, lufs: x.lufs, vocal: x.vocal ?? prev.vocal });
       continue;
     }
@@ -317,7 +227,6 @@ export function songSections(s: SongInput, factor: Factor): SongSection[] {
     const energy = flat ? 0.8 : r2(0.15 + 0.85 * ((c.lufs - lo) / (hi - lo)));
     return { name: '', label: c.label, startBar: c.start, bars: end - c.start, energy, vocal: false };
   });
-  // Vocal flags: measured activity, else the song's kind, else "the middle of a song with a vocal".
   const measured = cuts.some((c) => c.vocal !== null);
   secs.forEach((x, i) => {
     const v = cuts[i].vocal;
@@ -332,7 +241,6 @@ export function songSections(s: SongInput, factor: Factor): SongSection[] {
   return secs;
 }
 
-/** Intro / Verse / Build / Chorus (Drop without a vocal) / Break / Outro, numbered when they repeat. */
 export function nameSections(secs: Array<{ label: string; energy: number; vocal: boolean }>): string[] {
   if (!secs.length) return [];
   const anyVocal = secs.some((x) => x.vocal);
@@ -362,8 +270,6 @@ export function nameSections(secs: Array<{ label: string; energy: number; vocal:
   });
 }
 
-// ── Tempo ─────────────────────────────────────────────────────────────
-
 export interface TempoDecision {
   bpm: number;
   a: { factor: Factor; srcBpm: number | null; speed: number };
@@ -379,11 +285,6 @@ function bestFactor(bpm: number, target: number, fixed: Factor | undefined): Fac
   return best;
 }
 
-/**
- * The shared tempo. anchorSide keeps its tempo (its reading: fixed, else as detected); the other song takes the
- * reading that stretches least. 'middle' (anchorSide null) picks the pair of readings closest to each other and meets
- * half way (geometric mean). An explicit bpm wins; each song then reads nearest to it.
- */
 export function decideTempo(a: SongInput, b: SongInput, anchorSide: Side | null, opts: { bpm?: number; factorA?: Factor; factorB?: Factor } = {}): TempoDecision {
   const bA = a.bpm && a.bpm > 0 ? a.bpm : null;
   const bB = b.bpm && b.bpm > 0 ? b.bpm : null;
@@ -404,7 +305,6 @@ export function decideTempo(a: SongInput, b: SongInput, anchorSide: Side | null,
       for (const fb of fixed.b ? [fixed.b] : FACTORS)
         for (const fa of fixed.a ? [fixed.a] : FACTORS) {
           const d = dist(bA * fa, bB * fb);
-          // Ties: keep B's detected reading, then A's.
           if (!best || d < best.d - 1e-9) best = { fa, fb, d };
         }
       fac.a = best!.fa;
@@ -420,16 +320,10 @@ export function decideTempo(a: SongInput, b: SongInput, anchorSide: Side | null,
   return { bpm: target, a: side('a'), b: side('b') };
 }
 
-/** The worst stretch of the two songs (|log2 speed|; songs without a tempo don't count). */
 function worstStretch(t: TempoDecision): number {
   return Math.max(Math.abs(Math.log2(t.a.speed || 1)), Math.abs(Math.log2(t.b.speed || 1)));
 }
 
-/**
- * The tempo with the anchor's side kept, except: no anchor asked (and no bpm), and that would stretch a song
- * audibly while meeting half way stretches clearly less, then both meet half way (`halfway`). A vocal slowed
- * to ×0.77 smears; two songs at ×0.88 / ×1.14 stay clean. The key decision keeps its own anchor.
- */
 export function chooseTempo(req: MashupRequest, a: SongInput, b: SongInput, anchorSide: Side | null): TempoDecision & { halfway: boolean } {
   const opts = { bpm: req.bpm, factorA: req.factorA, factorB: req.factorB };
   const t = decideTempo(a, b, anchorSide, opts);
@@ -442,7 +336,6 @@ export function audibleStretch(speed: number): boolean {
   return speed < CLEAN_STRETCH[0] - 1e-9 || speed > CLEAN_STRETCH[1] + 1e-9;
 }
 
-/** 0 within ±3 %, up to 15 inside the clean band, up to 40 beyond it. */
 function stretchPenalty(speed: number): number {
   const d = Math.abs(Math.log2(speed));
   const a = Math.log2(1.03);
@@ -452,15 +345,11 @@ function stretchPenalty(speed: number): number {
   return Math.min(40, 15 + (25 * (d - b)) / (Math.log2(1.5) - b));
 }
 
-// ── Key ───────────────────────────────────────────────────────────────
-
-/** Steps around the circle of fifths between two key signatures (0..6). */
 export function fifthsDistance(x: KeyRef, y: KeyRef): number {
   const d = (((relativeMajorPc(y) - relativeMajorPc(x)) * 7) % 12 + 12) % 12;
   return Math.min(d, 12 - d);
 }
 
-/** "8B" (C major), "8A" (A minor). */
 export function camelot(k: KeyRef): string {
   const n = (((relativeMajorPc(k) * 7) % 12) + 7) % 12 + 1;
   return `${n}${k.minor ? 'A' : 'B'}`;
@@ -477,12 +366,10 @@ function shiftCost(s: number, vocal: boolean): number {
 
 export interface KeyMove {
   semitones: number;
-  /** Steps around the circle of fifths left after the move (0 = same notes, 1 = Camelot neighbour). */
   leftover: number;
   cost: number;
 }
 
-/** The mover's best shift (−6..+6) onto `to`: least key clash + shift cost; ties → smaller, then downwards. */
 export function bestKeyMove(from: KeyRef, to: KeyRef, vocal: boolean): KeyMove {
   let best: KeyMove | null = null;
   for (let s = -6; s <= 6; s++) {
@@ -495,27 +382,17 @@ export function bestKeyMove(from: KeyRef, to: KeyRef, vocal: boolean): KeyMove {
 }
 
 export interface KeyDecision {
-  /** Semitones per song. */
   a: number;
   b: number;
-  /** The mashup's key (the harmonic bed's key after its move), short name. */
   key: string | null;
-  /** The key the vocal ends up in (Krypt Tune). */
   vocalKey: string | null;
   leftover: number;
-  /** Plain-language line. */
   reason: string;
   penalty: number;
   weak: boolean;
-  /** Set when the stems' notes decided (decideKeyByHarmony): the fit of the move, unmoved, and the vocal key's confidence. */
   measured?: { fit: number; fit0: number; vocalKeyConfidence: number };
 }
 
-/**
- * The key move. `bed` = the song whose harmony stays the reference (the instrumental; A in backAndForth), `mover` =
- * the other one (the vocal). anchor beat: the mover moves; vocal: the bed moves; middle: the move is split, the
- * vocal taking the larger half. An explicit `key` moves both onto it.
- */
 export function decideKey(songs: Record<Side, SongInput>, bed: Side, anchor: MashupAnchor, opts: { key?: string; moverIsVocal: boolean }): KeyDecision {
   const mover = other(bed);
   const kB = toKeyRef(songs[bed].key);
@@ -534,7 +411,6 @@ export function decideKey(songs: Record<Side, SongInput>, bed: Side, anchor: Mas
   });
   const given = opts.key?.trim() ? toKeyRef(opts.key.trim()) : null;
   if (given) {
-    // Asked for a key: land on it exactly (its relative counts), by the smallest move.
     const exact = (k: KeyRef): KeyMove => ({ semitones: keyShift(k, given).semitones, leftover: 0, cost: 0 });
     const mb = kB ? exact(kB) : null;
     const mm = kM ? exact(kM) : null;
@@ -558,7 +434,6 @@ export function decideKey(songs: Record<Side, SongInput>, bed: Side, anchor: Mas
   let sm = S;
   let sb = 0;
   if (anchor === 'vocal') {
-    // The mover (the vocal; B in backAndForth) keeps its key: the bed moves.
     const mb = bestKeyMove(kB, kM, !opts.moverIsVocal);
     sb = mb.semitones;
     sm = 0;
@@ -590,8 +465,6 @@ function relation(from: KeyRef, to: KeyRef, leftover: number, s: number): string
   return `moves ${fmtSemitones(s)} to ${keyLongName(transposeKey(from, s))}${leftover ? ' (Camelot neighbours after the move)' : ''}`;
 }
 
-// ── Harmony (measured on the stems) ───────────────────────────────────
-
 function pearson(x: number[], y: number[]): number {
   const n = Math.min(x.length, y.length);
   if (!n) return 0;
@@ -608,19 +481,16 @@ function pearson(x: number[], y: number[]): number {
   return dx && dy ? num / Math.sqrt(dx * dy) : 0;
 }
 
-/** How well `vocal` shifted `s` semitones lines up with `bed`: Pearson r of the pitch profiles (−1..1). */
 export function profileFit(vocal: number[], bed: number[], s: number): number {
   const rolled = new Array<number>(12).fill(0);
   for (let i = 0; i < 12; i++) rolled[(((i + s) % 12) + 12) % 12] = vocal[i] ?? 0;
   return pearson(rolled, bed);
 }
 
-/** Usable profiles: 12 finite shares with something in them. */
 export function goodProfile(p: number[] | null | undefined): p is number[] {
   return Array.isArray(p) && p.length === 12 && p.every((v) => Number.isFinite(v) && v >= 0) && p.some((v) => v > 0);
 }
 
-/** The instrumental's profile from its parts (each part counts the same, as the ear hears a bass line next to the chords). */
 export function sumProfiles(parts: Array<number[] | null | undefined>): number[] | null {
   const ok = parts.filter(goodProfile);
   if (!ok.length) return null;
@@ -634,18 +504,14 @@ export function sumProfiles(parts: Array<number[] | null | undefined>): number[]
 }
 
 export interface HarmonyMove {
-  /** The vocal's shift onto the bed (the bed's is −semitones when it moves instead). */
   semitones: number;
   fit: number;
-  /** The fit unmoved. */
   fit0: number;
   cost: number;
 }
 
-/** Clash cost of a fit: 0 when the notes line up (r = 1), 40 when they don't at all (r ≤ 0 → 40 + more). */
 const fitCost = (r: number): number => 40 * (1 - r);
 
-/** The shift (−6..+6) of the vocal against the bed that minimises (note clash + shift cost); ties → smaller, then downwards. */
 export function bestHarmonyMove(vocal: number[], bed: number[], vocalMoves: boolean): HarmonyMove {
   let best: HarmonyMove | null = null;
   const fit0 = profileFit(vocal, bed, 0);
@@ -664,7 +530,6 @@ function fitPenalty(fit: number): number {
 
 const pct = (r: number): string => `${Math.round(clamp01(r) * 100)}%`;
 
-/** A part's key: its reading, else a Krumhansl estimate from its profile. */
 function harmonyKey(h: StemHarmony): { key: KeyRef | null; confidence: number } {
   const k = toKeyRef(h.key);
   if (k) return { key: k, confidence: h.keyConfidence };
@@ -672,10 +537,6 @@ function harmonyKey(h: StemHarmony): { key: KeyRef | null; confidence: number } 
   return e ? { key: toKeyRef(e.key), confidence: e.confidence } : { key: null, confidence: 0 };
 }
 
-/**
- * The key decision from measured notes (vocalOverBeat / stemBlend with a vocal on the other song's bed): the vocal
- * stem against the instrumental's stems. null when either wasn't measured.
- */
 function decideKeyByHarmony(songs: Record<Side, SongInput>, bed: Side, anchor: MashupAnchor): KeyDecision | null {
   const mover = other(bed);
   const hv = songs[mover].harmony?.vocal;
@@ -726,19 +587,14 @@ function keyPenalty(maxShift: number, leftover: number): number {
   return shift + (leftover === 1 ? 6 : leftover > 1 ? 15 : 0);
 }
 
-// ── Roles ─────────────────────────────────────────────────────────────
-
-/** Can this song give a vocal (an a cappella, or stems)? */
 function vocalAvailable(s: SongInput): boolean {
   return s.kind === 'acapella' || s.stems.includes('vocals') || s.canSeparate;
 }
 
-/** Can this song give an instrumental bed (an instrumental, or stems)? */
 function bedAvailable(s: SongInput): boolean {
   return s.kind === 'instrumental' || BED_STEMS.every((x) => s.stems.includes(x)) || s.canSeparate;
 }
 
-/** How well `vocal` over `bed` works (higher = better; the auto choice). */
 function directionScore(req: MashupRequest, songs: Record<Side, SongInput>, vocal: Side): number {
   const bed = other(vocal);
   const v = songs[vocal];
@@ -760,8 +616,6 @@ export function chooseVocal(req: MashupRequest, songs: Record<Side, SongInput>):
   return { side: scores.b > scores.a + 1e-9 ? 'b' : 'a', scores };
 }
 
-// ── Structure ─────────────────────────────────────────────────────────
-
 interface Mapped {
   sections: PlannedSection[];
   clips: Map<string, PlannedClip[]>;
@@ -775,7 +629,6 @@ function targetBars(req: MashupRequest, natural: number): number {
   return clamp(Math.round(want / 4) * 4 || 4, 4, MAX_BARS);
 }
 
-/** Bars [from, from+bars) of the stream of `list` (cycled), split where sections end: song bar + length chunks. */
 function takeFrom(list: SongSection[], cursor: { i: number; off: number }, bars: number): Array<{ songBar: number; bars: number; name: string }> {
   const out: Array<{ songBar: number; bars: number; name: string }> = [];
   if (!list.length) return out;
@@ -796,14 +649,12 @@ function takeFrom(list: SongSection[], cursor: { i: number; off: number }, bars:
   return out;
 }
 
-/** One section repeated from its start to fill `bars`. */
 function repeatSection(s: SongSection, bars: number): Array<{ songBar: number; bars: number }> {
   const out: Array<{ songBar: number; bars: number }> = [];
   for (let off = 0; off < bars; off += s.bars) out.push({ songBar: s.startBar, bars: Math.min(s.bars, bars - off) });
   return out;
 }
 
-/** The timeline of a bed: its own sections from bar 1, cut at `T`, an intro of ≤ 8 bars and an outro of ≤ 8 bars split off. */
 function bedTimeline(bed: SongSection[], T: number): Array<SongSection & { kind: 'intro' | 'outro' | 'main' }> {
   const out: Array<SongSection & { kind: 'intro' | 'outro' | 'main' }> = [];
   for (const s of bed) {
@@ -844,11 +695,6 @@ function numbered(names: string[]): string[] {
   });
 }
 
-/**
- * Vocal over a bed: the bed plays in its own order from bar 1; its highest-energy sections get the vocal's hook
- * (repeated to fill), the others the verses in order (the lyric keeps going), the lowest section between the hooks
- * is an instrumental break, and the intro and outro stay instrumental. `bedKeys` / `vocalKey` name the clip lists.
- */
 function mapVocalOverBed(bed: SongSection[], voc: SongSection[], T: number, bedKeys: string[], vocalKey: string | null, names: { bed: string; vocal: string }): Mapped {
   const clips = new Map<string, PlannedClip[]>();
   for (const k of [...bedKeys, ...(vocalKey ? [vocalKey] : [])]) clips.set(k, []);
@@ -908,7 +754,6 @@ function mapVocalOverBed(bed: SongSection[], voc: SongSection[], T: number, bedK
   return { sections, clips, transitions };
 }
 
-/** Same-energy mapping for a stem of the non-structural song: per section, the other song's section nearest in energy (repeated to fill). */
 function mapByEnergy(timeline: PlannedSection[], src: SongSection[], key: string, clips: Map<string, PlannedClip[]>, skip: Set<number> = new Set()): void {
   const list = clips.get(key) ?? [];
   clips.set(key, list);
@@ -935,7 +780,6 @@ function mapByEnergy(timeline: PlannedSection[], src: SongSection[], key: string
   });
 }
 
-/** backAndForth: an intro of A, then B and A trade their best-energy sections (8 / 16 bars) with crossfades, an outro. */
 function mapBackAndForth(A: SongSection[], B: SongSection[], T: number, names: Record<Side, string>): Mapped {
   const clips = new Map<string, PlannedClip[]>([
     ['a:mix', []],
@@ -1001,9 +845,6 @@ function mapBackAndForth(A: SongSection[], B: SongSection[], T: number, names: R
   return { sections, clips, transitions };
 }
 
-// ── The plan ──────────────────────────────────────────────────────────
-
-/** A song's reading as the contract shows it (sections 1-based on its own grid at `factor`). */
 export function readingOf(s: SongInput, factor: Factor): MashupSongReading {
   const secs = songSections(s, factor);
   const bpm = s.bpm && s.bpm > 0 ? snapBpm(s.bpm) : null;
@@ -1037,11 +878,9 @@ function tempoReason(t: TempoDecision, songs: Record<Side, SongInput>): string {
 }
 
 export interface PlanOptions {
-  /** Skip the suggestion pass (it re-plans with alternatives). */
   noSuggestions?: boolean;
 }
 
-/** Plan a mashup of `a` and `b`. Deterministic: the same inputs give the same plan. */
 export function planMashup(req: MashupRequest, a: SongInput, b: SongInput, opts: PlanOptions = {}): MashupPlanResult {
   const songs: Record<Side, SongInput> = { a, b };
   const style: MashupStyle = req.style;
@@ -1051,7 +890,6 @@ export function planMashup(req: MashupRequest, a: SongInput, b: SongInput, opts:
   const reasons: string[] = [];
   for (const s of ['a', 'b'] as Side[]) if (songs[s].problem) problems.push(`${letter(s)} ("${short(songs[s].name, 40)}"): ${songs[s].problem}`);
 
-  // Roles: who is the bed (keeps the harmony / grid), who gives the vocal.
   let vocalFrom: Side | null = null;
   let bed: Side = 'a';
   let roleScores: Record<Side, number> | null = null;
@@ -1073,7 +911,6 @@ export function planMashup(req: MashupRequest, a: SongInput, b: SongInput, opts:
   const mover = other(bed);
   const anchorSide: Side | null = anchor === 'middle' ? null : anchor === 'beat' ? bed : style === 'backAndForth' ? 'b' : (vocalFrom ?? mover);
 
-  // Tempo.
   const tempo = chooseTempo(req, a, b, anchorSide);
   reasons.push(tempoReason(tempo, songs) + (tempo.halfway ? ` Met half way: keeping ${letter(anchorSide!)}'s tempo would stretch the other song further.` : ''));
   for (const s of ['a', 'b'] as Side[]) {
@@ -1081,9 +918,7 @@ export function planMashup(req: MashupRequest, a: SongInput, b: SongInput, opts:
     else if (audibleStretch(tempo[s].speed)) notes.push(`${letter(s)} plays ${fmtSpeed(tempo[s].speed)} (outside ×${CLEAN_STRETCH[0]}–×${CLEAN_STRETCH[1]}): listen for stretch artefacts.`);
   }
 
-  // Key.
   const moverIsVocal = style === 'backAndForth' ? false : vocalFrom === mover;
-  // stemBlend with the vocal from the structural song: "keep the vocal" = keep the bed.
   const keyAnchor: MashupAnchor = anchor === 'vocal' && style !== 'backAndForth' && !moverIsVocal ? 'beat' : anchor;
   const key = decideKey(songs, bed, keyAnchor, { key: req.key, moverIsVocal });
   reasons.push(key.reason);
@@ -1094,7 +929,6 @@ export function planMashup(req: MashupRequest, a: SongInput, b: SongInput, opts:
   }
   for (const s of ['a', 'b'] as Side[]) if (s !== vocalFrom && Math.abs(key[s]) > 2) notes.push(`${letter(s)} is pitched ${fmtSemitones(key[s])}: instruments moved that far can sound processed.`);
 
-  // Stems and parts.
   const need: Record<Side, Set<MashupStem>> = { a: new Set(), b: new Set() };
   const parts: Array<{ side: Side; part: MashupStem | 'mix'; role: PlannedTrack['role'] }> = [];
   const addStems = (s: Side, list: MashupStem[]) => {
@@ -1128,15 +962,12 @@ export function planMashup(req: MashupRequest, a: SongInput, b: SongInput, opts:
     }
   }
 
-  // Vocal presence.
   if (vocalFrom && style !== 'backAndForth') {
     const v = songs[vocalFrom];
     const how = v.vocalSource === 'stems' ? 'from its vocal stem' : v.vocalSource === 'name' ? 'going by its name' : 'not measured yet: the stems will tell';
     const level = v.vocalPresence >= 0.6 ? 'a clear lead vocal' : v.vocalPresence >= 0.3 ? 'some vocal' : 'little or no vocal';
     reasons.push(`Vocal: ${letter(vocalFrom)} has ${level} (${how})${roleScores && req.vocalFrom !== 'a' && req.vocalFrom !== 'b' ? `; chosen over the other way round (fit ${Math.round(roleScores[vocalFrom])} vs ${Math.round(roleScores[other(vocalFrom)])})` : ''}.`);
     if (style === 'vocalOverBeat' && v.vocalSource !== 'unknown' && v.vocalPresence < NO_VOCAL) {
-      // Measured: the donor has no lead vocal (an instrumental, or only bleed in its vocal stem). Building would
-      // just play the other song's beat, so stop and say what works instead.
       const o = songs[other(vocalFrom)];
       const both = o.vocalSource !== 'unknown' && o.vocalPresence < NO_VOCAL;
       problems.push(
@@ -1149,7 +980,6 @@ export function planMashup(req: MashupRequest, a: SongInput, b: SongInput, opts:
     if (style === 'vocalOverBeat' && bs.kind !== 'instrumental' && bs.vocalPresence >= 0.3) reasons.push(`Bed: ${letter(bed)}'s own vocal is left out (its drums, bass and other stems are used).`);
   }
 
-  // Structure.
   const secs: Record<Side, SongSection[]> = { a: songSections(a, tempo.a.factor), b: songSections(b, tempo.b.factor) };
   const names: Record<Side, string> = { a: short(a.name, 24) || 'A', b: short(b.name, 24) || 'B' };
   const tracks: PlannedTrack[] = [];
@@ -1169,7 +999,6 @@ export function planMashup(req: MashupRequest, a: SongInput, b: SongInput, opts:
     const vocalPart = parts.find((p) => p.role === 'vocal' && p.side !== bed);
     const vocalKey = vocalPart ? keyOf(vocalPart.side, vocalPart.part) : null;
     mapped = mapVocalOverBed(bedSecs, vocalPart ? secs[vocalPart.side] : [], T, bedParts, vocalKey, { bed: names[bed], vocal: vocalPart ? names[vocalPart.side] : '' });
-    // stemBlend: the structural song's own vocal plays in place; the other song's drums / bass / other follow energy.
     for (const p of parts) {
       const k = keyOf(p.side, p.part);
       if (mapped.clips.has(k)) continue;
@@ -1190,7 +1019,6 @@ export function planMashup(req: MashupRequest, a: SongInput, b: SongInput, opts:
   }
   const bars = mapped.sections.reduce((n, s) => n + s.bars, 0);
 
-  // Tracks (fixed order: the vocal first, then drums, bass, other, mixes).
   const order: Record<PlannedTrack['role'], number> = { vocal: 0, drums: 1, bass: 2, other: 3, mix: 4 };
   const label = (st: MashupStem | 'mix') => (st === 'mix' ? 'Full mix' : st[0].toUpperCase() + st.slice(1));
   const sortedParts = [...parts].sort((x, y) => order[x.role] - order[y.role] || (x.side < y.side ? -1 : x.side > y.side ? 1 : 0));
@@ -1211,12 +1039,9 @@ export function planMashup(req: MashupRequest, a: SongInput, b: SongInput, opts:
     });
   }
   const vocalTrack = tracks.find((t) => t.role === 'vocal');
-  // Off unless asked: a finished vocal is already in tune, the shift puts it in the key, and snapping a singer's
-  // blue notes and runs to a scale changes the melody.
   const tune = vocalTrack ? (req.tune ?? 'off') : 'off';
   if (vocalTrack && tune !== 'off' && key.measured && key.measured.vocalKeyConfidence < KEY_WEAK) notes.push(`The vocal's key reading is weak (${Math.round(key.measured.vocalKeyConfidence * 100)}%): if Krypt Tune pulls notes the wrong way, turn it off.`);
 
-  // Score.
   const tempoPen = Math.max(...(['a', 'b'] as Side[]).map((s) => (songs[s].bpm ? stretchPenalty(tempo[s].speed) : 20)));
   let vocalPen = 0;
   if (vocalFrom && style !== 'backAndForth') {
@@ -1267,10 +1092,6 @@ export function planMashup(req: MashupRequest, a: SongInput, b: SongInput, opts:
   return { check, build };
 }
 
-/**
- * The channel gain that plays a part at the shared level: its song at MIX_LUFS (stems sum back to their song), the
- * vocal VOCAL_LIFT_DB over it; an a cappella (its own loudness is the vocal's) about where a vocal sits in a mix.
- */
 function levelDb(s: SongInput, p: { part: MashupStem | 'mix'; role: PlannedTrack['role'] }): number {
   const l = s.lufs;
   if (l === null || l === undefined || !Number.isFinite(l)) return 0;
@@ -1278,12 +1099,9 @@ function levelDb(s: SongInput, p: { part: MashupStem | 'mix'; role: PlannedTrack
   return r2(clamp(target - l + (p.role === 'vocal' ? VOCAL_LIFT_DB : 0), -18, 9));
 }
 
-// ── Suggestions (re-planned with an alternative) ──────────────────────
-
 function suggestions(req: MashupRequest, songs: Record<Side, SongInput>, cur: { score: number; tempo: TempoDecision; key: KeyDecision; vocalFrom: Side | null; style: MashupStyle; roleScores: Record<Side, number> | null }): string[] {
   const out: string[] = [];
   const replan = (patch: Partial<MashupRequest>) => planMashup({ ...req, ...patch }, songs.a, songs.b, { noSuggestions: true });
-  // A forced tempo reading that stretches more than the automatic one.
   for (const s of ['a', 'b'] as Side[]) {
     const fk = s === 'a' ? 'factorA' : 'factorB';
     if (req[fk] === undefined) continue;
@@ -1293,7 +1111,6 @@ function suggestions(req: MashupRequest, songs: Record<Side, SongInput>, cur: { 
       out.push(`Use ${letter(s)} ${d.factor === 1 ? 'as detected' : d.factor === 0.5 ? 'at half time' : 'at double time'}: it plays ${fmtSpeed(d.speed)} instead of ${fmtSpeed(cur.tempo[s].speed)}.`);
     }
   }
-  // Big stretch or a big vocal move: meeting half way.
   const anchor = req.anchor ?? 'beat';
   const worst = Math.max(Math.abs(Math.log2(cur.tempo.a.speed)), Math.abs(Math.log2(cur.tempo.b.speed)));
   const vocalShift = cur.vocalFrom ? Math.abs(cur.key[cur.vocalFrom]) : 0;
@@ -1305,7 +1122,6 @@ function suggestions(req: MashupRequest, songs: Record<Side, SongInput>, cur: { 
     if (cur.vocalFrom && Math.abs(alt.build.songs[cur.vocalFrom].semitones) < vocalShift) parts.push(`the vocal moves ${fmtSemitones(alt.build.songs[cur.vocalFrom].semitones)} and the beat ${fmtSemitones(alt.build.songs[other(cur.vocalFrom)].semitones)} instead of ${fmtSemitones(cur.key[cur.vocalFrom])}`);
     if (parts.length) out.push(`Anchor "middle": ${parts.join('; ')}.`);
   }
-  // The other way round fits better.
   if (cur.style === 'vocalOverBeat' && cur.vocalFrom && (req.vocalFrom === 'a' || req.vocalFrom === 'b') && cur.roleScores) {
     const o = other(cur.vocalFrom);
     if (cur.roleScores[o] > cur.roleScores[cur.vocalFrom] + 5) {

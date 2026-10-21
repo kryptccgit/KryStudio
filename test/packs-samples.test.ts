@@ -1,8 +1,3 @@
-// Wave 7b sample packs (research/14 §2.3): ZIP archives in a pack (only the listed members extracted, each verified,
-// extra entries ignored, '../' refused, a bad member or a missing one fails with a sentence and cleans up, cancel
-// mid-extract), installed packs' samples joining the sound library (SoundsService.factoryIndex, find_samples,
-// load_sample with pack: paths, factory wins ties), add_transition's new kinds (whoosh, tape-stop, swell from a pack,
-// levelled by peak; their fallbacks), list_packs sample counts and the card text. Synthetic ZIPs built with fflate.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -32,9 +27,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'kstudio-packsamples-'));
 const sha = (b: Uint8Array | string) => crypto.createHash('sha256').update(b).digest('hex');
 const BAR = 3840;
 
-// ── A synthetic archive ─────────────────────────────────────────────────
 const HIT = new Uint8Array(crypto.randomBytes(40_000));
-// Compressible, so it really is deflated.
 const WHOOSH = new Uint8Array(Buffer.from('whoosh '.repeat(9000)));
 const README = new Uint8Array(Buffer.from('not ours'));
 const EVIL = new Uint8Array(Buffer.from('escape attempt'));
@@ -93,7 +86,6 @@ function rig(catalog: PackDef[]) {
   return { dir, svc, logs };
 }
 
-/** Every file under `root` (relative, forward slashes). */
 function tree(root: string): string[] {
   const out: string[] = [];
   const walk = (d: string): void => {
@@ -106,8 +98,6 @@ function tree(root: string): string[] {
   if (fs.existsSync(root)) walk(root);
   return out.sort();
 }
-
-// ── ZIP install ─────────────────────────────────────────────────────────
 
 test('zip: only the listed members are extracted (stored + deflated), verified, the archive deleted; extra entries never written', async () => {
   const { dir, svc } = rig([sfxPack()]);
@@ -122,7 +112,6 @@ test('zip: only the listed members are extracted (stored + deflated), verified, 
   const lic = fs.readFileSync(path.join(root, 'LICENSE.txt'), 'utf8');
   assert.ok(lic.includes('downloads/sfx.zip (a ZIP archive; deleted after these members were extracted from it)'));
   assert.ok(lic.includes(`${sha(HIT)}  ${HIT.length}  sfx/hit-01.wav (from "Pack/Audio/hit_01.wav")`));
-  // Its samples join the library, factory-index shaped.
   assert.deepEqual(svc.samples().map((s) => [s.path, s.kind]), [
     ['pack:sfx-test/sfx/hit-01.wav', 'impact'],
     ['pack:sfx-test/sfx/whoosh-long.wav', 'whoosh'],
@@ -130,7 +119,6 @@ test('zip: only the listed members are extracted (stored + deflated), verified, 
   const info = svc.sampleInfo();
   assert.deepEqual(info.packs, [{ id: 'sfx-test', name: 'Test Effects', installed: true, count: 2, byKind: { impact: 1, whoosh: 1 } }]);
   assert.equal(info.samples.length, 2);
-  // Remove: the samples leave the library.
   const rm = await svc.remove('sfx-test');
   assert.equal(rm.ok, true, rm.message);
   assert.deepEqual(svc.samples(), []);
@@ -148,7 +136,6 @@ test('zip: a member whose SHA-256 is wrong fails with a sentence, and nothing of
   assert.equal(e.status, 'failed');
   assert.match(e.error!, /SHA-256 mismatch/);
   assert.ok(!fs.existsSync(path.join(dir, 'sfx-test')), 'not installed');
-  // The staging folder keeps no member, no temp file and no archive.
   assert.deepEqual(tree(path.join(dir, 'sfx-test.partial')).filter((f) => f !== '.krypt-partial.json'), []);
   assert.deepEqual(svc.samples(), []);
 });
@@ -198,7 +185,6 @@ test('zip: cancel mid-extract keeps the finished members; extract skips what is 
   assert.ok(fs.existsSync(wanted[0].dest));
   assert.ok(!fs.existsSync(wanted[1].dest));
   assert.deepEqual(fs.readdirSync(path.join(dir, 'out')), ['hit.wav'], 'no temp file left');
-  // Resume: the finished one is skipped, the other extracted.
   const skipped: string[] = [];
   await extractZipMembers(zipPath, wanted, {
     done: async (m) => {
@@ -209,10 +195,8 @@ test('zip: cancel mid-extract keeps the finished members; extract skips what is 
   });
   assert.deepEqual(skipped, ['Pack/Audio/hit_01.wav']);
   assert.deepEqual(new Uint8Array(fs.readFileSync(wanted[1].dest)), WHOOSH);
-  // A wrong size in the catalog never writes more than it says.
   await assert.rejects(extractZipMembers(zipPath, [{ ...wanted[1], dest: path.join(dir, 'out', 'small.wav'), bytes: 10 }]), /wrong size in the archive/);
   assert.ok(!fs.existsSync(path.join(dir, 'out', 'small.wav')));
-  // Not a ZIP at all.
   fs.writeFileSync(path.join(dir, 'b.zip'), 'definitely not a zip file, just text that is long enough');
   await assert.rejects(extractZipMembers(path.join(dir, 'b.zip'), wanted), /isn't a ZIP archive/);
 });
@@ -228,8 +212,6 @@ test('instrument packs without archives install exactly as before (no samples)',
   assert.deepEqual(tree(path.join(dir, 'plain')), ['LICENSE.txt', 'krypt/a.sfz', 'pack.json', 'samples/a.flac']);
   assert.deepEqual(svc.sampleInfo(), { packs: [], samples: [] });
 });
-
-// ── The sound library ───────────────────────────────────────────────────
 
 const fsmp = (p: string, kind: FactorySample['kind'], extra: Partial<FactorySample> = {}): FactorySample => ({ path: p, name: p.split('/').pop()!.replace(/\.wav$/, ''), kind, tags: [], genres: [], lengthSec: 1, channels: 2, peakDb: -1, ...extra });
 
@@ -254,15 +236,12 @@ test('SoundsService: installed pack samples join factoryIndex() after the factor
   assert.deepEqual(svc.factorySamples().map((s) => s.path), ['factory:fx/whoosh-1.wav', 'factory:fx/impact.wav']);
   packSamples = [];
   assert.equal(svc.factoryIndex()!.samples.length, 2);
-  // No factory index but a sample pack: the packs alone.
   fs.rmSync(path.join(factory, 'index.json'));
   packSamples = [psmp('pack:sfx-test/sfx/b.wav', 'retro')];
   assert.deepEqual(svc.factoryIndex()!.samples.map((s) => s.path), ['pack:sfx-test/sfx/b.wav']);
   packSamples = [];
   assert.equal(svc.factoryIndex(), null);
 });
-
-// ── MCP tools ───────────────────────────────────────────────────────────
 
 const LIB = path.join(TMP, 'lib');
 
@@ -337,7 +316,6 @@ const LIBRARY: FactoryIndex = {
     fsmp('factory:fx/swell-2.wav', 'swell', { bpm: 120, bars: 2, lengthSec: 4 }),
     fsmp('factory:fx/sweep-up-1.wav', 'sweep-up', { bpm: 120, bars: 1, lengthSec: 2 }),
     fsmp('factory:fx/revcym-1.wav', 'reverse-cymbal', { bpm: 120, bars: 1, lengthSec: 2 }),
-    // Installed pack samples come after the factory's (SoundsService order).
     { ...psmp('pack:sfx-test/sfx/whoosh-short.wav', 'whoosh', { bpm: 120, bars: 1, lengthSec: 2 }) },
     { ...psmp('pack:sfx-test/sfx/whoosh-dark.wav', 'whoosh', { name: 'Dark Air Pass', bpm: 120, bars: 2, lengthSec: 4, tags: ['dark'], peakDb: -7 }) },
     { ...psmp('pack:sfx-test/sfx/rain.wav', 'ambience', { name: 'Rain On Window', tags: ['rain'] }) },
@@ -363,13 +341,11 @@ test('find_samples: installed pack samples are listed (source "pack"), factory w
     ['pack:sfx-test/sfx/whoosh-dark.wav', 'pack'],
     ['pack:sfx-test/sfx/whoosh-short.wav', 'pack'],
   ]);
-  // A pack sound that fits the words better wins.
   const dark = await call('find_samples', { kind: 'whoosh', query: 'dark', genre: 'any' });
   assert.equal((dark.data as { samples: Array<{ path: string }> }).samples[0].path, 'pack:sfx-test/sfx/whoosh-dark.wav');
   assert.match(dark.text!, /pack:sfx-test\/sfx\/whoosh-dark\.wav {2}whoosh · Dark Air Pass · 2 bars @120 bpm/);
   const amb = await call('find_samples', { kind: 'ambience' });
   assert.deepEqual((amb.data as { samples: Array<{ path: string }> }).samples.map((s) => s.path), ['pack:sfx-test/sfx/rain.wav']);
-  // "fx" includes the new transition kinds.
   const all = await call('find_samples', { kind: 'fx', genre: 'any', limit: 100 });
   const kinds = new Set((all.data as { samples: Array<{ kind: string }> }).samples.map((s) => s.kind));
   for (const k of ['whoosh', 'tape-stop', 'swell']) assert.ok(kinds.has(k), k);
@@ -396,14 +372,12 @@ test('add_transition whoosh / swell / tape-stop: end on the boundary, pack sound
   const { doc, call } = makeDeps(LIBRARY);
   const w = await call('add_transition', { at_bars: [9], kind: 'whoosh', length_bars: 2 });
   assert.equal(w.ok, true, w.message);
-  // 2 bars: the 2-bar pack whoosh fits best (better than the factory's 1-bar one).
   assert.match(w.message, /"Dark Air Pass" from the Test Effects pack|"Dark Air Pass" from the sfx-test pack/);
   let clips = fx(doc);
   assert.equal(clips.length, 1);
   assert.equal(clips[0].path, 'pack:sfx-test/sfx/whoosh-dark.wav');
   assert.equal(clips[0].clip.start + clips[0].clip.length, 8 * BAR, 'ends exactly on the boundary');
   assert.equal(clips[0].clip.length, 2 * BAR);
-  // peak -7 dBFS vs the factory's -1: +6 dB on the kind's -10 dB.
   assert.ok(Math.abs(clips[0].ch.volume - 10 ** (-4 / 20)) < 1e-3, String(clips[0].ch.volume));
 
   const sw = await call('add_transition', { at_bars: [17], kind: 'swell' });

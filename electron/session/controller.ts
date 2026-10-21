@@ -1,18 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Clip launcher runtime (main process), Wave 12.2 (research/16 §2.1).
-//
-//   renderer / MCP ─▶ this ─NDJSON─▶ engine: launch, launchScene, launchStop,
-//                                     backToArrangement, setLaunchRecord, setLaunchGrid
-//   engine `launchRecorded` ─▶ session.capture (actor user, ONE undo step)
-//                           ─▶ SessionRecordState.lastCapture (the renderer toasts it)
-//
-// Editing the grid is plain doc commands (session.*); this only drives
-// playback. Scene tempo is applied as a doc edit (transport.set) by the
-// launching actor. The grid-controller note map is recomputed whenever the
-// launcher layout (scenes, clips, track order), the settings or the engine
-// (restart) change, and re-sent only when it differs.
-// ──────────────────────────────────────────────────────────────────────
-
 import { USER, type DocHost, type DocChange } from '@shared/doc/DocHost';
 import type { ActionResult, LaunchGridSettings, SessionRecordState, Settings } from '@shared/types';
 import type { EngineEvent, LaunchRecordEntry } from '@shared/engine/protocol';
@@ -30,7 +15,6 @@ export interface SessionDeps {
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
 }
 
-/** Runs a doc command for the launching actor; throws (or returns ok:false) on failure. */
 export type SessionExec = (cmd: string, args: unknown) => { ok: boolean; message?: string } | unknown;
 
 const LAUNCH_TIMEOUT_MS = 3000;
@@ -73,9 +57,6 @@ export class SessionController {
     this.offs = [];
   }
 
-  // ── Engine sync ────────────────────────────────────────────────────
-
-  /** After every engine (re)start: the engine forgot the record switch and the grid map. */
   private async sync(): Promise<void> {
     this.gridKey = 'off';
     if (this.recordOn) {
@@ -89,7 +70,6 @@ export class SessionController {
     await this.pushGrid();
   }
 
-  /** Send the grid-controller note map when it changed (and the engine runs). */
   async pushGrid(): Promise<ActionResult> {
     if (this.d.engine.status().state !== 'running') return { ok: true };
     const settings = launchGridSettings(this.d.getSettings());
@@ -110,7 +90,6 @@ export class SessionController {
     if (e.event === 'launchRecorded') this.capture(Array.isArray(e.entries) ? e.entries : []);
   }
 
-  /** Write launch-recorded spans into the playlist (one undo step, actor user) and report it to the renderer. */
   capture(entries: LaunchRecordEntry[]): ActionResult<{ placed: number; spans: number; skipped: number }> {
     if (!entries.length) return { ok: true, message: 'Nothing was launched while recording' };
     const r = this.d.doc.exec<{ placed: number; spans: number; skipped: number }>('session.capture', { entries }, { actor: USER, label: 'Record launches' });
@@ -132,8 +111,6 @@ export class SessionController {
     return result;
   }
 
-  // ── Launching ──────────────────────────────────────────────────────
-
   private engineDown(): ActionResult<never> | null {
     const st = this.d.engine.status();
     if (st.state === 'running') return null;
@@ -151,7 +128,6 @@ export class SessionController {
     return { ok: true, message: release ? 'Released' : `Launched ${quote(clipLabel(p, c.id))}` };
   }
 
-  /** Launch a scene row; a scene tempo is set first through transport.set (by `exec`, default: the user). */
   async launchScene(sceneId: string, exec?: SessionExec): Promise<ActionResult<{ tempo: number | null }>> {
     const p = this.d.doc.project;
     const sc = p.session?.scenes[sceneId];
@@ -188,8 +164,6 @@ export class SessionController {
     return { ok: true, message: 'Back to the arrangement' };
   }
 
-  // ── Launch recording ───────────────────────────────────────────────
-
   recordState(): SessionRecordState {
     return { on: this.recordOn, ...(this.lastCapture ? { lastCapture: { ...this.lastCapture } } : {}) };
   }
@@ -217,8 +191,6 @@ export class SessionController {
     this.d.broadcast(EVENT.sessionRecordState, this.recordState());
   }
 
-  // ── Grid controller settings ───────────────────────────────────────
-
   gridSettings(): LaunchGridSettings {
     return launchGridSettings(this.d.getSettings());
   }
@@ -227,12 +199,10 @@ export class SessionController {
     if (!patch || typeof patch !== 'object') return { ok: false, message: 'No grid settings to change' };
     const next = mergeLaunchGrid(this.gridSettings(), patch);
     const saved = launchGridSettings(this.d.updateSettings({ launchGrid: next }));
-    // onSettingsChanged re-sends the map.
     return { ok: true, message: saved.enabled ? `Grid controller on (${saved.layout})` : 'Grid controller off', data: saved };
   }
 }
 
-/** Does a doc change move what the grid shows (scenes, launch clips, track order)? */
 function layoutChanged(c: DocChange): boolean {
   if (c.kind === 'reset') return true;
   for (const p of c.patches) {
@@ -243,7 +213,6 @@ function layoutChanged(c: DocChange): boolean {
   return false;
 }
 
-/** Display name of a launch clip: its own name, else the pattern / channel name. */
 export function clipLabel(p: { session?: import('@shared/schema/launcher').Session; patterns: Record<string, { name: string }>; channels: Record<string, { name: string }> }, clipId: string): string {
   const c = p.session?.clips[clipId];
   if (!c) return '?';

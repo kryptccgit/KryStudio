@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// "Detect tempo & key": what Krypt hears in a clip, channel sample or file.
-// Tempo (+ confidence and half/double-time alternatives), key, swing, a
-// section timeline, loudness, stereo width and an energy sparkline.
-// Estimates carry a subtle "estimated" badge; measurements don't. Actions:
-// use the tempo for the project, make the clip follow the project tempo,
-// convert the audio to a pattern.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AudioWaveform, Check, ChevronDown, Drum, Loader2, Music2, Piano, RotateCcw, TriangleAlert } from 'lucide-react';
 import type { AudioAnalysis } from '@shared/analyzer/protocol';
@@ -48,7 +39,6 @@ import {
   watchAnalysis,
 } from './actions';
 
-/** Open the analysis dialog for a target (starts the analysis, or shows the cached one). */
 export function openAnalysisDialog(target: AudioTarget, doc?: Document | null, opts: { force?: boolean } = {}): void {
   const reopen = (): void => openAnalysisDialog(target);
   const key = startAnalysis(target, reopen, opts.force);
@@ -63,8 +53,6 @@ export function openAnalysisDialog(target: AudioTarget, doc?: Document | null, o
     render: (close) => <AnalysisView analysisKey={key} target={target} close={close} doc={doc ?? document} />,
   });
 }
-
-// ── Small pieces ──────────────────────────────────────────────────────
 
 function Estimated({ show }: { show: boolean }) {
   if (!show) return null;
@@ -123,10 +111,7 @@ function Stat({ label, value, hint, warn }: { label: string; value: string; hint
   );
 }
 
-/** dB-style readout; `signed` puts a + on positive values (true peak above 0 dBTP). */
 const db = (v: number, unit: string, signed = false): string => (Number.isFinite(v) ? `${signed && v > 0.05 ? '+' : ''}${v.toFixed(1)} ${unit}` : '–');
-
-// ── Sections + energy ─────────────────────────────────────────────────
 
 function Timeline({ a }: { a: AudioAnalysis }) {
   const blocks = useMemo(() => sectionBlocks(a.sections, a.durationSec), [a]);
@@ -140,7 +125,6 @@ function Timeline({ a }: { a: AudioAnalysis }) {
   return (
     <div>
       <div className="relative overflow-hidden rounded-lg border border-white/[0.07] bg-black/30">
-        {/* section bands behind the energy curve */}
         <div className="absolute inset-0">
           {blocks.map((b, i) => (
             <div key={i} className="absolute inset-y-0" style={{ left: `${b.left}%`, width: `${b.width}%`, background: `${b.color}14`, borderLeft: i ? `1px solid ${b.color}55` : undefined }} />
@@ -208,11 +192,8 @@ function StereoBar({ width, correlation }: { width: number; correlation: number 
   );
 }
 
-// ── The view ──────────────────────────────────────────────────────────
-
 function Running({ startedAt, name }: { startedAt: number; name: string }) {
   const jobs = useAnalyzer((s) => s.state?.jobs);
-  // our job: the analyze job naming this audio, else the newest analyze job
   const job = useMemo(() => {
     const list = (jobs ?? []).filter((j) => j.kind === 'analyze').sort((a, b) => b.startedAt - a.startedAt);
     return list.find((j) => j.label.includes(name)) ?? list[0] ?? null;
@@ -271,7 +252,6 @@ function AnalysisView({ analysisKey, target, close, doc }: { analysisKey: string
   useEffect(() => watchAnalysis(analysisKey), [analysisKey]);
   const clipChannel = useProject((p) => audioClipChannelOf(p, target));
   const [picked, setPicked] = useState<number | null>(null);
-  // re-render when the channel's sync params change (Follow button state)
   useProject((p) => (clipChannel ? p.channels[clipChannel]?.generator.params.tempo_sync ?? 0 : 0));
   useProject((p) => (clipChannel ? p.channels[clipChannel]?.generator.params.src_bpm ?? 0 : 0));
   const projectBpm = useProject((p) => p.transport.bpm);
@@ -300,7 +280,6 @@ function AnalysisView({ analysisKey, target, close, doc }: { analysisKey: string
   const a = run.analysis;
   const alts = a.tempo ? tempoAlternatives(a.tempo) : [];
   const bpm = picked ?? a.tempo?.bpm ?? null;
-  // Following: unless a reading was picked, the half/double reading nearest the project tempo (least stretch).
   const followBpm = picked ?? (a.tempo ? syncBpm(a.tempo, projectBpm) : null);
   const canFollow = !!clipChannel && audioClipCanFollowTempo();
   const following = !!clipChannel && followBpm !== null && isFollowingTempo(clipChannel, followBpm);

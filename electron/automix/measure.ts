@@ -1,9 +1,3 @@
-// Auto Mix: measure the song (research/20 §3). One offline render of the
-// scope with the engine's analysis, a file per insert (stems) and the gain
-// reduction of every dynamics slot (Wave 12.2b), turned into the planner's
-// PlanMeasure. The same render path as render_preview / review_song /
-// match_mix (electron/mcp/tools/hearing.ts).
-
 import type { Project } from '@shared/schema/project';
 import { ticksPerBar } from '@shared/schema/time';
 import type { Analysis } from '@shared/engine/protocol';
@@ -14,17 +8,14 @@ import type { MainDeps } from '../mcp/types';
 import { audibleSongEnd, renderAndAnalyse } from '../mcp/tools/hearing';
 import { collectHeard } from '../mcp/tools/craftReview';
 
-/** Longest song rendered whole; longer songs are measured on their fullest 32 bars. */
 export const MAX_WHOLE_BARS = 128;
 export const WINDOW_BARS = 32;
 
 export interface Measured {
   measure: PlanMeasure;
-  /** What was rendered ("the song (64 bars)", "bars 33-64"). */
   label: string;
 }
 
-/** bars: the range (default the whole audible song); stems false: the mix only (album songs); maxBars: the longest range allowed. */
 export interface MeasureScope {
   bars?: string;
   stems?: boolean;
@@ -35,7 +26,6 @@ export type MeasureFn = (deps: MainDeps, scope: MeasureScope) => Promise<Measure
 
 const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 
-/** The bar range to measure: the request's, the whole audible song, or the fullest 32-bar window of a long one. */
 export function measureScope(p: Project, bars?: string): { bars?: string } {
   if (bars?.trim()) return { bars: bars.trim() };
   const barTicks = ticksPerBar(p.transport.timeSig);
@@ -67,7 +57,6 @@ function insertMeasure(a: Analysis | null): InsertMeasure {
   };
 }
 
-/** The real measurement: one render with analysis + stems (+ gain reduction). Throws with a human message. */
 export const renderMeasure: MeasureFn = async (deps, scope) => {
   const args = scope.bars ? { scope: 'bars' as const, bars: scope.bars } : {};
   const out = await renderAndAnalyse(deps, args, { maxBars: Math.max(MAX_WHOLE_BARS, 160, scope.maxBars ?? 0), audibleSong: true, prefix: 'mixmatch', stems: scope.stems !== false });
@@ -98,7 +87,6 @@ export const renderMeasure: MeasureFn = async (deps, scope) => {
 
 const r1 = (x: number): number => Math.round(x * 10) / 10;
 
-/** The contract's before / after numbers. */
 export function publicMeasure(m: PlanMeasure, roles: Record<string, InsertInfo>): AutoMixMeasure {
   const t = m.master.tone;
   const vb = vocalVsBeat(m, roles);

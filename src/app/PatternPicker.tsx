@@ -1,6 +1,3 @@
-// The active-pattern selector (transport bar + Channel Rack header):
-// click for the list + actions, wheel / Num +/- to step, inline + and clone.
-
 import { useRef } from 'react';
 import { Copy, Palette, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -80,7 +77,6 @@ export function PatternPicker({ compact, className }: { compact?: boolean; class
         draggable={!!active}
         onDragStart={(e) => {
           if (!active) return;
-          // Drop onto the Playlist or a Session view slot.
           e.dataTransfer.setData(PATTERN_MIME, active.id);
           e.dataTransfer.effectAllowed = 'copy';
         }}

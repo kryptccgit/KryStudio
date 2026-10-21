@@ -1,6 +1,3 @@
-// The preset MCP tools (find_presets, load_preset, save_preset, apply_chain), default sounds for channels created
-// by name (chooseInstrument via write_pattern / add_channel) and find_samples with the factory index, through
-// callTool against a real DocHost + SoundsService over temp folders.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -35,9 +32,7 @@ const SETTINGS: Settings = {
 };
 
 interface RigOpts {
-  /** 'service' (default): a SoundsService with fixtures; 'empty': a service with no factory presets; 'none': no deps.sounds. */
   sounds?: 'service' | 'empty' | 'none';
-  /** Write the factory index (default true). */
   index?: boolean;
   genre?: string;
   presets?: readonly Preset[];
@@ -113,16 +108,12 @@ function rig(opts: RigOpts = {}) {
   return { dir, factory, userRoot, doc, deps, svc, call, byName, slotTypes, logs, setGenre: (g: string) => (doc.project.meta.genre = g) };
 }
 
-// ── Registry ──────────────────────────────────────────────────────────
-
 test('the four preset tools are registered with the right kinds', () => {
   assert.equal(getTool('find_presets')?.kind, 'read');
   assert.equal(getTool('load_preset')?.kind, 'write');
   assert.equal(getTool('save_preset')?.kind, 'transport', 'it writes a user file, never the project');
   assert.equal(getTool('apply_chain')?.kind, 'write');
 });
-
-// ── find_presets ──────────────────────────────────────────────────────
 
 test('find_presets: by role + genre (default: the project genre), words, kind, plugin; compact lines', async () => {
   const { call, setGenre } = rig({ genre: 'Big Room' });
@@ -166,8 +157,6 @@ test('find_presets with no presets installed, and without the sounds service (fa
   else assert.match(b.message, /No presets are installed yet/);
 });
 
-// ── load_preset ───────────────────────────────────────────────────────
-
 test('load_preset by id onto an existing channel: one undo group, message names preset + channel', async () => {
   const { call, doc, byName, slotTypes } = rig();
   const keys = byName('Keys');
@@ -200,7 +189,6 @@ test('load_preset by name or words (role from the words, the channel or the name
   assert.equal(words.ok, true, words.message);
   assert.equal(byName('Pluck').generator.preset?.id, DARK_PLUCK.id);
   assert.match(words.message, /Best match for "dark pluck"; others: Candy Pluck/);
-  // "dark" alone has no role: the channel name says lead.
   await call('add_channel', { name: 'Hook', instrument: 'synth', params: { cutoff: 900 } });
   const hint = await call('load_preset', { preset: 'dark', channel: 'Hook', name: 'Hook Lead', with_fx: false });
   assert.equal(hint.ok, true, hint.message);
@@ -233,8 +221,6 @@ test('load_preset onto a channel on the master gets it its own insert; a missing
   assert.match(s.warnings!.join(' '), /isn't installed/);
 });
 
-// ── save_preset ───────────────────────────────────────────────────────
-
 test('save_preset: a channel or an insert becomes a user preset file; no project change; then loadable', async () => {
   const { call, doc, svc } = rig();
   await call('load_preset', { preset: PLUCK.id, channel: 'Keys' });
@@ -244,7 +230,6 @@ test('save_preset: a channel or an insert becomes a user preset file; no project
   const r = await call('save_preset', { channel: 'Keys', name: 'Glass Pluck', tags: ['Bright'], genres: ['future bass'], description: 'Shimmery pluck.' });
   assert.equal(r.ok, true, r.message);
   assert.match(r.message, /^Saved user preset "Glass Pluck" \(user:glass-pluck; pluck, Wave, 2 changed params, 1 effect\)\. load_preset \{"preset":"user:glass-pluck"\} loads it\./);
-  // Only the label changes: the channel now shows the saved preset, as this agent, with no undo step.
   assert.deepEqual(doc.project.channels[keysId].generator.preset, { id: 'user:glass-pluck', name: 'Glass Pluck' });
   assert.deepEqual(doc.project.channels[keysId].generator.params, params);
   assert.equal(doc.getHistory().length, h);
@@ -277,8 +262,6 @@ test('save_preset: a channel or an insert becomes a user preset file; no project
   assert.match(ns.message, /sounds service/);
 });
 
-// ── apply_chain ───────────────────────────────────────────────────────
-
 test('apply_chain: words → the genre master on "master"; "new" creates a send; channel name → its insert; warnings', async () => {
   const { call, doc, slotTypes, byName } = rig({ genre: 'edm' });
   const r = await call('apply_chain', { chain: 'club master', insert: 'master' });
@@ -310,8 +293,6 @@ test('apply_chain: words → the genre master on "master"; "new" creates a send;
   assert.deepEqual(checkIntegrity(doc.project), []);
 });
 
-// ── Default sounds (chooseInstrument) ─────────────────────────────────
-
 test('chooseInstrument: role from the name + genre → preset / factory sample; legacy fallbacks', () => {
   const { deps, setGenre } = rig({ genre: 'EDM' });
   const pick = (name: string, grid = false, inst?: string) => chooseInstrument(deps, name, inst, grid);
@@ -339,7 +320,6 @@ test('chooseInstrument: role from the name + genre → preset / factory sample; 
   assert.equal(pick('Supersaw Lead').preset?.id, LEAD_EDM.id, 'asking for a supersaw by name gets one, whatever the genre');
   assert.equal(pick('Kick').sample, 'factory:kicks/trap-kick-1.wav');
   assert.equal(pick('808').preset?.id, EIGHT08.id);
-  // Genre from the library focus when the project has none.
   setGenre('');
   deps.updateSettings({ library: { focus: { collectionId: 'c1', name: 'Refs', brief: 'dark uk drill, sparse' } } } as Partial<Settings>);
   assert.equal(pick('Lead').preset?.id, LEAD_TRAP.id);
@@ -357,7 +337,6 @@ test('chooseInstrument with no presets / no index: the legacy kit, the 808, the 
   assert.deepEqual(bass.params, SYNTH_PRESETS[0].params);
   assert.equal(pick('Lead').label, 'TriOsc lead');
   assert.equal(pick('Mystery').label, 'Krypt TriOsc');
-  // No service at all: the shared factory data (whatever ships) or the same legacy fallbacks.
   const bare = rig({ sounds: 'none', index: false });
   const lead = chooseInstrument(bare.deps, 'Lead', undefined, false);
   if (lead.preset) {
@@ -402,8 +381,6 @@ test('add_channel: preset by name (own insert + FX), knobs → classic default, 
   assert.equal(byName('Supersaw').generator.preset?.id, LEAD_EDM.id, 'an explicit plugin still gets its best preset for the role');
   assert.ok(wave.ok);
 });
-
-// ── find_samples ──────────────────────────────────────────────────────
 
 test('find_samples: index metadata (kind, bars, root, genre ranking), groups, user files classified by name', async () => {
   const { call, userRoot } = rig({ genre: 'edm' });

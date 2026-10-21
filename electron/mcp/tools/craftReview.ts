@@ -1,9 +1,3 @@
-// review_song's checks (owned by craft-tools): the agent's mandatory
-// self-review. Pure functions over the project, the render's analysis and
-// the playbook targets, so each check is unit-testable without an engine.
-// Order of the checks = impact order (mix, arrangement, sound); the result
-// ranks issues by severity, then by that order. research/10-sound-and-craft.md.
-
 import type { Channel, Clip, MixerInsert, Project } from '@shared/schema/project';
 import type { PluginCatalog } from '@shared/plugins/types';
 import type { Analysis } from '@shared/engine/protocol';
@@ -26,23 +20,18 @@ export interface ReviewIssue {
   check: string;
   area: Area;
   severity: Severity;
-  /** Where (1-based bars), e.g. "33-48" or "17, 33". */
   bars?: string;
   problem: string;
-  /** The concrete fix as tool call sketches. */
   fix: string;
-  /** Impact order of the check (lower first among equal severity). */
   order: number;
 }
 
 export interface ReviewSection {
   name: string;
   kind: SectionKind | null;
-  /** Song ticks [start, end). */
   start: number;
   end: number;
   source: 'marker' | 'inferred';
-  /** Mean loudness of the section in the render (LUFS), when the analysis has an energy curve. */
   lufs?: number | null;
 }
 
@@ -51,39 +40,25 @@ export interface ReviewInput {
   catalog: PluginCatalog;
   playbook: Playbook | null;
   targets: PlaybookTargets;
-  /** Song ticks [start, end) under review. */
   range: { start: number; end: number };
-  /** The whole song is reviewed (length, intro and ending checks apply). */
   wholeSong: boolean;
-  /** The engine's full analysis of the render (null: render failed or this engine returned none). */
   analysis: Analysis | null;
-  /** Peak / correlation measured from the WAV when the engine returned no analysis. */
   measured?: { peakDb: number | null; correlation: number | null } | null;
   symbolic: SymbolicStats | null;
-  /** Presets and factory samples for the fix suggestions. */
   presets: readonly Preset[];
   samples: readonly FactorySample[] | null;
   genre: GenreId | null;
-  /** The app's preset pick for a role (load_preset's choice); default: rankPresets over `presets`. */
   pickPreset?: (role: InstrumentRole, words: string) => InstrumentPreset | null;
-  /** The render compared with the reference song (study_reference), when the project has one. */
   reference?: { name: string; comparison: ReferenceComparison } | null;
-  /**
-   * The studied reference for the closeness score (research/15 §3.5): its brief + analysis, the per-part balance of a
-   * stems render against the reference stems, and per-part sound similarity when fingerprints are available.
-   */
   closeness?: Pick<ClosenessInput, 'reference' | 'balance' | 'balanceNote' | 'sounds' | 'soundsNote'> | null;
 }
 
 export interface ReviewResult {
   score: number;
-  /** At most 10, ranked. */
   issues: ReviewIssue[];
-  /** Issues found in total (the score counts all of them). */
   total: number;
   works: string[];
   sections: ReviewSection[];
-  /** Checks that couldn't run, with why. */
   skipped: string[];
   metrics: {
     bars: number;
@@ -93,7 +68,6 @@ export interface ReviewResult {
     bandsVsMid: Record<string, number> | null;
     contrastLu: number | null;
   };
-  /** How close the song is to the studied reference (only with a reference). */
   closeness?: Closeness;
 }
 
@@ -104,17 +78,11 @@ const j = (v: unknown): string => JSON.stringify(v);
 const r1 = (n: number): number => Math.round(n * 10) / 10;
 const sgn = (n: number): string => `${n > 0 ? '+' : ''}${r1(n)}`;
 
-// ── What plays where ────────────────────────────────────────────────────
-
 export interface BarInfo {
-  /** Everything heard or moving in the bar (notes, audio positions, automation positions). '' = nothing. */
   sig: string;
-  /** Drum hits only. */
   drumSig: string;
-  /** Channels with notes in the bar. */
   channels: Set<string>;
   notes: number;
-  /** Notes in the bar's last beat. */
   lastBeatNotes: number;
   audio: number;
   automation: number;
@@ -124,9 +92,7 @@ export interface Heard {
   bars: BarInfo[];
   barTicks: number;
   start: number;
-  /** Per channel: velocities (0..127) and song ticks of the notes heard, and which patterns they come from. */
   channels: Map<string, { vels: number[]; ticks: number[]; patterns: Map<string, number> }>;
-  /** Clips that sound (not muted, track not muted, solo respected). */
   clips: Clip[];
 }
 
@@ -137,7 +103,6 @@ function audibleClip(p: Project, c: Clip, solo: string[]): boolean {
   return true;
 }
 
-/** Notes, audio and automation heard per bar of [start, end) (pattern clips play their window once, like render). */
 export function collectHeard(p: Project, start: number, end: number): Heard {
   const barTicks = ticksPerBar(p.transport.timeSig);
   const beat = ticksPerBeat(p.transport.timeSig);
@@ -204,8 +169,6 @@ export function collectHeard(p: Project, start: number, end: number): Heard {
   return { bars, barTicks, start, channels, clips };
 }
 
-// ── Sections ────────────────────────────────────────────────────────────
-
 const KIND_WORDS: Array<[RegExp, SectionKind]> = [
   [/\bintro/i, 'intro'],
   [/\boutro|\bending\b|\bend\b/i, 'outro'],
@@ -220,13 +183,11 @@ const KIND_WORDS: Array<[RegExp, SectionKind]> = [
   [/\bverse/i, 'verse'],
 ];
 
-/** The section kind a marker name implies ("Drop 2" → drop, "Pre-Chorus" → pre), or null. */
 export function kindOf(name: string): SectionKind | null {
   for (const [re, k] of KIND_WORDS) if (re.test(name)) return k;
   return null;
 }
 
-/** Sections from the markers inside the range; without markers, from where the set of playing channels changes. */
 export function sectionsOf(p: Project, range: { start: number; end: number }, heard: Heard): ReviewSection[] {
   const markers = Object.values(p.playlist.markers)
     .filter((m) => m.tick >= range.start && m.tick < range.end)
@@ -248,7 +209,6 @@ export function sectionsOf(p: Project, range: { start: number; end: number }, he
       s = i;
     }
   }
-  // Fold one-bar blips (a fill pattern, a pickup) into the section before them.
   const merged: ReviewSection[] = [];
   for (const x of out) {
     const last = merged[merged.length - 1];
@@ -263,12 +223,10 @@ export function sectionsOf(p: Project, range: { start: number; end: number }, he
   return merged;
 }
 
-/** Mean loudness (power average of the per-second energy curve) of song ticks [start, end). */
 export function rangeLoudness(curve: readonly number[] | undefined, bpm: number, rangeStart: number, start: number, end: number): number | null {
   if (!curve?.length) return null;
   let a = ticksToSeconds(start - rangeStart, bpm);
   const b = ticksToSeconds(end - rangeStart, bpm);
-  // Short-term loudness trails by ~3 s: skip the first 1.5 s of a long section.
   if (b - a >= 6) a += 1.5;
   const vals: number[] = [];
   for (let i = Math.max(0, Math.floor(a)); i < Math.min(curve.length, Math.ceil(b)); i++) {
@@ -278,8 +236,6 @@ export function rangeLoudness(curve: readonly number[] | undefined, bpm: number,
   if (!vals.length) return null;
   return r1(10 * Math.log10(vals.reduce((s, v) => s + Math.pow(10, v / 10), 0) / vals.length));
 }
-
-// ── Helpers over the project ────────────────────────────────────────────
 
 const fmtBar = (tick: number, barTicks: number, rangeStart = 0): number => Math.floor((tick - rangeStart) / barTicks) + 1;
 
@@ -308,7 +264,6 @@ function channelByRole(p: Project, role: string, heard: Heard): Channel | null {
   return p.channels[ids.find((c) => heard.channels.has(c)) ?? ids[0] ?? ''] ?? null;
 }
 
-/** The insert a channel plays through and the buses that insert routes into (one level). */
 function insertPath(p: Project, ch: Channel): MixerInsert[] {
   const ins = p.mixer.inserts[ch.insertId];
   if (!ins) return [];
@@ -340,7 +295,6 @@ function masterFx(p: Project, catalog: PluginCatalog) {
   const limiter = slots.find((s) => s.type === 'krypt.limiter');
   const clipper = slots.find((s) => s.type === 'krypt.clipper');
   const desc = limiter ? catalog.plugins.find((x) => x.id === 'krypt.limiter') : undefined;
-  // New projects set the ceiling to -1 dB (shared/schema/factory.ts); that still counts as the untouched default.
   const NEW_PROJECT: Record<string, number> = { ceiling: -1 };
   const limiterDefault = !!limiter && Object.entries(limiter.params).every(([k, v]) => {
     const spec = desc?.params.find((s) => s.id === k);
@@ -351,7 +305,6 @@ function masterFx(p: Project, catalog: PluginCatalog) {
     slots,
     limiter,
     hasLimiter: !!limiter || !!clipper,
-    /** Only the default limiter at its default settings: no master chain was ever loaded. */
     bare: slots.length === 0 || (slots.length === 1 && !!limiter && limiterDefault),
     inputGain: limiter ? (limiter.params.inputGain ?? desc?.params.find((s) => s.id === 'inputGain')?.default ?? 0) : 0,
   };
@@ -362,8 +315,6 @@ function std(xs: number[]): number {
   const m = xs.reduce((s, x) => s + x, 0) / xs.length;
   return Math.sqrt(xs.reduce((s, x) => s + (x - m) ** 2, 0) / xs.length);
 }
-
-// ── The review ──────────────────────────────────────────────────────────
 
 interface Ctx extends ReviewInput {
   heard: Heard;
@@ -559,7 +510,6 @@ function checkLength(ctx: Ctx): void {
 }
 
 function checkPhrases(ctx: Ctx): void {
-  // A studied reference's own section lengths are the plan (build_from_reference copies them): not a fault here.
   const refBars = (ctx.closeness?.reference.brief.plan ?? []).map((x) => x.bars);
   const odd = ctx.sections.filter((s) => {
     const bars = (s.end - s.start) / ctx.barTicks;
@@ -622,7 +572,6 @@ function checkEnergy(ctx: Ctx): void {
     issue(ctx, { check: 'contrast', area: 'arrangement', severity: 'low', problem: `Energy jumps ${contrast} LU between sections (target at most ${max}): ${thin} may sound empty.`, fix: `add a quiet layer (pad, texture) to ${thin} or lower the loudest section a little`, order: 23 });
   } else good(ctx, 20, `Clear energy contrast: ${contrast} LU between ${quiet.name || 'the quietest'} and ${loud.name || 'the loudest'} section.`);
 
-  // The planned shape: a section the plan wants clearly bigger must measure louder.
   const known = measured.map((s) => ({ s, e: expectedEnergy(ctx, s) })).filter((x): x is { s: ReviewSection; e: number } => x.e !== null);
   let worst: { hi: ReviewSection; lo: ReviewSection; diff: number } | null = null;
   for (const a of known) {
@@ -632,7 +581,6 @@ function checkEnergy(ctx: Ctx): void {
       if (diff < 1 && (!worst || diff < worst.diff)) worst = { hi: a.s, lo: b.s, diff };
     }
   }
-  // A flat song already has the contrast issue; the shape issue adds news only when the plan is inverted.
   if (worst && (contrast >= min || worst.diff < -1)) {
     issue(ctx, {
       check: 'shape',
@@ -646,15 +594,12 @@ function checkEnergy(ctx: Ctx): void {
   }
 }
 
-// ── Against the reference song ──────────────────────────────────────────
-
 const REF_GROUP_FIX: Record<string, { under: string; over: string }> = {
   'low end': { under: 'raise the kick / 808 / bass 2-3 dB (set_mixer volume_db) or load a deeper bass preset', over: 'lower the kick / 808 / bass 2-3 dB, and low-cut the non-bass parts at 150 Hz (add_effect eq b1)' },
   mids: { under: 'bring the chords / keys / lead up 2 dB, or cut less around 300 Hz-1 kHz', over: 'cut 300-800 Hz on pads and keys (add_effect eq, -3 dB), or lower the busiest mid part' },
   highs: { under: 'brighten the hats and the master top: add_effect {"insert":"Master","effect":"eq","params":{"b6Gain":"+2dB"}}, or raise the hats', over: 'tame the hats / bright synths: add_effect {"insert":"Master","effect":"eq","params":{"b6Gain":"-2dB"}}, or lower the hats' },
 };
 
-/** Tonal balance, width and energy shape against the reference (loudness is already the target). */
 function checkReference(ctx: Ctx): void {
   const ref = ctx.reference;
   if (!ref) return;
@@ -696,9 +641,6 @@ function checkReference(ctx: Ctx): void {
   }
 }
 
-// ── Closeness to the reference ──────────────────────────────────────────
-
-/** Where each closeness gap lands in the ranking: the musical identity (tempo, key, groove, chords) before the mix. */
 const CLOSENESS_ISSUE: Record<ClosenessDimId, { order: number; area: Area; word: string }> = {
   tempo: { order: 2, area: 'reference', word: 'Tempo' },
   key: { order: 4, area: 'reference', word: 'Key' },
@@ -709,11 +651,6 @@ const CLOSENESS_ISSUE: Record<ClosenessDimId, { order: number; area: Area; word:
   mix: { order: 9.5, area: 'mix', word: 'Mix balance' },
 };
 
-/**
- * The closeness score against the studied reference, and its biggest gaps as issues (tool-call fixes). The tonal
- * balance, width, loudness and energy shape already have their own reference checks (checkReference / the
- * reference's loudness target), so the mix gap only becomes an issue for the per-part balance.
- */
 function checkCloseness(ctx: Ctx): Closeness | null {
   const c = ctx.closeness;
   if (!c) return null;
@@ -750,7 +687,6 @@ function checkCloseness(ctx: Ctx): Closeness | null {
   return out;
 }
 
-/** Runs of bars where the same content repeats (period 1, 2, 4 or 8 bars) for longer than `maxBars`. */
 export function staticRuns(bars: readonly BarInfo[], maxBars: number): Array<{ start: number; end: number; period: number }> {
   const spans: Array<{ start: number; end: number; period: number }> = [];
   for (const P of [1, 2, 4, 8]) {
@@ -809,7 +745,6 @@ function checkStatic(ctx: Ctx): void {
 
 const FX_WORDS = /(fx|riser|uplift|downlift|impact|sweep|crash|cymbal|reverse|\brev\b|sub ?drop|boom|whoosh|noise|fill|roll|transition|swell|hit)/i;
 
-/** Which transition element sits in the bar before (or on the downbeat of) a boundary, or null. */
 export function transitionAt(p: Project, heard: Heard, boundary: number): string | null {
   const bar = heard.barTicks;
   const step = PPQ / 4;
@@ -830,7 +765,6 @@ export function transitionAt(p: Project, heard: Heard, boundary: number): string
       if (c.start < boundary && end > winStart && /(fill|roll|build|riser|transition|crash|sweep)/i.test(name)) return `pattern "${name}"`;
     }
   }
-  // A crash (or cymbal) on the downbeat.
   for (const [chId, e] of heard.channels) {
     const ch = p.channels[chId];
     const s = ch?.generator.sampleId ? p.samples[ch.generator.sampleId] : undefined;
@@ -840,9 +774,7 @@ export function transitionAt(p: Project, heard: Heard, boundary: number): string
   const bi = Math.floor((boundary - heard.start) / bar) - 1;
   const before = heard.bars[bi];
   const prev = heard.bars[bi - 1];
-  // A drum fill: the last bar's drums differ from the groove before it.
   if (before && prev && before.drumSig && prev.drumSig && before.drumSig !== prev.drumSig) return 'drum variation';
-  // A drop-out: the last beat is empty while the bar played.
   if (before && before.notes > 0 && before.lastBeatNotes === 0 && before.audio === 0) return 'drop-out';
   return null;
 }
@@ -1012,13 +944,11 @@ function checkVelocity(ctx: Ctx): void {
   } else if (fine.length) good(ctx, 31, `Hats breathe: velocity spread ${fine.join(', ')}.`);
 }
 
-/** The groove op (transform_notes) for this playbook / genre, or null when no template fits. */
 function grooveOp(ctx: Ctx, velocity?: number): { op: 'groove'; template: string; amount: number; velocity: number } | null {
   const g = grooveFor(ctx.playbook, ctx.genre);
   return g ? { op: 'groove', template: g.template, amount: g.amount, velocity: velocity ?? g.velocity } : null;
 }
 
-/** Robotic drums: every hit on the straight grid, no swing, where the playbook wants a groove. */
 function checkGroove(ctx: Ctx): void {
   const pb = ctx.playbook;
   const g = grooveFor(pb, ctx.genre);
@@ -1031,7 +961,6 @@ function checkGroove(ctx: Ctx): void {
   let on = 0;
   let all = 0;
   const stiff: Array<{ name: string; pattern: string | null; n: number }> = [];
-  // The playbook may groove only some parts (trap: the hats; the kick and clap stay on the grid).
   const only = g?.parts?.map((n) => n.toLowerCase().replace(/[^a-z0-9]/g, ''));
   for (const [chId, e] of ctx.heard.channels) {
     const ch = ctx.project.channels[chId];
@@ -1092,7 +1021,6 @@ function checkNotes(ctx: Ctx): void {
   }
 }
 
-/** Run every check; issues ranked by severity, then impact order; at most 10. */
 export function reviewSong(input: ReviewInput): ReviewResult {
   const p = input.project;
   const barTicks = ticksPerBar(p.transport.timeSig);

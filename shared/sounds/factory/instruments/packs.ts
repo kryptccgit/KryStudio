@@ -1,13 +1,3 @@
-// Factory presets for the downloadable sound packs (shared/packs/catalog.ts): real recorded instruments played by
-// Krypt Multisampler from our own SFZ mappings ('pack:<id>/<file>.sfz'). Each preset `requires` its pack, so agents
-// and the preset browser only offer it once the pack is installed (and say which pack to download otherwise).
-// Where the recording beats our synth approximation, the preset claims `defaultFor` that genre (the pack preset
-// wins the role once installed; see research/12-real-instruments.md §3).
-//
-// Multisampler params (research/12 §2, plain units): gain dB, attack ms (added to the mapping's), release ×
-// (scales the mapping's release, 1 = as mapped), velSens 0..1, tone Hz (low-pass, 20000 = open), tune st, fine ct,
-// releaseSamples 0..1 (level of key-release regions), width 0..1, roundRobin 0/1.
-
 import type { GenreId } from '../../genres';
 import type { InstrumentPreset, PresetFx } from '../../types';
 import { HALL, PLATE, ROOM, TAPE, chorus, clipper, comp, delay, DIV, drive, eq, preset, reverb, transient, type PresetSpec } from './kit';
@@ -16,19 +6,16 @@ export const MULTI = 'krypt.multisampler';
 
 const MS_BASE = { gain: 0, attack: 0, release: 1, velSens: 1, tone: 20000, tune: 0, fine: 0, releaseSamples: 1, width: 1, roundRobin: 1 };
 
-/** A full Krypt Multisampler param set. */
 export function ms(p: Partial<typeof MS_BASE> & { gain: number }): Record<string, number> {
   return { ...MS_BASE, ...p };
 }
 
 interface PackPresetSpec extends Omit<PresetSpec, 'plugin' | 'sample'> {
-  /** The pack id and the .sfz inside it. */
   pack: string;
   sfz: string;
   defaultFor?: GenreId[];
 }
 
-/** A preset that plays a pack's SFZ mapping and requires that pack. */
 function packPreset(s: PackPresetSpec): InstrumentPreset {
   const { pack, sfz, defaultFor, ...rest } = s;
   const out: InstrumentPreset = { ...preset({ ...rest, plugin: MULTI, sample: `pack:${pack}/${sfz}` }), requires: pack };
@@ -37,8 +24,6 @@ function packPreset(s: PackPresetSpec): InstrumentPreset {
 }
 
 const glue = (): PresetFx => comp(-18, 2, 15, 120);
-
-// ── Grand piano (grand-piano) ─────────────────────────────────────────
 
 const GRAND: InstrumentPreset[] = [
   packPreset({
@@ -85,8 +70,6 @@ const GRAND: InstrumentPreset[] = [
   }),
 ];
 
-// ── Upright piano (upright-piano) ─────────────────────────────────────
-
 const UPRIGHT: InstrumentPreset[] = [
   packPreset({
     id: 'factory:piano/upright',
@@ -117,8 +100,6 @@ const UPRIGHT: InstrumentPreset[] = [
     range: [21, 108],
   }),
 ];
-
-// ── Live drums (live-drums) ───────────────────────────────────────────
 
 const KIT_ROLES: InstrumentPreset['alsoRoles'] = ['snare', 'hat', 'openhat', 'ride', 'tom', 'perc'];
 
@@ -384,8 +365,6 @@ const DRUMS: InstrumentPreset[] = [
   }),
 ];
 
-// ── Keys & mallets (keys-mallets) ─────────────────────────────────────
-
 const MALLETS: InstrumentPreset[] = [
   packPreset({
     id: 'factory:bell/vibraphone',
@@ -457,8 +436,6 @@ const MALLETS: InstrumentPreset[] = [
     range: [43, 97],
   }),
 ];
-
-// ── Orchestral essentials (orchestral) ────────────────────────────────
 
 const ORCH: InstrumentPreset[] = [
   packPreset({

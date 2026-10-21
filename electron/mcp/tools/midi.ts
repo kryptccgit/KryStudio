@@ -1,9 +1,3 @@
-// MIDI hardware tool (Wave 12.2b): list MIDI ports, enable outputs, MIDI clock
-// out and following an external clock, through the main-process hardware
-// runtime (electron/midi/hardware.ts); plus the controller maps (gamepads and
-// keyboard pads as virtual MIDI inputs, shared/live/controllers.ts).
-// Settings, not doc edits.
-
 import { z } from 'zod';
 import type { MidiInputInfo, MidiOutputInfo } from '@shared/engine/protocol';
 import type { MidiOutSettings } from '@shared/types';
@@ -19,7 +13,6 @@ function describeControllers(c: ControllerSettings): string {
   return `Controller maps (${c.enabled ? 'on' : 'all off'}): ${maps}. Templates for add_controller: ${CONTROLLER_TEMPLATES.map((t) => t.id).join(', ')}.`;
 }
 
-/** A template by id or name; "gamepad" / "keyboard" = an empty map of that kind. */
 function findTemplate(ref: string): { id: string; source: 'gamepad' | 'keyboard' } {
   const r = ref.trim().toLowerCase();
   if (r === 'gamepad' || r === 'keyboard') return { id: `empty-${r}`, source: r };
@@ -28,7 +21,6 @@ function findTemplate(ref: string): { id: string; source: 'gamepad' | 'keyboard'
   return { id: t.id, source: t.source };
 }
 
-/** A port by id, else by case-insensitive name, else the one whose name contains `ref`. */
 function findPort<T extends { id: string; name: string }>(list: readonly T[], ref: string, what: string): string {
   const r = ref.trim();
   const exact = list.find((p) => p.id === r);

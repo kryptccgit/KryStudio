@@ -1,30 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// VoiceService: Krypt Voice (research/21) for the UI (IPC, actor = user)
-// and agents (MCP generate_voice / sing_notes / list_voices).
-//
-//   speak   text → WAV (Local: the analyzer's `tts` with Kokoro; Cloud: Fish
-//           Audio with the user's key) cached in userData/voice/cache/<hash>
-//           by engine + voice + speed + text → an audio clip (new track, or
-//           `track` / `at`), Follow tempo off → optional Krypt Tune
-//   sing    "Sing my notes": the lane's melody (shared/voice/singplan.ts) +
-//           the lyrics' syllables (shared/voice/syllables.ts) → speak line by
-//           line → where each syllable is (Kokoro word timings, else the
-//           analyzer's `syllables`, else equal splits) → the analyzer's `sing`
-//           (segments stretched + pitched onto the notes at the project
-//           tempo) → one clip at the pattern's first note in song time →
-//           Krypt Tune (hard) in the song's key
-//   voices  Kokoro presets (the model package's list), Fish's own licensed
-//           voices (cached a day; never the community library), and "my
-//           voice": a private Fish clone of the USER, made only from a take
-//           the app's recorder made in this session, with consent
-//
-// One job at a time (progress + cancel); a project-tab switch is refused
-// while a job that will edit the project runs (busy()). Every edit goes
-// through commands via `apply`: one undo step per call. Fish calls are
-// logged as "sent to Fish Audio" (electron/voice/fish.ts). Node-only: tests
-// drive it with fakes.
-// ──────────────────────────────────────────────────────────────────────
-
 import { KOKORO_VOICES } from '@shared/analyzer/models';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -45,27 +18,18 @@ import { userGroupApply, type VocalsService } from '../vocals/service';
 import { concatWav, parseWav } from './wav';
 import { consentHeard, FISH_KEYS_URL, FISH_TTS_MODEL, FishClient, FishError, type FetchLike, type FishVoice } from './fish';
 
-/** What the voice service needs of the analyzer service (electron/analyzer/service.ts). */
 export type VoiceAnalyzer = Pick<AnalyzerService, 'voiceModel' | 'runVoiceJob'>;
 
 export interface VoiceDeps {
   doc: DocHost;
   userDataDir: string;
-  /** null when the analyzer service didn't start (Local voices and singing are then unavailable). */
   analyzer: VoiceAnalyzer | null;
-  /** Krypt Tune on the new clip (electron/vocals). */
   vocals: Pick<VocalsService, 'tune'> | null;
-  /** The engine's decoder: frames / rate / channels of a rendered file. */
   sampleInfo(absPath: string): Promise<ActionResult<SampleInfo>>;
-  /** HTTP (default: global fetch). */
   fetch?: FetchLike;
-  /** The Fish key, encrypted at rest (electron/voice/index.ts: safeStorage). write(null) removes it. */
   secrets: { read(): string | null; write(key: string | null): ActionResult };
-  /** The app's audio recorder (electron/input/liveInput.ts): only its takes from this session can become "my voice". */
   recorder: { isSessionTake(absPath: string): boolean } | null;
-  /** The song position in ticks, when known (default placement). */
   playheadTick?(): number | null;
-  /** Play a rendered file once (Preview). */
   audition?(absPath: string): unknown;
   broadcastState?(s: VoiceState): void;
   broadcastProgress?(p: VoiceProgress): void;
@@ -73,12 +37,10 @@ export interface VoiceDeps {
   now?(): number;
 }
 
-/** Text per speak call (Fish bills per byte; Kokoro is happiest under a paragraph). */
 export const MAX_SPEAK_CHARS = 1000;
 export const MAX_LYRICS_CHARS = 2000;
 export const MAX_LINES = 48;
 export const MAX_SING_NOTES = 400;
-/** A "my voice" recording must be this fresh (and from this session). */
 export const RECENT_TAKE_MS = 2 * 60 * 60 * 1000;
 export const MIN_CLONE_SEC = 10;
 export const MAX_CLONE_SEC = 180;
@@ -93,7 +55,6 @@ const r1 = (n: number): number => Math.round(n * 10) / 10;
 const fail = <T = never>(message: string): ActionResult<T> => ({ ok: false, message });
 const sha = (s: string): string => crypto.createHash('sha256').update(s).digest('hex');
 
-/** User text in messages: no control / bidi characters, capped. */
 function snippet(s: string, max = 40): string {
   const c = String(s ?? '')
     .replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩]/g, ' ')
@@ -108,7 +69,6 @@ class Cancelled extends Error {
   }
 }
 
-/** Kokoro voice ids → a readable entry ("af_heart" → Heart, US English · female). English only for now. */
 const KOKORO_LANG: Record<string, string> = { a: 'US English', b: 'UK English' };
 export const KOKORO_DEFAULT_VOICES = ['af_heart', 'af_bella', 'af_nicole', 'af_sarah', 'af_sky', 'am_michael', 'am_fenrir', 'am_puck', 'bf_emma', 'bf_isabella', 'bm_george', 'bm_lewis'];
 
@@ -138,7 +98,6 @@ interface Rendered {
 
 interface ResolvedVoice {
   engine: VoiceEngine;
-  /** Kokoro voice id or Fish reference id. */
   ref: string;
   name: string;
   mine: boolean;
@@ -176,16 +135,12 @@ export class VoiceService {
     return this.deps.doc;
   }
 
-  /** Drop half-written renders from a crash. */
   async init(): Promise<void> {
     for (const name of await listDir(this.cacheDir)) {
       if (/\.tmp-[a-z0-9]+\.wav$/i.test(name)) await removeDir(path.join(this.cacheDir, name)).catch(() => {});
     }
   }
 
-  // ── State ──────────────────────────────────────────────────────────
-
-  /** A job that will edit the project is running (the project-tab guard): its label, else null. */
   busy(): string | null {
     return this.current && this.current.edits ? this.current.label : null;
   }
@@ -218,7 +173,6 @@ export class VoiceService {
     };
   }
 
-  /** Broadcast the state to every window (best effort; failures are logged). */
   notifyState(): void {
     if (!this.deps.broadcastState) return;
     void this.state()
@@ -226,7 +180,6 @@ export class VoiceService {
       .catch((err) => this.deps.log('warn', `Krypt Voice: couldn't read the voice state: ${errText(err)}`));
   }
 
-  /** The Kokoro voices the installed model package lists (voices.json, or voices/<id>.*), else the known English set. */
   private async kokoroVoices(modelDir: string): Promise<VoiceInfo[]> {
     const listed = await readJson<unknown>(path.join(modelDir, 'voices.json'));
     const out: VoiceInfo[] = [];
@@ -245,13 +198,11 @@ export class VoiceService {
       }
     }
     if (!out.length) for (const f of await listDir(path.join(modelDir, 'voices'))) add(f.replace(/\.[a-z0-9]+$/i, ''));
-    // The Model Manager installs flat: <modelDir>/<voice>.bin, named and described in KOKORO_VOICES.
     if (!out.length) {
       const files = new Set((await listDir(modelDir)).map((f) => f.toLowerCase()));
       for (const k of KOKORO_VOICES) if (files.has(`${k.id}.bin`)) add(k.id, { name: k.name, description: `${k.description} · Local (offline)` });
     }
     if (!out.length) for (const id of KOKORO_DEFAULT_VOICES) add(id);
-    // af_heart (Kokoro's best-rated voice) first.
     out.sort((a, b) => (a.id === 'local:af_heart' ? -1 : b.id === 'local:af_heart' ? 1 : 0));
     return out;
   }
@@ -263,7 +214,6 @@ export class VoiceService {
     if (c?.v === 1 && Array.isArray(c.voices) && !this.fishVoices) this.fishVoices = { at: c.at, voices: c.voices };
   }
 
-  /** Re-read Fish's official voices when the cache is a day old (or `force`). Never throws; failures land in fish.message. */
   refreshFishVoices(force: boolean): Promise<void> {
     if (this.refreshing) return this.refreshing;
     this.refreshing = (async () => {
@@ -271,7 +221,6 @@ export class VoiceService {
       const key = this.deps.secrets.read();
       if (!key) return false;
       if (!force && this.fishVoices && this.now() - this.fishVoices.at < FISH_VOICES_TTL_MS) return false;
-      // After a failure, wait a while before asking again on our own (state() → refresh → notify must not loop).
       if (!force && this.now() - this.fishTried < FISH_RETRY_MS) return false;
       this.fishTried = this.now();
       try {
@@ -287,7 +236,6 @@ export class VoiceService {
       return true;
     })().then((fetched) => {
       this.refreshing = null;
-      // Only after a real fetch: notifyState → state() → refreshFishVoices(false) must not loop.
       if (fetched) this.notifyState();
     });
     return this.refreshing;
@@ -303,9 +251,6 @@ export class VoiceService {
     await writeFileAtomic(path.join(this.dir, 'my-voices.json'), JSON.stringify({ v: 1, voices: list }, null, 1));
   }
 
-  // ── Voices ─────────────────────────────────────────────────────────
-
-  /** A voice id → engine + reference. Fish voices must be official or the user's own (never a community voice). */
   private async resolveVoice(voiceId: string | undefined, engine?: VoiceEngine): Promise<ActionResult<ResolvedVoice>> {
     const id = String(voiceId ?? '').trim();
     const st = await this.state();
@@ -342,8 +287,6 @@ export class VoiceService {
     return { ok: true, data: { engine: 'fish', ref, name: v.title, mine: false } };
   }
 
-  // ── Jobs ───────────────────────────────────────────────────────────
-
   cancel(): ActionResult {
     if (!this.current) return fail('Krypt Voice is not rendering anything');
     this.current.ctrl.abort();
@@ -375,12 +318,10 @@ export class VoiceService {
     try {
       this.deps.broadcastProgress?.(p);
     } catch {
-      /* a window mid-teardown */
     }
     try {
       run.onProgress?.(message, p.fraction);
     } catch {
-      /* best effort */
     }
   }
 
@@ -391,9 +332,6 @@ export class VoiceService {
     };
   }
 
-  // ── Rendering ──────────────────────────────────────────────────────
-
-  /** Text → cached WAV with one voice. */
   private async render(text: string, voice: ResolvedVoice, speed: number, signal: AbortSignal, run: RunOptions, stage: VoiceStage, base: number, span: number): Promise<Rendered> {
     const model = voice.engine === 'local' ? this.deps.analyzer?.voiceModel() : null;
     const key = sha(JSON.stringify({ v: CACHE_V, engine: voice.engine, model: voice.engine === 'local' ? model?.id ?? '' : FISH_TTS_MODEL, voice: voice.ref, speed: Math.round(speed * 100) / 100, text })).slice(0, 40);
@@ -431,8 +369,6 @@ export class VoiceService {
     return { path: wav, durationSec: info.durationSec, words: [], engine: 'fish', cached: false, key };
   }
 
-  // ── Placement ──────────────────────────────────────────────────────
-
   private parseAt(at: string | undefined): number | { error: string } | null {
     if (at === undefined || !String(at).trim()) return null;
     const m = /^\s*(\d+)(?:\.(\d+))?\s*$/.exec(String(at));
@@ -455,7 +391,6 @@ export class VoiceService {
     return { error: hit.length > 1 ? `Several Playlist tracks are called "${snippet(r, 30)}": use its number` : `No Playlist track "${snippet(r, 30)}" (use its number or name)` };
   }
 
-  /** The rendered file → one audio clip (a new track unless `trackId`). */
   private async place(file: { abs: string; hash: string }, name: string, start: number, trackId: string | null, apply: Apply): Promise<ActionResult<{ clipId: string; channelId: string; trackId: string; track: number; durationSec: number }>> {
     let info: ActionResult<SampleInfo>;
     try {
@@ -479,7 +414,6 @@ export class VoiceService {
         });
         tid = apply<{ id: string }>('playlist.addTrack', { name, index }).id;
       }
-      // An audio-clip channel plays at its own speed by default (tempo_sync 0 = Follow tempo off).
       const a = apply<{ clipId: string; channelId: string }>('playlist.addAudio', {
         path: file.abs,
         name,
@@ -503,7 +437,6 @@ export class VoiceService {
     return r.ok ? (r.message ?? `Krypt Tune (${style}) added.`) : `Krypt Tune wasn't added: ${r.message ?? 'unknown error'}.`;
   }
 
-  /** Run `fn` with the caller's apply, or as ONE user undo step (IPC). */
   private async withApply<T>(apply: Apply | undefined, label: string, fn: (a: Apply) => Promise<ActionResult<T>>): Promise<ActionResult<T>> {
     if (apply) return fn(apply);
     const g = userGroupApply(this.doc, label);
@@ -525,8 +458,6 @@ export class VoiceService {
     }
   }
 
-  // ── speak ──────────────────────────────────────────────────────────
-
   async speak(req: SpeakRequest & { engine?: VoiceEngine }, apply?: Apply, run: RunOptions = {}): Promise<ActionResult<SpeakOutcome>> {
     let text = String(req?.text ?? '').trim();
     if (!text) return fail('Type something for the voice to say');
@@ -546,7 +477,6 @@ export class VoiceService {
       }
       if (/[^\u0000-ɏḀ-ỿ -⁯₠-⃏\s]/u.test(text)) return fail('The Local voice speaks English for now. Use a Cloud (Fish Audio) voice for other languages.');
     }
-    // Validate the placement before rendering (no wasted Cloud request).
     const preview = !!req.preview;
     const at = preview ? null : this.parseAt(req.at);
     if (at && typeof at === 'object') return fail(at.error);
@@ -584,8 +514,6 @@ export class VoiceService {
     });
   }
 
-  // ── sing ───────────────────────────────────────────────────────────
-
   async sing(req: SingRequest, apply?: Apply, run: RunOptions = {}): Promise<ActionResult<SingOutcome>> {
     const p0 = this.doc.project;
     const pat = p0.patterns[String(req?.patternId ?? '')];
@@ -620,7 +548,6 @@ export class VoiceService {
 
     return this.job(label, !preview, run, async (signal) => {
       const notes: string[] = [...parsed.notes, ...map.notes];
-      // 1. Speak each line (cached).
       const lines: Rendered[] = [];
       const nLines = parsed.lines.length;
       for (let i = 0; i < nLines; i++) {
@@ -628,7 +555,6 @@ export class VoiceService {
         this.progress(run, 'speaking', (i / nLines) * 0.5, `Speaking line ${i + 1} of ${nLines}${voice.engine === 'fish' ? ' (Cloud: Fish Audio)' : ''}…`);
         lines.push(await this.render(parsed.lines[i].text, voice, 1, signal, run, 'speaking', (i / nLines) * 0.5, 0.5 / nLines));
       }
-      // 2. One source file (lines joined with a short silence).
       let srcPath = lines[0].path;
       let offsets = [0];
       if (lines.length > 1) {
@@ -638,7 +564,6 @@ export class VoiceService {
         if (!(await statFile(srcPath))) await writeFileAtomic(srcPath, joined.bytes);
         offsets = joined.offsets;
       }
-      // 3. Where each syllable is.
       const spans: Span[] = [];
       const methods = new Set<string>();
       for (let i = 0; i < nLines; i++) {
@@ -665,7 +590,6 @@ export class VoiceService {
         for (const x of s) spans.push({ startSec: x.startSec + offsets[i], endSec: x.endSec + offsets[i] });
       }
       if (methods.has('even splits (rough)')) notes.push('Some syllables were split evenly in time (the syllable finder gave no answer), so their timing is rough.');
-      // 4. Sing.
       const bpm = this.doc.project.transport.bpm;
       const segments = buildSegments(map.groups, melody, spans, { bpm, originTick: melody[0].tick, octave });
       if (!segments.length) throw new Error('nothing to sing (no syllable met a note)');
@@ -702,7 +626,6 @@ export class VoiceService {
         this.progress(run, 'placing', 1, 'Previewing');
         return { ok: true, message: `Previewing ${summary} (${how}).${notes.length ? ` ${notes.join(' ')}` : ''}`, data: { path: sungPath, durationSec: r1(durationSec), engine: voice.engine, notes, mapping } };
       }
-      // 5. Place at the pattern's first note in song time, or the playhead when the pattern isn't on the Playlist.
       this.progress(run, 'placing', 0.97, 'Adding the clip…');
       const p = this.doc.project;
       if (!p.patterns[pat.id]) throw new Error('the pattern was deleted while singing');
@@ -741,8 +664,6 @@ export class VoiceService {
     });
   }
 
-  // ── Fish key ───────────────────────────────────────────────────────
-
   async setFishKey(key: string | null): Promise<ActionResult> {
     if (key === null || (typeof key === 'string' && !key.trim())) {
       const r = this.deps.secrets.write(null);
@@ -770,8 +691,6 @@ export class VoiceService {
     return { ok: true, message: `Fish Audio key saved (encrypted with Windows' secure storage).${tier} Your text is sent to Fish Audio whenever you use a Cloud voice.` };
   }
 
-  // ── My voice ───────────────────────────────────────────────────────
-
   async cloneMyVoice(opts: { recordingPath: string; name: string; consent: true }): Promise<ActionResult<VoiceInfo>> {
     if (!opts || opts.consent !== true) return fail('Cloning needs your consent: confirm that this is your own voice and that you agree to turn it into an AI voice.');
     const raw = String(opts.recordingPath ?? '').trim();
@@ -797,7 +716,6 @@ export class VoiceService {
     if (secs > MAX_CLONE_SEC) return fail(`The recording is ${Math.round(secs)} s; ${MAX_CLONE_SEC / 60} minutes at most.`);
     return this.job('Make my voice', false, {}, async (signal) => {
       const wav = await readBytes(abs);
-      // The recording must start with the consent line (checked by Fish's speech-to-text; the recording goes to Fish anyway).
       let transcript = '';
       let checked = false;
       try {
@@ -817,7 +735,6 @@ export class VoiceService {
       try {
         await this.saveMyVoices(list);
       } catch (err) {
-        // Don't leave an orphan clone at Fish we can't track.
         await this.fish.deleteVoice(key, made.id).catch(() => {});
         return fail(`Your voice was made but couldn't be saved here (${errText(err)}), so it was deleted at Fish Audio again.`);
       }

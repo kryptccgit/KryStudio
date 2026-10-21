@@ -1,14 +1,8 @@
-//! Wave 7b drum fills: tom runs, trap snare / hat rolls, clap and triplet
-//! builds, a breakbeat-style ghost-note fill, a pop kit fill and a hand-drum
-//! fill. Exactly 1 or 2 bars at 128 BPM; the last hit leads into the next
-//! downbeat (no crash on the downbeat itself, so they layer over any drop).
-
 use super::drums::{clap_ch, hat, kick, membrane, snare, Clap, Drum, Hat, Kick, Snare, CLAP, DRUM, HAT, KICK, SNARE};
 use super::kit::*;
 use super::library::{spec, Spec};
 use super::synth::*;
 
-/// One placed hit: position (16th steps, fractional ok), mono sound, gain, pan.
 struct Hit<'a> {
     at: f32,
     x: &'a [f32],
@@ -60,7 +54,6 @@ fn tom_fill(bars: u32) -> Chans {
     let mut hits: Vec<Hit> = Vec::new();
     let last = (bars as f32 - 1.0) * 16.0;
     if bars == 2 {
-        // bar 1: a half-time groove with ghost notes building
         for st in 0..16 {
             match st {
                 0 | 10 => hits.push(Hit { at: st as f32, x: &k, g: 0.8, pan: 0.5 }),
@@ -70,7 +63,6 @@ fn tom_fill(bars: u32) -> Chans {
             }
         }
     }
-    // the fill bar: snare 8ths, then a 16th tom run high → floor
     hits.push(Hit { at: last, x: &k, g: 0.8, pan: 0.5 });
     hits.push(Hit { at: last + 2.0, x: &s, g: 0.5, pan: 0.5 });
     hits.push(Hit { at: last + 4.0, x: &s, g: 0.8, pan: 0.5 });
@@ -87,7 +79,6 @@ fn tom_fill(bars: u32) -> Chans {
 fn trap_snare_roll() -> Chans {
     let n = BAR;
     let mut hits_x: Vec<(f32, Vec<f32>, f32)> = Vec::new();
-    // 16ths for two beats, 16th triplets, then 32nds rising in pitch and level
     let mut pos = 0.0f32;
     let mut k = 0u32;
     while pos < 16.0 - 1e-3 {
@@ -111,7 +102,6 @@ fn trap_hat_roll() -> Chans {
     let h = hat(&Hat { decay: 45.0, seed: 6201, ..HAT });
     let hi = hat(&Hat { pitch: 1.12, decay: 40.0, seed: 6202, ..HAT });
     let mut hits: Vec<Hit> = Vec::new();
-    // 8ths, a 16th triplet roll, 16ths, a 32nd roll rising, 1/64 stutter at the end
     let plan: [(f32, f32, f32); 6] = [(0.0, 4.0, 2.0), (4.0, 6.0, 2.0 / 3.0), (6.0, 10.0, 1.0), (10.0, 12.0, 0.5), (12.0, 14.0, 1.0), (14.0, 16.0, 0.25)];
     for (a, b, stp) in plan {
         let mut pos = a;
@@ -187,7 +177,6 @@ fn pop_fill() -> Chans {
         hits.push(Hit { at: st, x: &h, g: 0.25, pan: 0.6 });
     }
     hits.push(Hit { at: 4.0, x: &s, g: 0.8, pan: 0.5 });
-    // beat 3: snare 16ths, beat 4: toms high → low
     for (i, st) in [8.0f32, 9.0, 10.0, 11.0].iter().enumerate() {
         hits.push(Hit { at: *st, x: &s, g: 0.5 + 0.1 * i as f32, pan: 0.5 });
     }
@@ -208,7 +197,6 @@ fn hand_drum_fill() -> Chans {
     let mut shk: Vec<f32> = (0..ns(0.06)).map(|i| nz.white() * (1.0 - (i as f32 / ns(0.06) as f32)).powi(2) * (i as f32 / 120.0).min(1.0)).collect();
     hp(&mut shk, 5000.0);
     let mut hits: Vec<Hit> = Vec::new();
-    // 3-3-2 then a run of 16ths over the last beat
     for st in [0.0f32, 3.0, 6.0, 8.0, 11.0, 14.0] {
         hits.push(Hit { at: st, x: &lo, g: 0.8, pan: 0.4 });
     }

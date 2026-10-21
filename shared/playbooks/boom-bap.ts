@@ -1,4 +1,3 @@
-// Boom bap: swung, sample-style 90s hip-hop with a hard kick and snare, dusty keys and a horn hook.
 import type { Playbook } from './types';
 
 export const BOOM_BAP: Playbook = {

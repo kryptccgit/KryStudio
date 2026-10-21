@@ -1,7 +1,3 @@
-//! krypt.filter — resonant multimode TPT SVF (12/24 dB low/high pass, band
-//! pass, notch) with input drive and an LFO on cutoff that locks to the
-//! song position (`beat_pos`) when synced and the transport is playing.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::filters::{svf_g, Svf};
 use crate::blocks::{tanh_fast, Smooth, TAU};
@@ -38,7 +34,6 @@ pub fn descriptor() -> PluginDescriptor {
 
 pub struct Filter {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     st: [[Svf; 2]; 2],
@@ -213,7 +208,6 @@ impl Effect for Filter {
             }
             self.coef_ctr -= 1;
             if w <= 0.0 {
-                // bypassed: keep the state clean for when the filter engages
                 for ch in self.st.iter_mut() {
                     ch.iter_mut().for_each(Svf::reset);
                 }

@@ -1,14 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Transport state for the UI (NON-React, read from frameLoop subscribers).
-// With the engine running this is just telemetry. When no telemetry flows
-// (browser mock, engine down but transport accepted) it simulates the
-// playhead from the transport result so the UI still behaves.
-//
-//   playState.playing()      → boolean
-//   playState.tick()         → song tick (song mode) or pattern-loop tick
-//   await transport('toggle')
-// ──────────────────────────────────────────────────────────────────────
-
 import { telemetry } from './telemetry';
 import { getProject } from '../doc/store';
 import { PPQ } from '@shared/schema/time';
@@ -44,11 +33,9 @@ export const playState = {
   playing(): boolean {
     return live() ? telemetry.playing : simPlaying;
   },
-  /** Raw position in ticks (song position or pattern position, as the engine reports it). */
   tick(): number {
     return live() ? telemetry.playheadTick() : simTick();
   },
-  /** Position wrapped to the active pattern (pattern mode), for the step-grid playhead. */
   patternTick(): number | null {
     const p = getProject();
     if (!p || !this.playing()) return null;
@@ -61,20 +48,17 @@ export const playState = {
     const len = patternLength(pat, p.transport.timeSig);
     return len > 0 ? this.tick() % len : 0;
   },
-  /** Subscribe to play/stop flips (cheap; driven by the frame loop + transport calls). */
   subscribe(fn: (playing: boolean) => void): () => void {
     listeners.add(fn);
     return () => {
       listeners.delete(fn);
     };
   },
-  /** Poll for telemetry-driven flips (called by the transport bar's frame subscriber). */
   poll(): void {
     notify();
   },
 };
 
-/** Run a transport action with feedback-friendly result handling. */
 export async function transport(action: 'play' | 'stop' | 'pause' | 'toggle'): Promise<ActionResult> {
   let r: ActionResult;
   try {
@@ -95,7 +79,7 @@ export async function transport(action: 'play' | 'stop' | 'pause' | 'toggle'): P
     } else if (!next && wasPlaying) {
       simFromTick = simTick();
       simPlaying = false;
-      if (action === 'toggle') simFromTick = 0; // Space = stop & return, like FL
+      if (action === 'toggle') simFromTick = 0;
     }
   }
   notify();

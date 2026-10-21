@@ -1,9 +1,3 @@
-// Krypt Script (Wave 12.2b): the header parser, the QuickJS sandbox limits
-// (an endless loop is killed, a huge allocation is refused, no require /
-// process / fetch / timers / Date), determinism, strict output validation,
-// every factory script, the commands (scripts.save / scripts.remove /
-// notes.applyScript as one undo step), the user library and the MCP tools
-// write_script / run_script against a real DocHost.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -64,7 +58,6 @@ function rig(tag = 'rig') {
     if (!r.ok) throw new Error(r.message);
     return r.data as T;
   };
-  /** Am, F, C, G chords (one bar each) on Keys. */
   const writeChords = () => {
     const chords = [[57, 60, 64], [53, 57, 60], [55, 60, 64], [55, 59, 62]];
     exec('notes.add', { patternId: pat, channelId: chId('Keys'), notes: chords.flatMap((ks, b) => ks.map((key) => ({ tick: b * BAR, dur: BAR, key, vel: 0.8 }))) });
@@ -73,8 +66,6 @@ function rig(tag = 'rig') {
 }
 
 const sig = (ns: Array<{ tick: number; key: number; dur: number; vel: number }>) => ns.map((n) => `${n.tick}:${n.key}:${n.dur}:${n.vel}`).join(' ');
-
-// ── Header ────────────────────────────────────────────────────────────
 
 test('header: name, kind, description and number / choice / toggle params', () => {
   const h = parseScriptHeader(
@@ -127,8 +118,6 @@ test('params: clamped and snapped; strict mode refuses unknown names and wrong t
   assert.deepEqual(resolveParams(h, { c: 'z', nope: 1 }, false), { ok: true, params: { n: 4, c: 'a', t: true } }, 'lenient: defaults');
 });
 
-// ── Sandbox ───────────────────────────────────────────────────────────
-
 test('sandbox: an endless loop is killed by the CPU deadline', async () => {
   const t0 = Date.now();
   const r = await runSandboxed(`${HEAD}function run() { while (true) {} }`, {});
@@ -136,7 +125,6 @@ test('sandbox: an endless loop is killed by the CPU deadline', async () => {
   assert.equal((r as { kind: string }).kind, 'timeout');
   assert.match((r as { message: string }).message, /longer than 200 ms/);
   assert.ok(Date.now() - t0 < 2000, `stopped quickly (${Date.now() - t0} ms)`);
-  // top-level code is limited too
   const top = await runSandboxed(`${HEAD}for(;;){}\nfunction run(){return []}`, {});
   assert.equal((top as { kind: string }).kind, 'timeout');
 });
@@ -206,8 +194,6 @@ test('sandbox: helpers: degree, snap, inScale, euclid, chordAt in A minor', asyn
   assert.deepEqual((r2 as { value: unknown }).value, [69, 60, 81, 67, 60, true, false, '10010010', 'F']);
 });
 
-// ── Output validation ────────────────────────────────────────────────
-
 test('output: strict shape, clamped ranges, at most 4096 notes', () => {
   const ok = cleanScriptOutput([{ tick: -5, dur: 0, key: 200, vel: 100, pan: 3, color: 99.6, slide: true, extra: 'ignored' }, { tick: 10.6, dur: 20.2, key: 59.5 }]);
   assert.equal(ok.ok, true);
@@ -227,8 +213,6 @@ test('output: strict shape, clamped ranges, at most 4096 notes', () => {
   assert.match((many as { message: string }).message, /4097 notes; the limit is 4096/);
   assert.equal(cleanScriptOutput(Array.from({ length: 4096 }, (_, i) => ({ tick: i, dur: 1, key: 60 }))).ok, true);
 });
-
-// ── Factory scripts ───────────────────────────────────────────────────
 
 test('factory: 6+ scripts, valid headers, each one produces valid notes on the sample context (default params, 3 seeds)', async () => {
   assert.ok(FACTORY_SCRIPTS.length >= 6);
@@ -268,8 +252,6 @@ test('factory: every param extreme still gives valid notes', async () => {
   }
 });
 
-// ── Service + commands on a real project ─────────────────────────────
-
 test('service: Markov melody stays in the key; same seed = same plan; preview gives 4 variations', async () => {
   const { svc, pat, chId } = rig('melody');
   const req = { script: { id: 'factory:markov-melody' }, patternId: pat, channelId: chId('Keys'), range: { fromBar: 1, bars: 4 }, seed: 11, key: { root: 9, scale: 'minor' } };
@@ -308,7 +290,6 @@ test('service + notes.applyScript: a transform replaces the notes it got, ONE un
   assert.equal(again.ok, true, 'an arp of the arp is a new result');
   doc.undo(USER);
   assert.equal(sig(notes('Keys')), before, 'undo restores the chords');
-  // identical output → No change
   const same = await svc.prepare({ script: { code: `// @name Same\n// @kind transform\nfunction run({ notes }) { return notes; }` }, patternId: pat, channelId: chId('Keys'), seed: 1 });
   assert.equal(same.ok, false);
   assert.match(same.message!, /^No change:/);
@@ -359,7 +340,6 @@ test('commands: scripts.save / scripts.remove keep scripts in the project (zod +
   const bad = doc.exec('scripts.save', { code: '// @name X\n// @kind nope\nfunction run(){}' }, { actor: USER });
   assert.equal(bad.ok, false);
   assert.match(bad.message!, /Line 2: @kind must be/);
-  // round trip through the load-time schema
   const parsed = zProject.parse(JSON.parse(JSON.stringify(doc.project)));
   assert.equal(Object.keys(parsed.scripts ?? {}).length, 2);
   assert.deepEqual(checkIntegrity(parsed), []);
@@ -418,8 +398,6 @@ test('IPC payloads: cleanRunRequest checks every field', () => {
   const r = cleanRunRequest({ script: { id: 'factory:ratchet' }, patternId: 'p', channelId: 'c', ids: ['a', 5], range: { fromBar: 0, bars: 2 }, mode: 'x', seed: -1, key: { root: 3, scale: 'minor' }, params: [1] })!;
   assert.deepEqual(r, { script: { id: 'factory:ratchet' }, patternId: 'p', channelId: 'c', ids: ['a'], range: undefined, mode: 'replace', params: undefined, seed: 1, key: { root: 3, scale: 'minor' } });
 });
-
-// ── MCP ───────────────────────────────────────────────────────────────
 
 test('MCP write_script: line-numbered errors, nothing saved; then saved in the project (one undo) or the library', async () => {
   const { call, doc, userDataDir } = rig('mcp-write');

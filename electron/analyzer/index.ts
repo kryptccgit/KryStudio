@@ -1,7 +1,3 @@
-// Analyzer wiring (Electron side): binary resolution with a dev shadow copy
-// (so `cargo build` can overwrite the original while the app runs), the
-// lazy supervisor, the Model Manager and the service shared by IPC + MCP.
-
 import { app } from 'electron';
 import path from 'node:path';
 import type { DocHost } from '@shared/doc/DocHost';
@@ -31,12 +27,6 @@ export interface AnalyzerDeps {
 const MISSING_DEV = 'The audio analyzer is not built yet. Run "npm run engine:build:debug" (it builds krypt-studio-analyzer.exe), then try again.';
 const MISSING_PACKAGED = 'The audio analyzer (krypt-studio-analyzer.exe) is missing from this install. Reinstall Krypt Studio.';
 
-/**
- * Dev: run a copy from %TEMP% so cargo can rebuild the original. Runtime
- * DLLs (onnxruntime / DirectML / VC++) are copied along: from next to the exe,
- * else from resources/bin, where engine-build stages them (cargo's output
- * folder never has them).
- */
 function launchable(src: string): string {
   if (app.isPackaged) return src;
   const root = path.join(app.getPath('temp'), 'krypt-studio-analyzer-shadow');

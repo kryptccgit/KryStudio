@@ -1,6 +1,3 @@
-// Auto Mix requests from IPC, checked field by field (never trust a renderer payload). A MasterFileRequest with
-// `path: ''` is kept: the IPC handler opens a file dialog for it.
-
 import { z } from 'zod';
 import type { AlbumExportRequest, AlbumRequest, AutoMixRequest, MasterFileRequest } from '@shared/automix/types';
 import { ALBUM_MAX_SONGS } from '@shared/automix/album';
@@ -57,7 +54,6 @@ function problem(what: string, e: z.ZodError): string {
   return `The ${what} is invalid (${i?.path.length ? `${i.path.join('.')}: ` : ''}${i?.message ?? 'unknown problem'})`;
 }
 
-/** The request, or a human message saying what is wrong with it. */
 export function cleanAutoMixRequest(raw: unknown): AutoMixRequest | string {
   const r = zAutoMixRequest.safeParse(raw);
   if (!r.success) return problem('Auto Mix request', r.error);

@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Browser-only fake of window.krypt.vocals (Auto-tune vocal / Match key &
-// tempo in the clip menu), for `npm run dev:web`. Keys and tempos come from
-// the mock analyzer's fake analysis; the edits are planned by the same
-// shared code the real service uses (shared/vocals/plan.ts,
-// shared/music/keymatch.ts) and applied to the in-page DocHost as ONE user
-// undo step. Simplified: a clip target's tempo is not adopted as the
-// project tempo (the real service does that).
-// ──────────────────────────────────────────────────────────────────────
-
 import { USER, type DocHost } from '@shared/doc/DocHost';
 import type { ActionResult, AudioTarget, KryptApi, MatchOutcome, TuneOutcome } from '@shared/types';
 
@@ -19,7 +9,6 @@ import { channelPitch, keySources, patternKey, planTune, songOf } from '@shared/
 const fail = <T>(message: string): ActionResult<T> => ({ ok: false, message });
 
 export function createMockVocals(host: DocHost, analyzer: AnalyzerApiLike): KryptApi['vocals'] {
-  /** Run steps as one user undo step. */
   function applyAll(label: string, steps: Array<{ cmd: string; args: unknown }>): ActionResult<unknown[]> {
     const r = host.execBatch(steps, { actor: USER, label });
     return r.ok ? { ok: true, data: (r.data as unknown[]) ?? [] } : fail(r.message ?? 'Edit failed');

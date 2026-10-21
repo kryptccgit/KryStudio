@@ -1,28 +1,15 @@
-// Seconds (analyzer) → beats from the track's first downbeat, and the
-// 32-step drum grid. Pure (Wave 3B library core, research/08 §4).
-//
-// Beat positions follow the analysed beat grid piecewise-linearly, so a
-// track that drifts in tempo still lines up bar by bar; beyond the grid's
-// edges they continue at the local tempo (mean of the 4 edge intervals).
-
 import type { AudioAnalysis, ChordSpan, DrumHit, DrumRole, TranscribedNote } from '../analyzer/protocol';
 import type { BeatChord, BeatNote, DrumGrid } from './types';
 import { isNum, round } from './stats';
 
-/** Steps per bar of the drum grid (32nds in 4/4). */
 export const GRID_STEPS = 32;
-/** Fixed order of drum roles in grids, profiles and examples. */
 export const DRUM_ROLES: readonly DrumRole[] = ['kick', 'snare', 'hat', 'openhat', 'perc'];
-/** Swing below this is treated as straight (the analyzer's resolution is about ±0.05). */
 const SWING_MIN = 0.1;
-/** A bar counts for the drum grid when it holds at least this many hits (drum-less intros and breaks don't dilute the probabilities). */
 const MIN_HITS_PER_BAR = 2;
-/** Bar length tolerance (beats) for a "confident" bar between two analysed downbeats. */
 const BAR_TOLERANCE = 0.3;
 
 export type BeatMap = (sec: number) => number;
 
-/** Both directions of an analysis' beat mapping (beats from the first downbeat). */
 export interface BeatMapping {
   toBeat: BeatMap;
   toSec: (beat: number) => number;
@@ -69,7 +56,6 @@ function buildMapping(analysis: AudioAnalysis): Mapping | null {
   }
   const bpm = analysis.tempo?.bpm;
   if (isNum(bpm) && bpm > 0) {
-    // No beat grid: constant tempo from 0 s (or from the one downbeat we have).
     const origin = downs[0] ?? 0;
     return { toBeat: (sec) => ((sec - origin) * bpm) / 60, toSec: (beat) => origin + (beat * 60) / bpm };
   }
@@ -78,7 +64,6 @@ function buildMapping(analysis: AudioAnalysis): Mapping | null {
 
 const mapCache = new WeakMap<AudioAnalysis, Mapping | null>();
 
-/** The cached two-way beat mapping of an analysis (resolve once for bulk conversions). null when the track has no tempo. */
 export function beatMapping(analysis: AudioAnalysis): BeatMapping | null {
   return mapping(analysis);
 }
@@ -90,61 +75,43 @@ function mapping(analysis: AudioAnalysis): Mapping | null {
   return m;
 }
 
-/**
- * The seconds → beats mapping of an analysis (cached per analysis object;
- * analyses are treated as immutable). null when the track has no tempo.
- */
 export function beatMapper(analysis: AudioAnalysis): BeatMap | null {
   return mapping(analysis)?.toBeat ?? null;
 }
 
-/**
- * Seconds → beats from the first downbeat, following the analysed beat grid
- * (interpolated between beats, extrapolated at the edges at the local tempo).
- * Without a beat grid: at the detected tempo from 0 s. null when the track has no tempo.
- */
 export function secToBeat(analysis: AudioAnalysis, sec: number): number | null {
   const m = mapping(analysis);
   return m && isNum(sec) ? m.toBeat(sec) : null;
 }
 
-/** The inverse of secToBeat (beats from the first downbeat → seconds), O(1). null when the track has no tempo. */
 export function beatToSec(analysis: AudioAnalysis, beat: number): number | null {
   const m = mapping(analysis);
   return m && isNum(beat) ? m.toSec(beat) : null;
 }
 
-/** Beats per bar of an analysis (the analysed value, else 4). */
 export function beatsPerBar(analysis: AudioAnalysis): number {
   const b = analysis.beats?.beatsPerBar;
   return isNum(b) && b >= 1 && b <= 16 ? Math.round(b) : 4;
 }
 
-/**
- * Undo a 16th-note swing on a beat position: odd 16ths sit `swing × half a
- * 16th` late (transport convention), so they map back onto the straight grid.
- */
 export function unswingBeat(beat: number, swing: number | null | undefined): number {
   if (!isNum(swing) || swing < SWING_MIN) return beat;
   const s = Math.min(1, swing);
   const whole = Math.floor(beat);
-  const u = (beat - whole) * 4; // 16ths into the beat, 0..4
+  const u = (beat - whole) * 4;
   const pair = Math.floor(u / 2) * 2;
-  const v = u - pair; // 0..2 within an 8th
+  const v = u - pair;
   const knee = 1 + s / 2;
   const straight = v <= knee ? v / knee : 1 + (v - knee) / (2 - knee);
   return whole + (pair + straight) / 4;
 }
 
 interface Bar {
-  /** Start, in beats from the first downbeat. */
   start: number;
-  /** Length in beats. */
   len: number;
   ok: boolean;
 }
 
-/** Bars between the analysed downbeats (the last one runs a nominal bar if the track goes on). */
 function analysedBars(analysis: AudioAnalysis, map: BeatMap): Bar[] {
   const downs = cleanTimes(analysis.beats?.downbeats);
   if (!downs.length) return [];
@@ -164,10 +131,8 @@ function analysedBars(analysis: AudioAnalysis, map: BeatMap): Bar[] {
   return bars;
 }
 
-/** Which bar (index) and step (0..31) a beat position falls on, rounding to the nearest 32nd. */
 function barStep(bars: Bar[], beat: number): { bar: number; step: number } | null {
   if (!bars.length) return null;
-  // Last bar whose start is <= beat (or the first, for hits just before it).
   let lo = 0;
   let hi = bars.length - 1;
   if (beat < bars[0].start) lo = 0;
@@ -181,7 +146,6 @@ function barStep(bars: Bar[], beat: number): { bar: number; step: number } | nul
   const b = bars[lo];
   const g = Math.round(((beat - b.start) / b.len) * GRID_STEPS);
   if (g < 0) {
-    // Just before this bar's downbeat: belongs to step 0 only if it rounds there.
     return null;
   }
   if (g >= GRID_STEPS) {
@@ -192,19 +156,6 @@ function barStep(bars: Bar[], beat: number): { bar: number; step: number } | nul
   return { bar: lo, step: g };
 }
 
-/**
- * Drum hits → per-role counts on a 32-step bar grid (bars from the analysed downbeats). null without a usable beat grid.
- *
- * - Bars run between consecutive analysed downbeats; a bar only counts when
- *   its length matches beatsPerBar (±0.3 beat) — so a missed or shifted
- *   downbeat skips that bar instead of smearing the grid — and when it holds
- *   at least 2 hits (drum-less intros and breakdowns don't dilute the
- *   probabilities). `bars` is the number of such bars.
- * - Positions follow the beat grid inside the bar (tempo drift safe) and are
- *   un-swung when the analysis measured swing, then rounded to the nearest 32nd.
- * - Several hits of one role on one step of one bar count once (max velocity).
- * - `rolls` counts runs of ≥ 3 consecutive 32nd hat hits.
- */
 export function drumGrid(analysis: AudioAnalysis, hits: DrumHit[], source: DrumGrid['source']): DrumGrid | null {
   const map = beatMapper(analysis);
   if (!map || !analysis.beats || cleanTimes(analysis.beats.times).length < 2) return null;
@@ -212,7 +163,6 @@ export function drumGrid(analysis: AudioAnalysis, hits: DrumHit[], source: DrumG
   if (!bars.some((b) => b.ok)) return null;
   const swing = analysis.swing;
 
-  // (role → global step (bar*32+step) → max velocity)
   const cells = new Map<DrumRole, Map<number, number>>();
   const perBar = new Map<number, number>();
   for (const h of hits) {
@@ -251,7 +201,6 @@ export function drumGrid(analysis: AudioAnalysis, hits: DrumHit[], source: DrumG
     vel[role] = v.map((x) => round(x, 3));
   }
 
-  // Hat rolls: runs of ≥ 3 consecutive 32nds (may cross a bar line between active bars).
   let rolls = 0;
   const hat = cells.get('hat');
   if (hat) {
@@ -266,7 +215,6 @@ export function drumGrid(analysis: AudioAnalysis, hits: DrumHit[], source: DrumG
   return { steps: 32, bars: active.size, counts, vel, rolls, source };
 }
 
-/** Transcribed notes (seconds) → beat notes. Notes before the first downbeat get negative beats. Empty without a tempo. */
 export function notesToBeats(analysis: AudioAnalysis, notes: TranscribedNote[]): BeatNote[] {
   const map = beatMapper(analysis);
   if (!map) return [];
@@ -280,7 +228,6 @@ export function notesToBeats(analysis: AudioAnalysis, notes: TranscribedNote[]):
   return out.sort((a, b) => a.beat - b.beat || a.key - b.key);
 }
 
-/** Chord spans (seconds) → beat chords, merged when adjacent spans repeat the same chord. Empty without a tempo. */
 export function chordsToBeats(analysis: AudioAnalysis, chords: ChordSpan[]): BeatChord[] {
   const map = beatMapper(analysis);
   if (!map) return [];

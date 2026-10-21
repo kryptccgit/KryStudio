@@ -1,8 +1,3 @@
-//! Small DSP building blocks shared by every instrument and effect.
-//! All written from first principles / published papers (see THIRD-PARTY.md).
-
-// Per-sample index loops over parallel buffers are the clearest DSP style;
-// smoothers expose `next()` deliberately (they are not iterators).
 #![allow(clippy::needless_range_loop, clippy::should_implement_trait)]
 
 pub mod crossover;
@@ -20,13 +15,11 @@ pub mod truepeak;
 pub const PI: f32 = std::f32::consts::PI;
 pub const TAU: f32 = std::f32::consts::TAU;
 
-/// dB → linear gain.
 #[inline]
 pub fn db_to_gain(db: f32) -> f32 {
     (db * 0.115_129_255).exp()
 }
 
-/// Linear gain → dB (floored at -240 dB).
 #[inline]
 pub fn gain_to_db(g: f32) -> f32 {
     if g <= 1e-12 {
@@ -36,7 +29,6 @@ pub fn gain_to_db(g: f32) -> f32 {
     }
 }
 
-/// Fractional MIDI note → Hz (A4 = 69 = 440 Hz).
 #[inline]
 pub fn midi_to_hz(p: f32) -> f32 {
     440.0 * ((p - 69.0) * (1.0 / 12.0)).exp2()
@@ -47,7 +39,6 @@ pub fn semis_to_ratio(s: f32) -> f32 {
     (s * (1.0 / 12.0)).exp2()
 }
 
-/// Velocity curve shared by every instrument (ENGINE_PROTOCOL §4).
 #[inline]
 pub fn vel_gain(v: f32) -> f32 {
     if v.is_finite() {
@@ -57,7 +48,6 @@ pub fn vel_gain(v: f32) -> f32 {
     }
 }
 
-/// Equal-power pan, normalized so the centre is unity on both sides.
 #[inline]
 pub fn pan_gains(pan: f32) -> (f32, f32) {
     let p = if pan.is_finite() { pan.clamp(-1.0, 1.0) } else { 0.0 };
@@ -65,7 +55,6 @@ pub fn pan_gains(pan: f32) -> (f32, f32) {
     (a.cos() * std::f32::consts::SQRT_2, a.sin() * std::f32::consts::SQRT_2)
 }
 
-/// Flush tiny values to zero (denormal guard for feedback paths).
 #[inline]
 pub fn flush(x: f32) -> f32 {
     if x.abs() < 1e-20 {
@@ -84,7 +73,6 @@ pub fn flush64(x: f64) -> f64 {
     }
 }
 
-/// Replace NaN/inf with 0 (last line of defence on outputs).
 #[inline]
 pub fn finite(x: f32) -> f32 {
     if x.is_finite() {
@@ -94,14 +82,12 @@ pub fn finite(x: f32) -> f32 {
     }
 }
 
-/// One-pole smoothing coefficient for a time constant in ms.
 #[inline]
 pub fn tc_coef(ms: f32, sr: f32) -> f32 {
     let n = (ms * 0.001 * sr).max(1e-3);
     1.0 - (-1.0 / n).exp()
 }
 
-/// Fast rational tanh approximation (accurate to ~1e-4, exact limits ±1).
 #[inline]
 pub fn tanh_fast(x: f32) -> f32 {
     let x = x.clamp(-5.0, 5.0);
@@ -111,7 +97,6 @@ pub fn tanh_fast(x: f32) -> f32 {
     (n / d).clamp(-1.0, 1.0)
 }
 
-/// Small, fast, deterministic PRNG (xorshift32).
 #[derive(Clone, Copy, Debug)]
 pub struct Rng(u32);
 
@@ -128,19 +113,16 @@ impl Rng {
         self.0 = x;
         x
     }
-    /// Uniform 0..1.
     #[inline]
     pub fn unit(&mut self) -> f32 {
         (self.next_u32() >> 8) as f32 * (1.0 / 16_777_216.0)
     }
-    /// Uniform -1..1 (white noise).
     #[inline]
     pub fn bipolar(&mut self) -> f32 {
         self.unit() * 2.0 - 1.0
     }
 }
 
-/// One-pole parameter smoother (no zipper noise). Snaps when settled.
 #[derive(Clone, Copy, Debug)]
 pub struct Smooth {
     pub cur: f32,
@@ -181,7 +163,6 @@ impl Smooth {
         }
         self.cur
     }
-    /// Advance `n` samples at once (block-rate smoothing).
     #[inline]
     pub fn advance(&mut self, n: usize) -> f32 {
         let k = (1.0 - self.coef).powi(n as i32);
@@ -197,7 +178,6 @@ impl Smooth {
     }
 }
 
-/// Linear pitch glide in semitones (constant-time portamento).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Glide {
     pub cur: f32,

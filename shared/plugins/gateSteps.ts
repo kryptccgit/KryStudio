@@ -1,51 +1,23 @@
-// ──────────────────────────────────────────────────────────────────────
-// Krypt Gate/Time custom steps (krypt.gate pattern "Custom steps"). The
-// engine (engine/crates/dsp/src/effects/gate.rs) reads them from plain
-// params: stepDiv, stepCount, s1..s16 (time mode) and g1..g16 (level).
-// This module is the one place that knows the mapping, plus a compact
-// text form for agents and the factory step presets. Pure: no I/O.
-//
-// Step text:  [division] step step step …      (1 to 16 steps)
-//   division  1/32 | 1/16 | 1/8 | 1/4 (optional; default 1/16)
-//   step      CODE or CODE:LEVEL (LEVEL 0..100 %, default 100)
-//   CODE      P play · R2 R3 R4 roll ×2/×3/×4 · RP repeat the previous step
-//             H half speed · V reverse · S tape stop · U tape start (spin up)
-//             . a muted step (same as P:0)
-//   `|` may separate beats or bars for readability; it is ignored.
-//   Consecutive steps with the same code form one run: half speed,
-//   reverse, repeat and the tape curves span the whole run.
-//   e.g. "1/16 P P P P | P P . P | R2 R2 R4 R4 | V V S S"
-// ──────────────────────────────────────────────────────────────────────
-
-/** Index of "Custom steps" in the krypt.gate `pattern` options. */
 export const GATE_CUSTOM_PATTERN = 10;
 export const GATE_MAX_STEPS = 16;
-/** Mirrors STEP_MODES in gate.rs (the `s1`..`s16` options). */
 export const GATE_STEP_MODES = ['Play', 'Roll x2', 'Roll x3', 'Roll x4', 'Repeat prev', 'Half speed', 'Reverse', 'Tape stop', 'Tape start'] as const;
 export const GATE_STEP_CODES = ['P', 'R2', 'R3', 'R4', 'RP', 'H', 'V', 'S', 'U'] as const;
-/** The `stepDiv` options. */
 export const GATE_STEP_DIVS = ['1/32', '1/16', '1/8', '1/4'] as const;
 const DEFAULT_DIV = 1;
-/** Every custom-step param id (drawn by the step editor, not as knobs). */
 export const GATE_STEP_PARAM_IDS: readonly string[] = ['stepDiv', 'stepCount', ...Array.from({ length: GATE_MAX_STEPS }, (_, i) => `s${i + 1}`), ...Array.from({ length: GATE_MAX_STEPS }, (_, i) => `g${i + 1}`)];
 
 export interface GateStep {
-  /** GATE_STEP_MODES index. */
   mode: number;
-  /** 0..1 */
   level: number;
 }
 
 export interface GateSteps {
-  /** GATE_STEP_DIVS index. */
   div: number;
-  /** 1..16 steps. */
   steps: GateStep[];
 }
 
 export type GateStepsResult = { ok: true; value: GateSteps } | { ok: false; message: string };
 
-/** Parse step text (syntax above). Never throws; the message names the bad token. */
 export function parseGateSteps(text: string): GateStepsResult {
   const tokens = text.split(/[\s,|]+/).filter(Boolean);
   let div = DEFAULT_DIV;
@@ -73,7 +45,6 @@ export function parseGateSteps(text: string): GateStepsResult {
   return { ok: true, value: { div, steps } };
 }
 
-/** Step text in the canonical form, e.g. "1/16 P P R2 R2:50 . V". */
 export function printGateSteps(s: GateSteps): string {
   const step = ({ mode, level }: GateStep): string => {
     if (mode === 0 && level === 0) return '.';
@@ -87,7 +58,6 @@ export function printGateSteps(s: GateSteps): string {
 const clampInt = (v: unknown, lo: number, hi: number, dflt: number): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : dflt);
 const clamp01 = (v: unknown, dflt: number): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : dflt);
 
-/** The steps stored in a krypt.gate slot's (sparse) params; missing keys use the catalog defaults. */
 export function readGateSteps(params: Readonly<Record<string, number>>): GateSteps {
   const count = clampInt(params.stepCount, 1, GATE_MAX_STEPS, GATE_MAX_STEPS);
   return {
@@ -96,10 +66,6 @@ export function readGateSteps(params: Readonly<Record<string, number>>): GateSte
   };
 }
 
-/**
- * Params for mixer.setSlotParams: switches the slot to Custom steps and writes ALL 16 steps (those past the
- * count back to Play at full level), so nothing stale survives a preset.
- */
 export function gateStepParams(s: GateSteps): Record<string, number> {
   const out: Record<string, number> = { pattern: GATE_CUSTOM_PATTERN, stepDiv: s.div, stepCount: Math.min(GATE_MAX_STEPS, Math.max(1, s.steps.length)) };
   for (let i = 0; i < GATE_MAX_STEPS; i++) {
@@ -117,7 +83,6 @@ export interface GateStepPreset {
   text: string;
 }
 
-/** Factory step patterns (original names). */
 export const GATE_STEP_PRESETS: readonly GateStepPreset[] = [
   { id: 'build-roll', name: 'Build roll', description: 'Straight for two beats, then 1/32 and 1/64 rolls into the drop', text: '1/16 P P P P P P P P R2 R2 R2 R2 R4 R4 R4 R4' },
   { id: 'half-time-tail', name: 'Half-time tail', description: 'The bar plays normally, then the back half drops to half speed', text: '1/16 P P P P P P P P H H H H H H H H' },
@@ -135,7 +100,6 @@ export function findGateStepPreset(ref: string): GateStepPreset | undefined {
   return GATE_STEP_PRESETS.find((p) => p.id.replace(/-/g, '') === n || p.name.toLowerCase().replace(/[\s_-]+/g, '') === n);
 }
 
-/** Preset params (parse cannot fail for the factory text; the test checks it). */
 export function gateStepPresetParams(p: GateStepPreset): Record<string, number> {
   const r = parseGateSteps(p.text);
   if (!r.ok) throw new Error(`Bad factory step preset ${p.id}: ${r.message}`);

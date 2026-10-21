@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Session view (clip launcher, research/16 §2.1): one column per playlist
-// track, one row per scene. DOM grid with sticky track headers, a sticky
-// scene column on the right and a sticky stop row at the bottom.
-//   - edits: dispatch(session.*) via ./actions (one command per gesture)
-//   - playback: window.krypt.session via ./actions (failures toast)
-//   - live state: ./live (store updates only on launches; progress bars
-//     are written imperatively from the frame loop)
-// ──────────────────────────────────────────────────────────────────────
-
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AudioLines,
@@ -53,10 +43,8 @@ import './session.css';
 const L = M.SESSION_LAYOUT;
 const EMPTY: readonly string[] = [];
 
-/** Grid buttons don't take keyboard focus: the arrows / Enter / Delete stay with the grid. */
 const keepFocus = (e: React.PointerEvent): void => e.preventDefault();
 
-/** Stable callbacks the memoized cells call (selection, focus, drop highlight). */
 interface GridApi {
   select: (col: number, row: number) => void;
   focus: () => void;
@@ -79,7 +67,6 @@ export function SessionView() {
     try {
       localStorage.setItem(SHOW_ALL_KEY, v ? '1' : '0');
     } catch {
-      /* per-viewer convenience only */
     }
   }, []);
   const closeGrid = useCallback(() => setGridOpen(false), []);
@@ -94,8 +81,6 @@ export function SessionView() {
   );
 }
 
-// ── Toolbar ──────────────────────────────────────────────────────────
-
 function SessionToolbar({ gridOpen, onGrid, showAll, onShowAll }: { gridOpen: boolean; onGrid: () => void; showAll: boolean; onShowAll: (v: boolean) => void }) {
   const quantize = useDocStore((s) => s.project?.session?.quantize ?? '1bar');
   const anyOverridden = useLauncherLive((s) => s.anyOverridden);
@@ -109,7 +94,6 @@ function SessionToolbar({ gridOpen, onGrid, showAll, onShowAll }: { gridOpen: bo
       .recordState()
       .then((s) => alive && setRec(s.on))
       .catch(() => {
-        /* the button just starts off */
       });
     const off = window.krypt.session.onRecordState((s) => setRec(s.on));
     return () => {
@@ -229,8 +213,6 @@ function ToolbarPill({
   );
 }
 
-// ── Empty states ─────────────────────────────────────────────────────
-
 function NoTracks() {
   return (
     <div className="flex flex-1 items-center justify-center p-6">
@@ -249,8 +231,6 @@ function NoTracks() {
     </div>
   );
 }
-
-// ── The grid ─────────────────────────────────────────────────────────
 
 type DropState = { col: number; row: number; effect: 'move' | 'copy'; label: string } | null;
 
@@ -355,7 +335,6 @@ function SessionGrid({ showAll }: { showAll: boolean }) {
       if (channelId) void A.setClipFromChannelDrag(trackId, sceneId, channelId);
       return;
     }
-    // Explorer files: Electron resolves the real path; one file per slot.
     const files = [...dt.files].filter((f) => AUDIO_FILE_RE.test(f.name));
     if (!files.length) return void toast.warn('Drop audio files (wav, mp3, flac, ogg, aiff) onto a slot');
     let path = '';
@@ -371,7 +350,6 @@ function SessionGrid({ showAll }: { showAll: boolean }) {
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
     const t = e.target as HTMLElement;
-    // Typing a name, or a focused button handling its own Enter / Space.
     if (t !== e.currentTarget && (t.tagName === 'INPUT' || t.tagName === 'BUTTON' || t.tagName === 'SELECT')) return;
     const p = getProject();
     if (!p) return;
@@ -415,7 +393,6 @@ function SessionGrid({ showAll }: { showAll: boolean }) {
   };
 
   const size = M.gridSize(cols, rows);
-  /** CSS grid row of the stop buttons (row 2 holds the "no scenes" note when there are none). */
   const footerRow = Math.max(rows, 1) + 2;
   return (
     <div
@@ -490,8 +467,6 @@ function NoScenes({ cols }: { cols: number }) {
     </div>
   );
 }
-
-// ── Track headers + stop row ─────────────────────────────────────────
 
 const TrackHeader = memo(function TrackHeader({ trackId, col }: { trackId: Id; col: number }) {
   const name = useDocStore((s) => s.project?.playlist.tracks[trackId]?.name ?? '');
@@ -573,8 +548,6 @@ function StopAllCorner({ cols, footerRow }: { cols: number; footerRow: number })
   );
 }
 
-// ── A scene row: slots + the scene cell ──────────────────────────────
-
 const SceneRow = memo(function SceneRow({
   sceneId,
   row,
@@ -614,7 +587,6 @@ interface SlotProps {
   col: number;
   row: number;
   selected: boolean;
-  /** Drop-target label while something is dragged over this slot. */
   drop: string | null;
   api: GridApi;
 }
@@ -753,7 +725,6 @@ const ClipSlot = memo(function ClipSlot({ clipId, trackId, sceneId, col, row, se
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(M.LAUNCH_CLIP_MIME, clipId);
-        // The playlist takes a pattern clip dragged out of the launcher, too.
         if (clip.kind === 'pattern' && clip.patternId) e.dataTransfer.setData(M.PATTERN_MIME, clip.patternId);
         e.dataTransfer.effectAllowed = 'copyMove';
       }}
@@ -789,7 +760,6 @@ const ClipSlot = memo(function ClipSlot({ clipId, trackId, sceneId, col, row, se
             try {
               e.currentTarget.setPointerCapture(e.pointerId);
             } catch {
-              /* capture is best effort */
             }
             held.current = M.needsRelease(clip.launchMode);
             void A.launchClip(clipId);
@@ -921,8 +891,6 @@ function clipMenu(c: LaunchClip, label: string, status: M.SlotStatus, sceneId: I
     { label: 'Delete', icon: Trash2, shortcut: 'Del', danger: true, onSelect: () => void A.removeClip(c.id) },
   ];
 }
-
-// ── Scene cell (sticky right column) ─────────────────────────────────
 
 const SceneCell = memo(function SceneCell({ sceneId, row, cols }: { sceneId: Id; row: number; cols: number }) {
   const scene = useDocStore((s) => s.project?.session?.scenes[sceneId]);

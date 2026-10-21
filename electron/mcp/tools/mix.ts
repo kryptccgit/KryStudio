@@ -1,5 +1,3 @@
-// Mixing tools: insert levels, effects, routing, sidechain.
-
 import { z } from 'zod';
 import type { PluginDescriptor } from '@shared/plugins/types';
 import { formatParam } from '@shared/plugins/types';
@@ -31,7 +29,6 @@ const zSteps = z
     `Gate/Time only (krypt.gate): custom steps as text or a preset name. Text: [1/32|1/16|1/8|1/4] then 1-16 steps, each P play, R2/R3/R4 roll, RP repeat previous step, H half speed, V reverse, S tape stop, U tape start, . muted; :0-100 sets a level (R4:60). Same codes in a row form one run. Presets: ${GATE_STEP_PRESETS.map((p) => p.name).join(', ')}. Example: "1/16 P P P P P P . P R2 R2 R4 R4 V V S S"`,
   );
 
-/** krypt.gate params for a `steps` input (a preset name or step text); fails with a human message. */
 function gateSteps(desc: PluginDescriptor, steps: string | undefined): Record<string, number> | undefined {
   if (steps === undefined) return undefined;
   if (desc.id !== 'krypt.gate') fail(`steps only works with Krypt Gate/Time, not ${desc.name}`);
@@ -100,7 +97,7 @@ export const addEffect = defineTool({
     'Insert an effect into a mixer insert\'s FX chain (max 10): eq, comp, limiter, clipper, reverb, delay, drive, filter, duck, utility, gate (Gate/Time: stutters, half-time, tape stop, reverse, gates; `steps` writes a custom step pattern) (or krypt.* ids). position is 1-based (default: end); mix 0..100 %. Example: {"insert":"Lead","effect":"reverb","params":{"mode":"Hall","decay":"2.5s"},"mix":25}',
   input: z.object({
     insert: zIns,
-    effect: z.string().max(160), // stock alias or an installed vst3:/clap: id
+    effect: z.string().max(160),
     params: z.record(z.string(), zValue).optional(),
     steps: zSteps,
     position: z.number().int().min(1).max(MAX_FX_SLOTS).optional(),

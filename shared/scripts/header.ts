@@ -1,14 +1,3 @@
-// The Krypt Script header: `// @…` comment lines (read without running the
-// code, so the dialog can show the knobs and an agent gets line-numbered
-// errors before anything executes).
-//
-//   // @name Euclid with probability
-//   // @kind generator                      (generator | transform)
-//   // @description Even hits; each one plays with a probability.
-//   // @param pulses number 5 1..16 step 1 "Pulses"
-//   // @param style choice up up|down|upDown "Style"
-//   // @param accent toggle on "Accent the one"
-
 import { SCRIPT_KINDS, SCRIPT_LIMITS, type ScriptHeader, type ScriptIssue, type ScriptKind, type ScriptParam, type ScriptParamValues } from './types';
 
 const DIRECTIVE = /^\s*\/\/\s*@([A-Za-z]+)\b\s*(.*)$/;
@@ -29,7 +18,6 @@ function humanize(id: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
-/** Split off a trailing "Label" (double or single quotes). */
 function takeLabel(rest: string): { body: string; label: string | null } {
   const m = rest.match(/^(.*?)\s*(["'])(.*)\2\s*$/);
   if (!m) return { body: rest.trim(), label: null };
@@ -95,7 +83,6 @@ function parseParam(rest: string, line: number, issues: ScriptIssue[]): ScriptPa
 
 export type HeaderResult = { ok: true; header: ScriptHeader; issues: [] } | { ok: false; header: null; issues: ScriptIssue[] };
 
-/** Parse a script's header. Pure; never runs the code. */
 export function parseScriptHeader(code: string): HeaderResult {
   const issues: ScriptIssue[] = [];
   if (typeof code !== 'string' || !code.trim()) return { ok: false, header: null, issues: [{ line: 0, message: 'The script is empty' }] };
@@ -144,7 +131,6 @@ export function parseScriptHeader(code: string): HeaderResult {
   return { ok: true, header: { name: name!, kind: kind!, description: description.slice(0, SCRIPT_LIMITS.descriptionChars), params }, issues: [] };
 }
 
-/** The params' defaults. */
 export function defaultParams(h: ScriptHeader): ScriptParamValues {
   const out: ScriptParamValues = {};
   for (const p of h.params) out[p.id] = p.default;
@@ -156,11 +142,6 @@ const snapStep = (v: number, p: { min: number; step: number }): number => {
   return Math.round(s * 1e6) / 1e6;
 };
 
-/**
- * The values a run gets: defaults, overridden by `raw`. Numbers are clamped to the range; choices must be an option
- * and toggles a boolean. strict = unknown names and wrong types are errors (agents); otherwise they fall back to the
- * default (the dialog after the script changed).
- */
 export function resolveParams(h: ScriptHeader, raw: Record<string, unknown> | undefined, strict: boolean): { ok: true; params: ScriptParamValues } | { ok: false; message: string } {
   const out = defaultParams(h);
   const src = raw ?? {};
@@ -195,7 +176,6 @@ export function resolveParams(h: ScriptHeader, raw: Record<string, unknown> | un
   return { ok: true, params: out };
 }
 
-/** One line per param for agents: "pulses number 1..16 (default 5)". */
 export function describeParams(h: ScriptHeader): string {
   if (!h.params.length) return 'no params';
   return h.params

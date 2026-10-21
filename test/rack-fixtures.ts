@@ -1,8 +1,3 @@
-// Fixture catalog entries for the Wave 12.2 racks (research/16 §2.3) until the lead regenerates
-// shared/plugins/catalog.gen.json from the engine: the three rack plugins with macro1..8 and the sampler `end`
-// param. installRackFixtures() adds whatever is missing to the shared CATALOG object IN PLACE (each test file is
-// its own process), so DocHost, the commands and the MCP tools all see them. Once the real catalog has them, this
-// is a no-op.
 import { CATALOG } from '@shared/plugins/catalog';
 import type { ParamSpec, PluginDescriptor } from '@shared/plugins/types';
 import { DRUM_RACK_PLUGIN, FX_RACK_PLUGIN, MACRO_PARAM_IDS, RACK_PLUGIN } from '@shared/schema/rack';

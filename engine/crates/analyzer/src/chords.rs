@@ -1,45 +1,9 @@
-//! Chord estimation: which chord sounds when, as root + quality spans.
-//!
-//! 1. A segment grid: the beats (plus filled-in beats where the grid has gaps
-//!    or stops short of the file's ends), or a 0.5 s grid without a beat.
-//! 2. Per segment, from the harmonic chroma in key.rs (partials already
-//!    credited to their fundamentals by the harmonic sieve):
-//!    * the treble chroma (notes from C3 up): which pitch classes sound;
-//!    * bass evidence: the bass register (below C3) with percussive smear
-//!      removed — a frame's two strongest bass pitch classes a semitone apart
-//!      and alike in strength are a kick's pitch sweep, and each pitch class's
-//!      median over the bass-active segments is a kick or drone that plays
-//!      throughout, not a bass line — blended with the lowest treble note
-//!      where the bass register is quiet (the harmony's own bass voice).
-//! 3. Template matching (Fujishima 1999): cosine between the treble chroma
-//!    and binary templates for maj, min, 7, maj7, m7, dim, sus4, sus2 and
-//!    the bare fifth in all 12 roots, plus a bass term — the bass on the root
-//!    counts fully, on another chord tone partly (inversions) — so the bass
-//!    decides between chords that share most notes (Fm7 vs Abmaj7 under Fm9,
-//!    Ebmaj7 vs Gm7 under Ebmaj9). Small priors favour triads, and chords
-//!    whose triad is diatonic in the detected key get a small bonus.
-//! 4. Viterbi smoothing over the segments with a change penalty that is
-//!    lowest on downbeats and highest off the beat-3 half bar, so chords
-//!    don't flicker with melody notes (bass/treble and key-aware models after
-//!    Mauch 2010 and Lee & Slaney 2008; metric-position weighting after
-//!    Papadopoulos & Peeters 2008).
-//! 5. Equal neighbours merge into spans. Stretches that aren't harmony are
-//!    left out: too little treble energy, no template fit, or low tonality
-//!    (noise, cymbals). An atonal file (drums only, noise, a bass line alone)
-//!    gets no chords at all.
-//!
-//! Krypt-original code from the published ideas above; no GPL code
-//! (Chordino / NNLS-Chroma / autochord) was read or ported.
-//! `KRYPT_CHORD_DEBUG=1` prints every segment's reading to stderr.
-
 use crate::key::{self, Chroma};
 use crate::protocol::{Beats, ChordQuality, ChordSpan};
 
 struct Template {
     quality: ChordQuality,
-    /// Semitones above the root; the root (0) first.
     intervals: &'static [usize],
-    /// Added to the score: triads are the default reading.
     prior: f32,
 }
 
@@ -57,43 +21,24 @@ const TEMPLATES: [Template; 9] = [
 
 const N_STATES: usize = 12 * TEMPLATES.len();
 
-/// Score bonus for chords whose triad is diatonic in the detected key
-/// (key-aware chord models: Lee & Slaney 2008, Mauch 2010).
 const KEY_BONUS: f32 = 0.04;
-/// Weight of the bass term (0..1) against the treble cosine (0..1).
 const BASS_WEIGHT: f32 = 0.5;
-/// Bass on a chord tone other than the root (an inversion) counts this much.
 const BASS_OTHER_TONE: f32 = 0.4;
-/// Score → log-likelihood scale (nats per unit score per beat).
 const KAPPA: f32 = 12.0;
-/// Change penalties (nats) by metric position of the segment start.
 const COST_DOWNBEAT: f32 = 0.8;
 const COST_HALF_BAR: f32 = 1.6;
 const COST_BEAT: f32 = 2.6;
-/// Grid points without a known metric position (filled beats, 0.5 s grid).
 const COST_FREE: f32 = 1.6;
-/// A segment is tonal when its treble energy reaches this fraction of the
-/// file's 75th-percentile segment...
 const MIN_REL_ENERGY: f32 = 0.03;
-/// ...and some template fits at least this well (cosine).
 const MIN_FIT: f32 = 0.6;
-/// No chords when the treble holds less than this share of the file's note
-/// energy (a bass line or a pitched kick alone is not harmony).
 const MIN_TREBLE_SHARE: f32 = 0.15;
-/// Segments whose tonality (share of the harmonic spectrum in tonal peaks)
-/// is below this are not harmony (noise, cymbals).
 const MIN_TONALITY: f32 = 0.15;
-/// Two neighbouring bass pitch classes this close in strength are a smear.
 const SMEAR_RATIO: f32 = 0.5;
-/// Grid step without beats (s).
 const FREE_STEP: f32 = 0.5;
 
-/// Segment boundaries (s, ascending, first 0, last = duration) and the
-/// change cost at each segment's start (`cost[i]` for segment i).
 struct Grid {
     bounds: Vec<f32>,
     cost: Vec<f32>,
-    /// Typical segment length (s).
     period: f32,
 }
 
@@ -121,7 +66,6 @@ fn grid(beats: Option<&Beats>, duration: f32) -> Grid {
         return free();
     }
     let bpb = b.beats_per_bar.max(1) as usize;
-    // Metric cost per beat: downbeat, half bar (even meters), other beats.
     let mut pts: Vec<(f32, f32)> = Vec::with_capacity(b.times.len() + 16);
     let mut since_down: Option<usize> = None;
     for &t in &b.times {
@@ -135,7 +79,6 @@ fn grid(beats: Option<&Beats>, duration: f32) -> Grid {
         };
         pts.push((t, cost));
     }
-    // Fill gaps > 1.5 periods inside the grid.
     let mut filled: Vec<(f32, f32)> = Vec::with_capacity(pts.len() + 16);
     for (i, &p) in pts.iter().enumerate() {
         if i > 0 {
@@ -150,7 +93,6 @@ fn grid(beats: Option<&Beats>, duration: f32) -> Grid {
         }
         filled.push(p);
     }
-    // Extend to the file's ends at the beat period.
     let mut head: Vec<(f32, f32)> = Vec::new();
     let mut t = filled[0].0 - period;
     while t > 0.3 * period {
@@ -165,7 +107,6 @@ fn grid(beats: Option<&Beats>, duration: f32) -> Grid {
         all.push((t, COST_FREE));
         t += period;
     }
-    // Segment starts: 0 replaces a first point within 0.3 periods of it.
     if all[0].0 <= 0.3 * period {
         all[0].0 = 0.0;
     } else {
@@ -181,13 +122,9 @@ fn grid(beats: Option<&Beats>, duration: f32) -> Grid {
 struct Segment {
     t0: f32,
     t1: f32,
-    /// Mean treble chroma per frame (file scale).
     treble: [f32; 12],
-    /// Mean bass-register chroma per frame (total-note-energy scale).
     bass: [f32; 12],
-    /// Mean lowest-treble-note chroma per frame (same scale as `bass`).
     low: [f32; 12],
-    /// Mean tonality (0..1).
     tonality: f32,
 }
 
@@ -199,7 +136,6 @@ fn segment(ch: &Chroma, t0: f32, t1: f32) -> Segment {
     if n == 0 {
         return Segment { t0, t1, treble, bass, low, tonality: 0.0 };
     }
-    // Frames whose centre lies in [t0, t1); at least the nearest one.
     let a = ((t0 * ch.fps).ceil().max(0.0) as usize).min(n);
     let b = ((t1 * ch.fps).ceil().max(0.0) as usize).min(n);
     let (a, b) = if b > a { (a, b) } else {
@@ -223,9 +159,6 @@ fn segment(ch: &Chroma, t0: f32, t1: f32) -> Segment {
     Segment { t0, t1, treble, bass, low, tonality: tonality * inv }
 }
 
-/// One frame's bass register without percussive smear: when its two
-/// strongest pitch classes are a semitone apart and similar in strength (a
-/// kick's pitch sweep, not a bass line), both are dropped.
 fn bass_frame(b: &[f32; 12]) -> [f32; 12] {
     let mut out = *b;
     let mut idx: [usize; 12] = std::array::from_fn(|k| k);
@@ -239,15 +172,7 @@ fn bass_frame(b: &[f32; 12]) -> [f32; 12] {
     out
 }
 
-/// Bass evidence per segment, a distribution over pitch classes (or zeros):
-/// the bass register with each pitch class's median over the bass-active
-/// segments removed (a kick drum's or a drone's constant pitch, which the
-/// long low-band window smears into every frame, is not a bass line),
-/// blended with the lowest treble note where the bass register is quiet.
 fn bass_evidence(segs: &[Segment]) -> Vec<[f32; 12]> {
-    // Baseline over the segments where the bass register is active at all, so
-    // a kick that plays in most of them is caught even when long stretches of
-    // the file have no drums.
     let tot: Vec<f32> = segs.iter().map(|s| s.bass.iter().sum::<f32>()).collect();
     let mut sorted = tot.clone();
     sorted.sort_by(|a, b| a.total_cmp(b));
@@ -261,8 +186,6 @@ fn bass_evidence(segs: &[Segment]) -> Vec<[f32; 12]> {
         .map(|s| {
             let b: [f32; 12] = std::array::from_fn(|k| (s.bass[k] - base[k]).max(0.0));
             let (eb, el) = (b.iter().sum::<f32>(), s.low.iter().sum::<f32>());
-            // Bass presence: 0 while the bass register (after the baseline) is
-            // under a quarter of the lowest treble note, 1 from three quarters.
             let alpha = if eb <= 1e-12 { 0.0 } else if el <= 1e-12 { 1.0 } else { ((eb / el - 0.25) / 0.5).clamp(0.0, 1.0) };
             std::array::from_fn(|k| {
                 let bk = if eb > 1e-12 { b[k] / eb } else { 0.0 };
@@ -273,17 +196,11 @@ fn bass_evidence(segs: &[Segment]) -> Vec<[f32; 12]> {
         .collect()
 }
 
-/// Pitch classes of a key's scale, as a 12-bit mask relative to C: major
-/// (plus the flat 7th of the common bVII) or natural minor (plus the raised
-/// 7th of V and vii°).
 fn scale_mask(tonic: usize, minor: bool) -> u16 {
     let steps: &[usize] = if minor { &[0, 2, 3, 5, 7, 8, 10, 11] } else { &[0, 2, 4, 5, 7, 9, 10, 11] };
     steps.iter().fold(0u16, |m, &s| m | 1 << ((tonic + s) % 12))
 }
 
-/// Per-state scores for one segment: (score, treble cosine). `lw` is the
-/// segment's bass evidence (a distribution or zeros); `scale` the key's
-/// scale mask (0 = no key).
 fn scores(seg: &Segment, lw: &[f32; 12], scale: u16) -> Vec<(f32, f32)> {
     let mut tn = seg.treble;
     key::normalize(&mut tn);
@@ -298,7 +215,6 @@ fn scores(seg: &Segment, lw: &[f32; 12], scale: u16) -> Vec<(f32, f32)> {
                 bass += if j == 0 { lw[pc] } else { BASS_OTHER_TONE * lw[pc] };
             }
             let cos = fit / (tpl.intervals.len() as f32).sqrt();
-            // Diatonic bonus: the chord's triad (sevenths aside) lies in the key.
             let diatonic = scale != 0 && tpl.intervals.iter().take(3).all(|&iv| scale & (1 << ((root + iv) % 12)) != 0);
             let key_bonus = if diatonic { KEY_BONUS } else { 0.0 };
             out.push((cos + BASS_WEIGHT * bass + tpl.prior + key_bonus, cos));
@@ -311,8 +227,6 @@ fn state(s: usize) -> (u8, ChordQuality) {
     ((s / TEMPLATES.len()) as u8, TEMPLATES[s % TEMPLATES.len()].quality)
 }
 
-/// Viterbi over one run of tonal segments. `emis[i][s]` are log-likelihoods,
-/// `cost[i]` the change penalty entering segment i. Returns the state path.
 fn viterbi(emis: &[Vec<f32>], cost: &[f32]) -> Vec<usize> {
     let n = emis.len();
     if n == 0 {
@@ -343,21 +257,15 @@ fn viterbi(emis: &[Vec<f32>], cost: &[f32]) -> Vec<usize> {
     path
 }
 
-/// Chord spans for a file. `beats` from the analysis (None: 0.5 s grid);
-/// `key` (tonic pitch class, minor) when one was detected.
 pub fn estimate(ch: &Chroma, beats: Option<&Beats>, key: Option<(usize, bool)>, duration: f32) -> Vec<ChordSpan> {
     estimate_full(ch, beats, key, duration).spans
 }
 
-/// Chord spans plus the evidence the key re-ranking uses.
 pub struct ChordEstimate {
     pub spans: Vec<ChordSpan>,
-    /// Bass evidence per pitch class over the chord-bearing time (sums to 1,
-    /// or zeros): how often each pitch class is the bass.
     pub bass_share: [f32; 12],
 }
 
-/// [`estimate`] with the bass share.
 pub fn estimate_full(ch: &Chroma, beats: Option<&Beats>, key: Option<(usize, bool)>, duration: f32) -> ChordEstimate {
     let none = || ChordEstimate { spans: Vec::new(), bass_share: [0.0; 12] };
     if ch.treble.is_empty() || duration.is_nan() || duration <= 0.0 {
@@ -416,7 +324,6 @@ pub fn estimate_full(ch: &Chroma, beats: Option<&Beats>, key: Option<(usize, boo
         while j < segs.len() && tonal[j] {
             j += 1;
         }
-        // Run [i, j): emissions scaled by segment length (in beats).
         let emis: Vec<Vec<f32>> = (i..j)
             .map(|k| {
                 let w = ((segs[k].t1 - segs[k].t0) / g.period).clamp(0.5, 2.0);
@@ -424,8 +331,6 @@ pub fn estimate_full(ch: &Chroma, beats: Option<&Beats>, key: Option<(usize, boo
             })
             .collect();
         let path = viterbi(&emis, &g.cost[i..j]);
-        // Per-segment confidence: posterior of the chosen state under a
-        // softmax of the (unscaled-by-length) emissions, times the fit.
         let conf: Vec<f32> = path
             .iter()
             .enumerate()
@@ -452,7 +357,6 @@ pub fn estimate_full(ch: &Chroma, beats: Option<&Beats>, key: Option<(usize, boo
                 eprintln!("chord debug: {:7.2}-{:7.2} {}{} conf {:.2} ton {:.2} bass [{}] | {}", segs[k].t0, segs[k].t1, NOTE[r as usize], q.as_str(), conf[o], segs[k].tonality, bass.join(" "), tops.join(", "));
             }
         }
-        // Merge equal neighbours (by label: sus4 and sus2 are both "sus").
         let mut a = 0;
         while a < path.len() {
             let mut b = a + 1;
@@ -471,7 +375,6 @@ pub fn estimate_full(ch: &Chroma, beats: Option<&Beats>, key: Option<(usize, boo
     ChordEstimate { spans, bass_share }
 }
 
-/// Note names for diagnostics (sharps).
 pub const NOTE: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 #[cfg(test)]
@@ -479,7 +382,6 @@ mod tests {
     use super::*;
 
     fn chroma_of(segments: &[(&[usize], usize, f32)], fps: f32) -> Chroma {
-        // (pitch classes, lowest pitch class, seconds)
         let mut treble = Vec::new();
         let mut low = Vec::new();
         for &(pcs, bass, secs) in segments {
@@ -505,7 +407,6 @@ mod tests {
 
     #[test]
     fn templates_and_bass_pick_the_root() {
-        // Fm9 (F Ab C Eb G) over F, Ebmaj9 (Eb G Bb D F) over Eb, C E G over C, A C E over A.
         let ch = chroma_of(&[(&[5, 8, 0, 3, 7], 5, 2.0), (&[3, 7, 10, 2, 5], 3, 2.0), (&[0, 4, 7], 0, 2.0), (&[9, 0, 4], 9, 2.0)], 10.0);
         let spans = estimate(&ch, None, None, 8.0);
         let labels: Vec<String> = spans.iter().map(label).collect();
@@ -515,7 +416,6 @@ mod tests {
 
     #[test]
     fn viterbi_ignores_one_off_flicker() {
-        // C major for 4 s with one 0.5 s step where an extra B makes Cmaj7 / Em fit.
         let ch = chroma_of(&[(&[0, 4, 7], 0, 2.0), (&[4, 7, 11], 0, 0.5), (&[0, 4, 7], 0, 1.5)], 10.0);
         let spans = estimate(&ch, None, None, 4.0);
         assert_eq!(spans.len(), 1, "{spans:?}");
@@ -528,7 +428,6 @@ mod tests {
         let g = grid(Some(&b), 6.0);
         assert_eq!(g.bounds[0], 0.0);
         assert_eq!(*g.bounds.last().unwrap(), 6.0);
-        // 0, 0.5, 1.0 ... (gap 2.5 → 4.0 filled with 3.0, 3.5), tail to 5.5
         let want = [0.0f32, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0];
         assert_eq!(g.bounds.len(), want.len(), "{:?}", g.bounds);
         for (a, b) in g.bounds.iter().zip(want) {

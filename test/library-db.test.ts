@@ -1,8 +1,3 @@
-// Reference library database (electron/library/db.ts) on a temp dir:
-// schema + migrations (fresh, idempotent reopen, refusing a newer schema),
-// WAL, record dedupe, status transitions with the gen guard, queries
-// (text / bpm / key incl. enharmonics and mode / status / sort / paging),
-// originality hash lookups, cascading deletes and the profile cache rows.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -105,12 +100,10 @@ test('records: per-collection dedupe (case-insensitive paths), counts, row mappi
 test('status: gen guard, requeue, missing → restore, failures, retry', () => {
   const db = fresh();
   seed(db);
-  // A job that started before a requeue can't write its result.
   db.requeue('trap-3', { size: 999, mtime: 2 });
   assert.equal(db.saveLight('trap-3', 0, summary(), '{}', [], 1, 60), false, 'stale gen');
   const gen = db.track('trap-3')!.gen;
   assert.equal(db.saveLight('trap-3', gen, summary(), JSON.stringify({ analysis: {} }), [0], 1, 60), true);
-  // Requeue drops features + hashes.
   assert.equal(db.saveDeep('trap-3', gen, JSON.stringify({ analysis: {} }), [0], 1, [{ hash: 42, stem: 'vocals', pos: 0 }], 1, 70), true);
   assert.equal(db.track('trap-3')!.status, 'deep');
   assert.equal(db.hashCount('trap-3'), 1);
@@ -118,12 +111,10 @@ test('status: gen guard, requeue, missing → restore, failures, retry', () => {
   assert.equal(db.track('trap-3')!.status, 'pending');
   assert.equal(db.featuresJson('trap-3'), null);
   assert.equal(db.hashCount('trap-3'), 0);
-  // missing remembers what it was.
   db.markMissing('trap-0');
   assert.equal(db.track('trap-0')!.status, 'missing');
   db.restore('trap-0');
   assert.equal(db.track('trap-0')!.status, 'light');
-  // failures + retry
   assert.equal(db.markFailed('trap-3', db.track('trap-3')!.gen, 'Unsupported or corrupt audio file'), true);
   assert.equal(db.track('trap-3')!.status, 'failed');
   assert.equal(db.track('trap-3')!.error, 'Unsupported or corrupt audio file');

@@ -1,4 +1,3 @@
-// Channel Rack step tools: notes.fillSteps, notes.shiftSteps, channel filter groups.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -91,8 +90,8 @@ test('fill args are validated', () => {
 
 test('shift steps right / left wraps around the pattern', () => {
   const { host, pat, kick } = fresh();
-  exec(host, 'notes.fillSteps', { patternId: pat, channelId: kick, every: 4 }); // 0 4 8 12
-  exec(host, 'notes.add', { patternId: pat, channelId: kick, notes: [{ tick: 15 * TICKS_PER_STEP, key: 60 }] }); // + 15
+  exec(host, 'notes.fillSteps', { patternId: pat, channelId: kick, every: 4 });
+  exec(host, 'notes.add', { patternId: pat, channelId: kick, notes: [{ tick: 15 * TICKS_PER_STEP, key: 60 }] });
   let r = exec<{ moved: number }>(host, 'notes.shiftSteps', { patternId: pat, channelId: kick, steps: 1 });
   assert.equal(r.ok, true, r.message);
   assert.equal(r.data!.moved, 5);
@@ -100,14 +99,13 @@ test('shift steps right / left wraps around the pattern', () => {
   r = exec(host, 'notes.shiftSteps', { patternId: pat, channelId: kick, steps: -2 });
   assert.equal(r.ok, true);
   assert.deepEqual(steps(notesOf(host, pat, kick)), [3, 7, 11, 14, 15], '0 and 1 wrap past 0 to 14 / 15');
-  // a full-length rotation is the identity
   exec(host, 'notes.shiftSteps', { patternId: pat, channelId: kick, steps: 16 });
   assert.deepEqual(steps(notesOf(host, pat, kick)), [3, 7, 11, 14, 15]);
 });
 
 test('shift steps honours an explicit length, and wrap=false drops what falls out', () => {
   const { host, pat, hat } = fresh();
-  exec(host, 'notes.fillSteps', { patternId: pat, channelId: hat, every: 2, steps: 8 }); // 0 2 4 6
+  exec(host, 'notes.fillSteps', { patternId: pat, channelId: hat, every: 2, steps: 8 });
   exec(host, 'notes.shiftSteps', { patternId: pat, channelId: hat, steps: 3, length: 8 * TICKS_PER_STEP });
   assert.deepEqual(steps(notesOf(host, pat, hat)), [1, 3, 5, 7]);
   const r = exec<{ moved: number; removed: number }>(host, 'notes.shiftSteps', { patternId: pat, channelId: hat, steps: -2, wrap: false });

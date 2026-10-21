@@ -1,15 +1,3 @@
-//! krypt.squash — three-band upward + downward "squash" compressor.
-//!
-//! An LR4 crossover tree splits the signal into low / mid / high bands
-//! (they sum back to an allpass, so Depth 0 is magnitude-transparent).
-//! Each band has a stereo-linked peak follower and a static curve in dB:
-//! above −24 dBFS it compresses downward at 10:1, below −36 dBFS it lifts
-//! the band upward at 4:1 (at most +30 dB, faded out under −90 dBFS so
-//! silence and noise floors are not pumped up). Upward and Downward scale
-//! the two halves of the curve, Time scales every band's attack/release
-//! (×0.25 … ×4), and Depth blends the processed bands with the unprocessed
-//! band sum (parallel compression, phase-coherent). Zero latency.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::crossover::Split3;
 use crate::blocks::dynamics::Follower;
@@ -54,14 +42,11 @@ const UP_T: f32 = -36.0;
 const UP_R: f32 = 4.0;
 const UP_MAX: f32 = 30.0;
 const KNEE: f32 = 6.0;
-/// Base attack / release per band (ms) at Time 50%.
 const ATT_MS: [f32; 3] = [12.0, 5.0, 2.0];
 const REL_MS: [f32; 3] = [140.0, 90.0, 60.0];
 
-/// Gain change (dB) for a band level `x` dB.
 #[inline]
 pub(crate) fn ott_curve(x: f32, up: f32, down: f32) -> f32 {
-    // soft-kneed downward branch
     let over = x - DOWN_T;
     let d = if over <= -KNEE * 0.5 {
         0.0
@@ -71,7 +56,6 @@ pub(crate) fn ott_curve(x: f32, up: f32, down: f32) -> f32 {
     } else {
         (1.0 / DOWN_R - 1.0) * over
     };
-    // upward branch, faded out near silence
     let under = UP_T - x;
     let mut u = if under > 0.0 { (under * (1.0 - 1.0 / UP_R)).min(UP_MAX) } else { 0.0 };
     u *= ((x + 90.0) / 10.0).clamp(0.0, 1.0);
@@ -90,7 +74,6 @@ pub struct Squash {
     in_gain: Smooth,
     out_gain: Smooth,
     band_gain: [Smooth; 3],
-    /// gain-reduction meter: overall dB the bands were turned down in the last block (>= 0)
     gr_db: f32,
 }
 
@@ -190,7 +173,6 @@ impl Effect for Squash {
                 let xdb = if env > 1e-9 { 20.0 * env.log10() } else { -180.0 };
                 let g = db_to_gain(ott_curve(xdb, self.up, self.down));
                 let bg = self.band_gain[b].next();
-                // parallel blend per band: dry band + depth·(processed − dry)
                 let k = (1.0 + depth * (g - 1.0)) * bg;
                 out[0] += bands[0][b] * k;
                 out[1] += bands[1][b] * k;
@@ -202,7 +184,6 @@ impl Effect for Squash {
             buf[0][i] = out[0] * go;
             buf[1][i] = out[1] * go;
         }
-        // overall reduction (energy of the bands as set vs. as squashed); upward lift reads 0
         self.gr_db = if e_dry > 1e-12 && e_wet > 1e-20 && e_dry > e_wet { (10.0 * (e_dry / e_wet).log10()).min(60.0) } else { 0.0 };
         sanitize_block(&mut buf, n);
     }

@@ -1,18 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// EngineSupervisor: owns the krypt-studio-engine.exe sidecar.
-//
-//   spawn (absolute path, --parent-pid, --factory-dir, windowsHide)
-//     → hello → openDevice (settings) → loadProject (bridge) → running
-//   NDJSON over stdio: requests carry ids + timeouts; lines without an id
-//   are events (log / device / renderProgress / applied / xrun).
-//   Heartbeat: ping every 1 s; 3 misses (or any exit) → restart with
-//   exponential backoff; 5 crashes inside a minute → 'failed' until the
-//   user clicks Restart engine.
-//
-// Implements the EngineClient contract (electron/engine/types.ts). Every
-// call resolves to an ActionResult and never throws.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import readline from 'node:readline';
 import type { ActionResult, EngineStatus } from '@shared/types';
@@ -31,24 +16,14 @@ import type { EngineClient } from './types';
 import { killSidecar, spawnSidecar } from '../system/sidecar';
 
 export interface SupervisorOptions {
-  /** Absolute exe to launch (dev: a shadow copy), or null if not built. */
   resolveExe(): string | null;
-  /** Shown as the 'failed' message when the exe is missing. */
   missingMessage: string;
   factoryDir: string;
-  /**
-   * userData/packs, passed as --packs-dir ('pack:<id>/…' samples). An engine build older than that flag rejects it
-   * at start-up; the supervisor then runs that build without it (main still resolves pack paths before they reach
-   * the engine) and tries the flag again with the next build.
-   */
   packsDir?: string;
   audioSettings(): { deviceId: string | null; bufferFrames: number; sampleRate: number };
-  /** Send the current project (loadProject). Called on every (re)start. */
   loadProject(): Promise<ActionResult>;
-  /** Push document changes still queued for the engine and wait for the ack: renders read the engine's model. */
   syncDoc?(): Promise<void>;
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
-  /** Test hook: replaces the real sidecar spawner. */
   spawn?: (exe: string, args: string[]) => ChildProcessWithoutNullStreams;
 }
 
@@ -65,7 +40,6 @@ const MAX_MISSES = 3;
 const CRASH_WINDOW_MS = 60_000;
 const MAX_CRASHES = 5;
 
-/** Requests that legitimately keep the control loop busy (don't count missed pings meanwhile). */
 const NO_HEARTBEAT_SUSPEND = new Set(['ping', 'render', 'cancelRender', 'audition', 'auditionOff', 'transport', 'locate']);
 
 export class EngineSupervisor implements EngineClient {
@@ -84,9 +58,7 @@ export class EngineSupervisor implements EngineClient {
   private playing = false;
   private generation = 0;
   private missingPoll: NodeJS.Timeout | null = null;
-  /** The exe of the current process, and whether it got --packs-dir. */
   private launched: { exe: string; packsArg: boolean } | null = null;
-  /** An engine exe that rejected --packs-dir (an older build): started without it. */
   private noPacksArgExe: string | null = null;
 
   private _status: EngineStatus = { state: 'stopped', device: null, engineVersion: null, restarts: 0 };
@@ -95,8 +67,6 @@ export class EngineSupervisor implements EngineClient {
   private playingListeners = new Set<(playing: boolean) => void>();
 
   constructor(private readonly opts: SupervisorOptions) {}
-
-  // ── Status / events ────────────────────────────────────────────────
 
   status(): EngineStatus {
     return this._status;
@@ -121,14 +91,12 @@ export class EngineSupervisor implements EngineClient {
     return this.playing;
   }
 
-  /** True once hello succeeded on the current process. */
   isAlive(): boolean {
     return !!this.child && this.telemetry !== null;
   }
 
   private setStatus(patch: Partial<EngineStatus>): void {
     const next: EngineStatus = { ...this._status, ...patch };
-    // A patch only touches `message` when it names it; `message: undefined` clears it.
     if ('message' in patch && patch.message === undefined) delete next.message;
     if (JSON.stringify(next) === JSON.stringify(this._status)) return;
     this._status = next;
@@ -136,7 +104,6 @@ export class EngineSupervisor implements EngineClient {
       try {
         fn(next);
       } catch {
-        /* ignore */
       }
     }
   }
@@ -148,7 +115,6 @@ export class EngineSupervisor implements EngineClient {
       try {
         fn(p);
       } catch {
-        /* ignore */
       }
     }
   }
@@ -158,7 +124,6 @@ export class EngineSupervisor implements EngineClient {
       try {
         fn(e);
       } catch {
-        /* ignore */
       }
     }
   }
@@ -167,8 +132,6 @@ export class EngineSupervisor implements EngineClient {
     if (!this.child || !this.telemetry) return null;
     return `ws://127.0.0.1:${this.telemetry.port}/?token=${encodeURIComponent(this.telemetry.token)}`;
   }
-
-  // ── Lifecycle ──────────────────────────────────────────────────────
 
   start(): void {
     if (this.child) return;
@@ -210,13 +173,11 @@ export class EngineSupervisor implements EngineClient {
     child.stdin.on('error', (e) => this.opts.log('debug', `[engine] stdin: ${e.message}`));
     child.on('error', (e) => {
       this.opts.log('error', `[engine] process error: ${e.message}`);
-      // 'error' without 'exit' happens when spawn itself fails.
       if (child.pid === undefined) this.onExit(gen, null, null);
     });
     child.on('exit', (code, signal) => this.onExit(gen, code, signal));
     readline.createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (l) => this.onLine(l));
     readline.createInterface({ input: child.stderr, crlfDelay: Infinity }).on('line', (l) => {
-      // An engine build from before --packs-dir refuses it (and exits): remember that exe (see onExit).
       if (packsArg && l.includes("Unknown argument '--packs-dir'")) this.noPacksArgExe = exe;
       this.stderrTail.push(l);
       if (this.stderrTail.length > 20) this.stderrTail.shift();
@@ -235,7 +196,7 @@ export class EngineSupervisor implements EngineClient {
       return;
     }
     if (hello.data.protocol !== PROTOCOL_VERSION) {
-      this.stopping = true; // don't crash-loop on a version mismatch
+      this.stopping = true;
       this.kill();
       this.setStatus({
         state: 'failed',
@@ -311,7 +272,6 @@ export class EngineSupervisor implements EngineClient {
       this.setStatus({ state: 'stopped', message: undefined });
       return;
     }
-    // An engine build from before --packs-dir: run it without the flag (not a crash).
     const launched = this.launched;
     if (launched?.packsArg && this.noPacksArgExe === launched.exe) {
       this.opts.log('warn', 'This audio engine build predates sound packs (--packs-dir); starting it without that option. Rebuild the engine for pack instruments in offline renders.');
@@ -342,7 +302,6 @@ export class EngineSupervisor implements EngineClient {
     }, delay);
   }
 
-  /** Graceful stop; resolves once the process has exited. */
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.restartTimer) clearTimeout(this.restartTimer);
@@ -358,9 +317,8 @@ export class EngineSupervisor implements EngineClient {
     const exited = new Promise<void>((r) => child.once('exit', () => r()));
     await this.request({ cmd: 'shutdown' }, 800);
     try {
-      child.stdin.end(); // EOF also makes the engine exit
+      child.stdin.end();
     } catch {
-      /* ignore */
     }
     const killTimer = setTimeout(() => killSidecar(child), 1500);
     await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 2500))]);
@@ -378,7 +336,6 @@ export class EngineSupervisor implements EngineClient {
     return { ok: false, message: s.message ?? `Audio engine is ${s.state}` };
   }
 
-  /** In dev, start automatically once the exe appears (after engine:build). */
   watchForBinary(intervalMs = 2000): void {
     if (this.missingPoll) return;
     this.missingPoll = setInterval(() => {
@@ -412,8 +369,6 @@ export class EngineSupervisor implements EngineClient {
       });
     });
   }
-
-  // ── Requests ───────────────────────────────────────────────────────
 
   request<T = unknown>(req: EngineRequest, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<ActionResult<T>> {
     const child = this.child;
@@ -457,7 +412,7 @@ export class EngineSupervisor implements EngineClient {
     }
     if (typeof msg.id === 'number') {
       const p = this.pending.get(msg.id);
-      if (!p) return; // timed out earlier
+      if (!p) return;
       if (p.timer) clearTimeout(p.timer);
       p.resolve(
         msg.ok
@@ -486,9 +441,6 @@ export class EngineSupervisor implements EngineClient {
     this.emitEvent(e);
   }
 
-  // ── Convenience wrappers (EngineClient) ────────────────────────────
-
-  /** Open an output device and reflect it in the status. */
   async openDevice(o: { deviceId?: string | null; bufferFrames?: number; sampleRate?: number }): Promise<ActionResult<DeviceStatus>> {
     const r = await this.request<DeviceStatus>({ cmd: 'openDevice', ...o }, 15_000);
     if (r.ok && r.data) this.setStatus({ device: r.data, message: r.data.open ? undefined : r.data.message ?? 'No audio output device is open.' });
@@ -497,7 +449,6 @@ export class EngineSupervisor implements EngineClient {
 
   private renders = 0;
 
-  /** A render (export, agent preview) is running: the project tabs refuse a switch meanwhile. */
   isRendering(): boolean {
     return this.renders > 0;
   }
@@ -505,8 +456,6 @@ export class EngineSupervisor implements EngineClient {
   async render(job: RenderRequest): Promise<ActionResult<RenderResult>> {
     this.renders++;
     try {
-      // An edit made just before (an agent's write_pattern → render_preview) may
-      // still sit in the bridge's coalescing window; render what the user sees.
       await this.opts.syncDoc?.();
       return await this.request<RenderResult>({ cmd: 'render', job }, 0);
     } finally {

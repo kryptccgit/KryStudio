@@ -1,30 +1,3 @@
-//! krypt.vocoder — channel (filterbank) vocoder.
-//!
-//! The voice (modulator) and the carrier each run through 8–40 log-spaced
-//! 4th-order band passes (two cascaded TPT SVF band-pass sections,
-//! 0 dB at the centre). An envelope follower on every voice band sets
-//! the gain of the matching carrier band. Carrier bands are normalized by
-//! the carrier's average band level (so the output follows the voice's
-//! level whatever the carrier's), and "Carrier flatten" additionally
-//! divides each band by its own slow envelope (spectral whitening, at most
-//! +40 dB over the average), so dull or bright carriers still take on the
-//! voice's spectrum. The carrier envelopes release slowly (300 ms), so a
-//! carrier's own note endings still come through. Formant shift moves the
-//! carrier bank against the voice bank. Sibilance passes the voice's
-//! content above the top band straight through for consonants.
-//!
-//! Wave 12.2 additions (all default to the old sound): up to 40 bands, an
-//! internal saw + noise carrier, an unvoiced detector (when the voice's
-//! energy sits mostly above 3 kHz — s, f, sh, t — the carrier crossfades to
-//! noise so consonants stay intelligible over any carrier), and a release
-//! tilt (longer release on the low bands for smooth vowels, shorter on the
-//! high bands for crisp consonants, or the reverse).
-//!
-//! Routing: by default the slot's input is the carrier (put it on a synth)
-//! and the sidechain is the voice. Either can be swapped, and the carrier
-//! can be an internal saw pair or noise. With no sidechain routed, the
-//! input is the voice and the internal carrier plays.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::filters::{Svf, SvfMode};
 use crate::blocks::osc::{blep_wave, Shape};
@@ -46,7 +19,6 @@ param_table! {
     Attack => logp("attack", "Attack", 0.5, 100.0, 4.0, "ms", "Envelope"),
     Release => logp("release", "Release", 5.0, 500.0, 60.0, "ms", "Envelope"),
     Output => lin("output", "Output", -24.0, 24.0, 0.0, "dB", "Output"),
-    // wave 12.2 (appended; the defaults keep the old sound)
     Unvoiced => lin("unvoiced", "Unvoiced", 0.0, 1.0, 0.0, "%", "Vocoder"),
     CarrierNoise => lin("carrierNoise", "Noise (saw + noise)", 0.0, 1.0, 0.3, "%", "Routing"),
     ReleaseTilt => lin("releaseTilt", "Release tilt", -1.0, 1.0, 0.0, "", "Envelope"),
@@ -72,12 +44,8 @@ pub fn descriptor() -> PluginDescriptor {
 
 const MAX_BANDS: usize = 40;
 const CTRL: usize = 16;
-/// Whitening never lifts a band more than 1/FLOOR over the average band.
 const FLOOR: f32 = 0.01;
 const MAX_GAIN: f32 = 1e4;
-/// Output calibration: a white-noise voice over a saw carrier comes out
-/// about 6 dB under the voice's level (sparser, speech-like voices come
-/// out close to their own level).
 const TRIM: f32 = 2.0;
 
 #[derive(Clone, Copy, Default)]
@@ -185,7 +153,6 @@ impl Vocoder {
         let hi = (p.get(P::HighFreq as usize) as f64).min(fs * 0.42).max(lo * 2.0);
         let nb = self.bands;
         let ratio = (hi / lo).powf(1.0 / (nb - 1) as f64);
-        // octave bandwidth per section: wider than the spacing so the bank overlaps
         let bw = ratio.log2() * (0.7 + 1.3 * p.get(P::Width as usize) as f64);
         let q = (2f64.powf(bw)).sqrt() / (2f64.powf(bw) - 1.0);
         let shift = 2f64.powf(p.get(P::Formant as usize) as f64 / 12.0);
@@ -204,7 +171,6 @@ impl Vocoder {
         let rel_ms = p.get(P::Release as usize);
         let tilt = p.get(P::ReleaseTilt as usize);
         for b in 0..MAX_BANDS {
-            // tilt 0 → exactly the old single release; ±1 → ×/÷ 4 between the bottom and the top band
             let pos = b.min(nb - 1) as f32 / (nb - 1) as f32 * 2.0 - 1.0;
             let k = if tilt == 0.0 { 1.0 } else { (-2.0 * tilt * pos).exp2() };
             self.rel[b] = tc_coef(rel_ms * k, self.sr);
@@ -224,9 +190,6 @@ impl Vocoder {
         self.out.reset(self.out.target);
     }
 
-    /// Control-rate band gains from the envelopes:
-    /// g = m · avg^(f−1) / max(c, FLOOR·avg)^f — at f = 0 every carrier band
-    /// is scaled by the average band level, at f = 1 by its own level.
     fn refresh_gains(&mut self) {
         let f = self.flatten;
         let nb = self.bands;
@@ -272,7 +235,6 @@ impl Effect for Vocoder {
             self.snap();
         }
         let sc = sidechain.filter(|s| s[0].len() >= n && s[1].len() >= n);
-        // resolve routing: 0 input, 1 sidechain, 2 saw, 3 noise
         let (voice_from_sc, carrier_src) = match sc {
             Some(_) => (self.voice_sc, self.carrier),
             None => {
@@ -323,8 +285,6 @@ impl Effect for Vocoder {
                     [0.35 * v * (1.0 - nz) + 0.5 * nz * self.rng.bipolar(); 2]
                 }
             };
-            // unvoiced detector: a mostly-HF voice crossfades the carrier to noise
-            // (the same noise on both sides, so a mono internal carrier stays mono)
             let car = if unvoiced > 0.0 {
                 let hf = self.uv_hp.tick(voice as f64) as f32;
                 self.uv_hf += (hf.abs() - self.uv_hf) * self.uv_coef;
@@ -347,7 +307,6 @@ impl Effect for Vocoder {
                 self.refresh_gains();
                 self.ctrl = CTRL;
             }
-            // linear interpolation of the control-rate gains
             let t = 1.0 - self.ctrl as f32 / CTRL as f32;
             self.ctrl -= 1;
             let mut y = [0.0f32; 2];
@@ -364,7 +323,6 @@ impl Effect for Vocoder {
                 let c1 = if mono_carrier { c0 } else { self.car_bp[1][b].tick(car[1] as f64) as f32 };
                 let ce = &mut self.car_env[b];
                 let cl = 0.5 * (c0.abs() + c1.abs());
-                // peak follower: instant attack, so |band| / envelope ≤ 1 (no onset spikes)
                 *ce = if cl > *ce { cl } else { *ce + (cl - *ce) * self.c_rel };
                 if *ce < 1e-9 {
                     *ce = 0.0;
@@ -410,7 +368,6 @@ mod tests {
         let mut r = Rng::new(seed);
         (0..n)
             .map(|i| {
-                // a voice-ish test signal: a pitched buzz with noise bursts (consonants)
                 let t = i as f32 / 48000.0;
                 let buzz = (std::f32::consts::TAU * f * t).sin() * 0.4 + (std::f32::consts::TAU * 3.1 * f * t).sin() * 0.15;
                 let burst = if (i / 6000) % 3 == 2 { r.bipolar() * 0.3 } else { 0.0 };
@@ -419,8 +376,6 @@ mod tests {
             .collect()
     }
 
-    /// Render the same input through the frozen pre-12.2 vocoder and the upgraded one
-    /// (old params set, new params left at their defaults) and return the max |difference|.
     fn diff(params: &[(usize, f32)], with_sc: bool) -> (f32, f32) {
         let mut old = vocoder_legacy::Vocoder::new(48000.0, 256);
         let mut new = Vocoder::new(48000.0, 256);
@@ -468,7 +423,6 @@ mod tests {
         for (k, (params, sc)) in configs.iter().enumerate() {
             let (d, peak) = diff(params, *sc);
             assert!(peak > 1e-3, "config {k} is silent");
-            // bit-identical in practice; the contract is -90 dB under the signal
             assert!(d <= peak * 3.2e-5, "config {k}: differs by {d} (peak {peak})");
             assert_eq!(d, 0.0, "config {k}: not bit-identical ({d})");
         }
@@ -501,7 +455,6 @@ mod tests {
 
     #[test]
     fn unvoiced_lifts_hissy_consonants_over_a_saw() {
-        // voice = high-passed noise ("sss"); carrier = internal saw. Unvoiced fills the top bands with noise.
         let level = |unvoiced: f32| {
             let mut v = Vocoder::new(48000.0, 256);
             v.set_param(P::Unvoiced as usize, unvoiced);

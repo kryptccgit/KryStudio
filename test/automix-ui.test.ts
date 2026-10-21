@@ -1,7 +1,3 @@
-// Auto Mix dialog logic (src/automix/logic.ts): the form reducer, form → AutoMixRequest / MasterFileRequest, the scope →
-// bar range, song length, the Auto preset guess, the effective target, intent chips, the tone-curve geometry, the
-// before / after rows, the honest A/B note, the history-entry state, progress stages, failure messages; plus the entry
-// points, the mock and the guide anchors being wired.
 import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -77,7 +73,6 @@ function repoRoot(): string {
     try {
       if (statSync(path.join(dir, 'package.json')).isFile()) return dir;
     } catch {
-      /* keep climbing */
     }
     dir = path.dirname(dir);
   }
@@ -299,8 +294,6 @@ test('progress stages, bar and failure messages', () => {
   assert.ok(isNoFileMessage('No file chosen'));
   assert.ok(!isNoFileMessage('The file is damaged'));
 });
-
-// ── Master a song: pick vs run, the reference guard, the working steps, the headline ──
 
 const songAt = (path: string): SongPick => ({ status: 'ready', path, summary: '3:24 · stereo · 44.1 kHz', error: null });
 

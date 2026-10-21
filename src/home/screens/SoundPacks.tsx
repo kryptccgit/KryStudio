@@ -1,9 +1,3 @@
-// Home ▸ Sounds ▸ Sound packs: one card per optional pack (real recorded
-// instruments from CC0 / public-domain libraries) with what it adds, its
-// download size and RAM, its licence and credit (shown BEFORE the download,
-// with a link), Download / Cancel / Update / Remove, progress and errors.
-// Nothing downloads until the user clicks; agents only read this state.
-
 import { useEffect, useRef } from 'react';
 import { AlertTriangle, AudioLines, Download, ExternalLink, FolderOpen, HardDriveDownload, MemoryStick, Package, RefreshCw, Scale, Trash2, X } from 'lucide-react';
 import type { PackEntryState } from '@shared/packs/types';
@@ -56,7 +50,6 @@ function PackCard({ e, busy, highlight, sounds }: { e: PackEntryState; busy?: 'i
   const progress = packProgress(e);
   const actions = packActions(e);
 
-  // "Download pack" from a preset: bring this card into view and flash its border.
   useEffect(() => {
     if (highlight === null) return;
     const t = setTimeout(() => ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60);
@@ -115,7 +108,6 @@ function PackCard({ e, busy, highlight, sounds }: { e: PackEntryState; busy?: 'i
         )}
       </div>
 
-      {/* Licence + credit, always visible (before the download too). */}
       <div className="mt-2.5 rounded-lg border border-white/[0.07] bg-black/25 px-2.5 py-2 text-[11px] leading-snug">
         <div className="flex items-center gap-1.5 text-white/85">
           <Scale className="h-3 w-3 flex-shrink-0 text-krypt-purple/80" aria-hidden="true" />

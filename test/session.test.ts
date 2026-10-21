@@ -1,7 +1,3 @@
-// Clip launcher (Session view) commands (shared/commands/session.ts): scenes,
-// launch clips, quantize, the arrangement bridges (fromArrangement,
-// scenesToSong, capture) and the deletion hooks in the track / pattern /
-// channel commands. DocHost runs strict (integrity after every exec).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -31,13 +27,11 @@ function fresh() {
     assert.equal(r.ok, false, `${cmd} should fail`);
     assert.match(r.message ?? '', re);
   };
-  /** A pattern with one note and an explicit length. */
   const pattern = (name: string, length: number): string => {
     const id = ex<{ id: string }>('patterns.add', { name, length, select: false }).id;
     ex('notes.add', { patternId: id, channelId: kick, notes: [{ tick: 0, key: 36 }] });
     return id;
   };
-  /** An audio clip channel with 4 s of audio (at 140 bpm: 8960 ticks → 3 bars rounded up). */
   const audio = (): { channelId: string; clipId: string } => {
     const r = ex<{ channelId: string; clipId: string }>('playlist.addAudio', { path: 'C:/loops/loop.wav', trackId: tracks[15], start: 0, frames: 4 * 48000, sampleRate: 48000 });
     ex('playlist.removeClips', { ids: [r.clipId] });
@@ -53,8 +47,6 @@ const onTrack = (host: DocHost, trackId: string): Clip[] =>
     .filter((c) => c.trackId === trackId)
     .sort((a, b) => a.start - b.start);
 const spans = (cs: Clip[]) => cs.map((c) => [c.start, c.length, c.offset]);
-
-// ── Scenes ────────────────────────────────────────────────────────────
 
 test('scenes: the session is created on first use; add / name / index / set / move / remove; one undo removes the new session', () => {
   const { host, ex, no } = fresh();
@@ -83,7 +75,6 @@ test('scenes: the session is created on first use; add / name / index / set / mo
   assert.deepEqual(host.project.session!.sceneOrder, [b, c]);
   assert.equal(host.project.session!.scenes[a], undefined);
   ok(host);
-  // undo everything: the session itself disappears with the first scene's undo
   for (let i = 0; i < 9; i++) host.undo(USER);
   assert.equal(host.project.session, undefined);
 });
@@ -94,8 +85,6 @@ test(`scenes: at most ${MAX_SCENES}`, () => {
   assert.equal(host.execBatch(steps, { actor: USER }).ok, true);
   no('session.addScene', {}, new RegExp(`at most ${MAX_SCENES}`));
 });
-
-// ── Launch clips ──────────────────────────────────────────────────────
 
 test('setClip: pattern defaults, replace keeps the id, one clip per slot; removing a scene removes its row', () => {
   const { host, pat, tracks, ex, pattern } = fresh();
@@ -191,11 +180,9 @@ test('removeClip ({id} / {ids}) and moveClip (move, copy, replacing the occupant
   const other = pattern('Other', BAR);
   const a = ex<{ id: string }>('session.setClip', { trackId: tracks[0], sceneId: s1, patternId: pat, follow: { action: 'next', afterBars: 1 } }).id;
   const b = ex<{ id: string }>('session.setClip', { trackId: tracks[1], sceneId: s2, patternId: other }).id;
-  // move a → (t1, s2) replaces b
   assert.equal(ex<{ id: string }>('session.moveClip', { id: a, trackId: tracks[1], sceneId: s2 }).id, a);
   assert.equal(host.project.session!.clips[b], undefined);
   assert.deepEqual([host.project.session!.clips[a].trackId, host.project.session!.clips[a].sceneId], [tracks[1], s2]);
-  // copy back to (t0, s1): a new id with its own follow rule
   const cp = ex<{ id: string }>('session.moveClip', { id: a, trackId: tracks[0], sceneId: s1, copy: true }).id;
   assert.notEqual(cp, a);
   const copy = host.project.session!.clips[cp];
@@ -203,7 +190,6 @@ test('removeClip ({id} / {ids}) and moveClip (move, copy, replacing the occupant
   assert.deepEqual(copy.follow, host.project.session!.clips[a].follow);
   ex('session.updateClip', { id: cp, follow: { action: 'stop', afterBars: 2 } });
   assert.equal(host.project.session!.clips[a].follow!.action, 'next', 'the copy does not share the follow rule');
-  // same slot: a move is a no-op, a copy is refused
   const before = host.version;
   ex('session.moveClip', { id: a, trackId: tracks[1], sceneId: s2 });
   assert.equal(host.version, before);
@@ -222,8 +208,6 @@ test('setQuantize creates the session and validates the value', () => {
   no('session.setQuantize', { quantize: '3bars' }, /quantize/);
 });
 
-// ── Capture (launch recording → playlist) ─────────────────────────────
-
 test('capture: a span inside an existing clip splits it; edges trim; covered clips go; automation stays; one undo step', () => {
   const { host, pat, tracks, ex, pattern } = fresh();
   const t = tracks[0];
@@ -240,7 +224,7 @@ test('capture: a span inside an existing clip splits it; edges trim; covered cli
   const cs = onTrack(host, t).filter((c) => c.kind === 'pattern');
   assert.deepEqual(spans(cs), [
     [0, BAR * 2, 0],
-    [BAR * 2, BAR * 2, BAR], // natural loop of the 2-bar pattern: offset = 3 bars mod 2 bars
+    [BAR * 2, BAR * 2, BAR],
     [BAR * 4, BAR * 4, BAR * 4],
   ]);
   assert.equal(cs[0].id, big);
@@ -274,16 +258,13 @@ test('capture: spans over several clips (left trim, right cut with offset, remov
 test('capture: loop offsets — a loop that is not whole pattern lengths is tiled pass by pass; one-shots play once', () => {
   const { host, pat, tracks, ex } = fresh();
   const s1 = ex<{ id: string }>('session.addScene', {}).id;
-  // 1-beat loop starting 240 ticks into a 1-bar pattern
   const lc = ex<{ id: string }>('session.setClip', { trackId: tracks[0], sceneId: s1, patternId: pat, offset: 240, length: 960 }).id;
-  // recorded mid-loop: 480 ticks into the source = 240 into the loop
   ex('session.capture', { entries: [{ trackId: tracks[0], clipId: lc, startTick: 0, endTick: 2400, offset: 480 }] });
   assert.deepEqual(spans(onTrack(host, tracks[0])), [
     [0, 720, 480],
     [720, 960, 240],
     [1680, 720, 240],
   ]);
-  // a one-shot: plays from its position to the end of its length, never wraps
   const once = ex<{ id: string }>('session.setClip', { trackId: tracks[1], sceneId: s1, patternId: pat, length: 1920, loop: false }).id;
   ex('session.capture', { entries: [{ trackId: tracks[1], clipId: once, startTick: BAR, endTick: BAR * 3, offset: 0 }] });
   assert.deepEqual(spans(onTrack(host, tracks[1])), [[BAR, 1920, 0]]);
@@ -319,7 +300,6 @@ test('capture: audio launch clips tile with the channel, gain and zero fades; de
     assert.equal(c.fadeOut, 0);
   }
   ok(host);
-  // nothing usable → no change at all
   const v = host.version;
   ex('session.capture', { entries: [{ trackId: tracks[3], clipId: 'lc_deleted', startTick: 0, endTick: BAR, offset: 0 }] });
   assert.equal(host.version, v);
@@ -344,8 +324,6 @@ test('capture: an audio clip crossing the span keeps its fades on the outer edge
   ok(host);
 });
 
-// ── fromArrangement ───────────────────────────────────────────────────
-
 test('fromArrangement with markers: one scene per section named after the marker; covering clips become slots (length capped, offset kept)', () => {
   const { host, pat, tracks, ex, no, pattern, audio } = fresh();
   no('session.fromArrangement', {}, /no pattern or audio clips/);
@@ -355,7 +333,7 @@ test('fromArrangement with markers: one scene per section named after the marker
   const { channelId } = audio();
   ex('playlist.addClip', { kind: 'audio', trackId: tracks[2], start: BAR * 8, length: BAR * 2, channelId, offset: 480 });
   ex('playlist.addClip', { kind: 'pattern', trackId: tracks[3], start: 0, length: BAR * 12, patternId: pat });
-  ex('playlist.updateClips', { updates: [{ id: onTrack(host, tracks[3])[0].id, mute: true }] }); // muted clips are ignored
+  ex('playlist.updateClips', { updates: [{ id: onTrack(host, tracks[3])[0].id, mute: true }] });
   ex('playlist.addMarker', { tick: BAR * 2, name: 'Intro' });
   ex('playlist.addMarker', { tick: BAR * 8, name: 'Drop' });
   const r = ex<{ sceneIds: string[]; clips: number }>('session.fromArrangement', {});
@@ -364,10 +342,8 @@ test('fromArrangement with markers: one scene per section named after the marker
   assert.equal(r.clips, 3);
   const at = (trackId: string, sceneId: string) => Object.values(s.clips).find((c) => c.trackId === trackId && c.sceneId === sceneId);
   const [intro, drop] = r.sceneIds;
-  // Intro [2, 8): T1's clip starts at 2 → whole section; offset 240 kept
   assert.deepEqual([at(tracks[0], intro)!.patternId, at(tracks[0], intro)!.length, at(tracks[0], intro)!.offset], [pat, BAR * 6, 240]);
   assert.equal(at(tracks[1], intro), undefined, 'T2 starts after the section start');
-  // Drop [8, 12): T1 ended at 8; T2 covers it 4 bars in; the audio clip is capped at its end (2 bars)
   assert.equal(at(tracks[0], drop), undefined);
   assert.deepEqual([at(tracks[1], drop)!.length, at(tracks[1], drop)!.offset], [BAR * 4, BAR * 4]);
   const au = at(tracks[2], drop)!;
@@ -385,7 +361,6 @@ test('fromArrangement: a "Start" scene before the first marker; without markers 
   let r = ex<{ sceneIds: string[]; clips: number }>('session.fromArrangement', {});
   let s = host.project.session!;
   assert.deepEqual(r.sceneIds.map((id) => s.scenes[id].name), ['Start', 'Verse']);
-  // pattern offsets wrap at the pattern length (1 bar): 4 bars in → 0
   const verse = Object.values(s.clips).find((c) => c.sceneId === r.sceneIds[1])!;
   assert.deepEqual([verse.offset, verse.length], [0, BAR * 6]);
   host.undo(USER);
@@ -394,7 +369,6 @@ test('fromArrangement: a "Start" scene before the first marker; without markers 
   s = host.project.session!;
   assert.deepEqual(r.sceneIds.map((id) => s.scenes[id].name), ['Bars 1-4', 'Bars 5-8', 'Bars 9-12']);
   assert.deepEqual(Object.values(s.clips).map((c) => c.length).sort((a, b) => a - b), [BAR * 2, BAR * 4, BAR * 4], 'the last section is capped at the clip end');
-  // appended after existing scenes
   ex('session.addScene', { name: 'Mine' });
   r = ex<{ sceneIds: string[]; clips: number }>('session.fromArrangement', { barsPerScene: 8 });
   assert.equal(host.project.session!.sceneOrder.length, 6);
@@ -402,15 +376,13 @@ test('fromArrangement: a "Start" scene before the first marker; without markers 
   ok(host);
 });
 
-// ── scenesToSong ──────────────────────────────────────────────────────
-
 test('scenesToSong: scenes in order for N bars each; loops fill, one-shots play once; one undo step', () => {
   const { host, pat, tracks, ex, no, pattern } = fresh();
   const s1 = ex<{ id: string }>('session.addScene', { name: 'A' }).id;
   const s2 = ex<{ id: string }>('session.addScene', { name: 'B' }).id;
   const two = pattern('Two', BAR * 2);
   ex('session.setClip', { trackId: tracks[0], sceneId: s1, patternId: pat });
-  ex('session.setClip', { trackId: tracks[1], sceneId: s1, patternId: two, length: BAR * 3 }); // not whole pattern lengths → tiled
+  ex('session.setClip', { trackId: tracks[1], sceneId: s1, patternId: two, length: BAR * 3 });
   ex('session.setClip', { trackId: tracks[0], sceneId: s2, patternId: two, loop: false });
   const r = ex<{ clips: number; start: number; end: number }>('session.scenesToSong', { order: [{ sceneId: s1, bars: 4 }, { sceneId: s2, bars: 4 }, { sceneId: s1, bars: 2 }] });
   assert.deepEqual([r.start, r.end], [0, BAR * 10]);
@@ -426,7 +398,6 @@ test('scenesToSong: scenes in order for N bars each; loops fill, one-shots play 
   ]);
   assert.equal(r.clips, 6);
   ok(host);
-  // default start: after the arrangement (rounded up to a bar)
   const r2 = ex<{ clips: number; start: number; end: number }>('session.scenesToSong', { order: [{ sceneId: s2, bars: 1 }] });
   assert.equal(r2.start, BAR * 10);
   host.undo(USER);
@@ -450,8 +421,6 @@ test('scenesToSong at an explicit tick clears the launcher tracks there but leav
   assert.deepEqual(spans(onTrack(host, tracks[5])), [[0, BAR * 8, 0]]);
   ok(host);
 });
-
-// ── Deletion hooks ────────────────────────────────────────────────────
 
 test('deleting a track, a pattern or an audio channel removes the launch clips that use it (integrity stays clean, undo restores)', () => {
   const { host, pat, tracks, ex, pattern, audio } = fresh();

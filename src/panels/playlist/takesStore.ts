@@ -1,5 +1,3 @@
-// Which tracks show their take lanes (view state: not undoable, not in the document).
-
 import { create } from 'zustand';
 
 export interface TakeLanesView {

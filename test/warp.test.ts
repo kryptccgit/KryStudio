@@ -1,8 +1,3 @@
-// Warp (Wave 12.2, research/16 §2.2): the audio.*Warp* commands keep the
-// markers valid (isValidWarp after every command) and undo cleanly;
-// planAutoWarp's grid maths; auto-warp in main with a fake analyzer (beat
-// grid, tempo-only fallback, no beat, stems on their source mix); the
-// warp_clip MCP tool through callTool (one undo group, "No change").
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test, run } from './harness';
@@ -42,8 +37,6 @@ function rig(opts: { frames?: number; name?: string } = {}) {
   };
   return { doc, ch, clipId: r.data!.clipId, sampleId: r.data!.sampleId, exec, warp, valid };
 }
-
-// ── Commands ──────────────────────────────────────────────────────────
 
 test('every warp command is registered with a description', () => {
   for (const id of ['audio.setWarpMode', 'audio.addWarpMarker', 'audio.moveWarpMarker', 'audio.removeWarpMarker', 'audio.clearWarp', 'audio.setWarpOptions', 'audio.autoWarp']) {
@@ -129,8 +122,6 @@ test('move: sec re-pins the audio (beat stays); crossing a neighbour is refused,
   valid();
 });
 
-// ── Auto-warp maths ───────────────────────────────────────────────────
-
 const grid = (bpm: number, n: number, t0 = 0) => Array.from({ length: n }, (_, i) => t0 + (i * 60) / bpm);
 
 test('planAutoWarp: bar markers on bar lines, the last beat pinned, source tempo from the markers', () => {
@@ -143,7 +134,6 @@ test('planAutoWarp: bar markers on bar lines, the last beat pinned, source tempo
 });
 
 test('planAutoWarp: a pickup before the downbeat shifts the grid by whole bars; downbeat on a bar line', () => {
-  // Beats at 0.25 s steps from 0.1 s; the downbeat is the 3rd beat (index 2): 2 beats + a bit of pickup.
   const p = planAutoWarp({ beatTimes: grid(240, 12, 0.1), downbeatIndex: 2, every: 'beat', projectBpm: 240, barQuarters: 4 });
   const db = p.markers.find((m) => Math.abs(m.sec - (0.1 + 0.5)) < 1e-9)!;
   assert.equal(db.beat % 4, 0, 'the downbeat sits on a bar line');
@@ -183,7 +173,6 @@ test('audio.autoWarp: replaces markers, sets the mode from the hint, makes the S
   assert.equal(g.stretch, 1);
   const len1 = doc.project.playlist.clips[clipId].length;
   assert.ok(Math.abs(len1 / len0 - 100 / 120) < 0.01, `clip rescaled like a tempo-sync change (${len0} → ${len1})`);
-  // The marker map and the Stretch params agree: beat 8 lands where 100 bpm puts it.
   assert.ok(Math.abs(secToBeat(warp()!.markers, 4.8)! - 8) < 1e-9);
   valid();
   doc.undo(USER);
@@ -193,8 +182,6 @@ test('audio.autoWarp: replaces markers, sets the mode from the hint, makes the S
   assert.equal(tooFew.ok, false, 'beats past the 8 s file are dropped');
   assert.match(tooFew.message!, /at least 2 beats/);
 });
-
-// ── Auto-warp in main (fake analyzer) ─────────────────────────────────
 
 function analysis(over: Partial<AudioAnalysis> = {}): AudioAnalysis {
   return {
@@ -277,8 +264,6 @@ test('autoWarpChannel: a stem is tracked on its source mix; the vocal stem gets 
   assert.equal(guessWarpHint(doc.project, doc.project.channels[ch], null), 'mix');
 });
 
-// ── UI maths (src/panels/plugin/warpView.ts) ──────────────────────────
-
 test('warpView: mapping from markers or the Stretch rate, grid lines, drag clamp, snapping, labels', () => {
   const ms = [
     { id: 'a', sec: 0.5, beat: 0 },
@@ -307,8 +292,6 @@ test('warpView: mapping from markers or the Stretch rate, grid lines, drag clamp
   assert.equal(beatLabel(5.5, 4), '2.2.50');
   assert.equal(beatLabel(6, 3), '3.1');
 });
-
-// ── warp_clip (MCP) ───────────────────────────────────────────────────
 
 const SETTINGS = { mcp: { fileAccess: 'anywhere' } } as unknown as Settings;
 

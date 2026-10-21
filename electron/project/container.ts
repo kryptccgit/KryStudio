@@ -1,12 +1,3 @@
-// The .kstudio container: a zip (fflate) holding
-//   project.json   the normalized document
-//   meta.json      { format, appVersion, schemaVersion, savedAt, projectId }
-//   recovery.json  (autosave snapshots only) crash-recovery bookkeeping
-//   cover-<hash>.jpg|png  the cover image meta.cover names (stored, not
-//                  deflated: JPEG / PNG are compressed already). Only the
-//                  entry project.json references is extracted on open.
-// Plain .json project files are accepted on open too (fixtures, agents).
-
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { COVER_FILE_RE, type Project } from '@shared/schema/project';
 
@@ -24,7 +15,6 @@ export interface Decoded {
   project: unknown;
   meta: Partial<ContainerMeta> | null;
   extra: Record<string, unknown>;
-  /** Binary entries the project references (its cover), by entry name. */
   assets: Record<string, Uint8Array>;
 }
 
@@ -64,7 +54,6 @@ function parseJson(text: string, what: string): unknown {
 }
 
 export function decodeContainer(bytes: Uint8Array): Decoded {
-  // Plain JSON project (starts with "{" after optional BOM / whitespace).
   let i = 0;
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) i = 3;
   while (i < bytes.length && (bytes[i] === 0x20 || bytes[i] === 0x0a || bytes[i] === 0x0d || bytes[i] === 0x09)) i++;
@@ -73,7 +62,6 @@ export function decodeContainer(bytes: Uint8Array): Decoded {
   if (!(bytes[0] === 0x50 && bytes[1] === 0x4b)) throw new ProjectFileError("This isn't a Krypt Studio project (not a .kstudio archive).");
   let files: Record<string, Uint8Array>;
   try {
-    // JSON entries first; binary entries are extracted only when project.json references them (below).
     files = unzipSync(bytes, { filter: (f) => f.name.endsWith('.json') });
   } catch (err) {
     throw new ProjectFileError(`The project archive is damaged (${(err as Error).message}).`);
@@ -88,7 +76,6 @@ export function decodeContainer(bytes: Uint8Array): Decoded {
     try {
       extra[name.slice(0, -5)] = JSON.parse(strFromU8(data));
     } catch {
-      /* optional side files never block opening */
     }
   }
   const project = parseJson(strFromU8(pj), 'project.json');
@@ -99,7 +86,6 @@ export function decodeContainer(bytes: Uint8Array): Decoded {
       const hit = unzipSync(bytes, { filter: (f) => f.name === cover })[cover];
       if (hit) assets[cover] = hit;
     } catch {
-      /* a damaged cover never blocks opening: the project opens without it */
     }
   }
   return { project, meta, extra, assets };

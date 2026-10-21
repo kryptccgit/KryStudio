@@ -1,5 +1,3 @@
-// Groove templates (shared/grooves) measured from the Groove MIDI Dataset, the pure applyGroove,
-// the notes.groove command and the transform_notes "groove" op.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,10 +21,8 @@ import {
 import type { MainDeps } from '../electron/mcp/types';
 import { callTool, inputJsonSchema, newSession, TOOLS, type ToolCaller } from '../electron/mcp/tools';
 
-const SIX = 240; // a 16th at PPQ 960
+const SIX = 240;
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
-
-// ── Templates ─────────────────────────────────────────────────────────
 
 test('templates: 11 styles, 16 finite steps per class, plausible ranges, attribution', () => {
   assert.deepEqual([...GROOVE_IDS], ['hiphop', 'funk', 'soul', 'jazz', 'shuffle', 'latin', 'reggae', 'afrobeat', 'rock', 'pop', 'dance']);
@@ -72,7 +68,6 @@ test('templates: the measurements look like the styles they claim to be', () => 
   assert.ok(shuffle.classes.hihat.offset[2] > 0.25, 'shuffle: the off-8th hat is late');
   for (const t of GROOVE_TEMPLATES) {
     const h = t.classes.hihat;
-    // Hats accent the beat more than the 16th in between, in every style.
     assert.ok(h.vel[0] + h.vel[4] + h.vel[8] + h.vel[12] > h.vel[1] + h.vel[5] + h.vel[9] + h.vel[13], `${t.id} hat accents`);
   }
 });
@@ -103,8 +98,6 @@ test('findGroove + instrument classes from channel names', () => {
   assert.equal(grooveClassForRole(null), 'other');
 });
 
-// ── applyGroove ───────────────────────────────────────────────────────
-
 function grid(n: number, vel = 100 / 127): GrooveNote[] {
   return Array.from({ length: n }, (_, i) => ({ tick: i * SIX, dur: SIX / 2, vel }));
 }
@@ -123,11 +116,9 @@ test('applyGroove: amount 0 + velocity 0 is the identity; deterministic; on-grid
     assert.equal(n.tick, want, `step ${i}`);
     assert.equal(n.dur, SIX / 2);
   });
-  // amount scales the shift
   const half = applyGroove(notes, { template: 'shuffle', amount: 0.5, velocity: 0, class: 'hihat' });
   const full = applyGroove(notes, { template: 'shuffle', amount: 1, velocity: 0, class: 'hihat' });
   half.forEach((n, i) => assert.ok(Math.abs(n.tick - notes[i].tick - (full[i].tick - notes[i].tick) / 2) <= 1, `half shift at ${i}`));
-  // channelName and class agree; the input array is never mutated
   assert.deepEqual(applyGroove(notes, { template: 'jazz', class: 'snare' }), applyGroove(notes, { template: 'jazz', channelName: 'Clap' }));
   assert.equal(notes[1].tick, SIX);
   assert.throws(() => applyGroove(notes, { template: 'nope' }), /Unknown groove "nope" \(use one of: hiphop/);
@@ -167,13 +158,10 @@ test('applyGroove: notes stay inside the pattern and velocities inside MIDI 1..1
       });
     }
   }
-  // 3/4: 12 steps per bar, steps wrap per bar (step 12 = the next downbeat → template step 0)
   const k = findGroove('pop')!.classes.kick;
   const waltz = applyGroove([{ tick: 12 * SIX, dur: 10, vel: 0.5 }], { template: 'pop', class: 'kick', velocity: 0, stepsPerBar: 12 });
   assert.equal(waltz[0].tick, Math.round(12 * SIX + k.offset[0] * SIX));
 });
-
-// ── Command: notes.groove ─────────────────────────────────────────────
 
 function doc() {
   const p = createDefaultProject('Grooves');
@@ -199,7 +187,6 @@ test('notes.groove: one undo step, class from the channel name, clear errors', (
   const want = applyGroove(grid(16), { template: 'hiphop', class: 'hihat', amount: 1, velocity: 0.5, length: 16 * SIX });
   assert.deepEqual(list(hat).map((n) => [n.tick, n.vel]), want.map((n) => [n.tick, n.vel]));
 
-  // timing only, again: already on the groove → a visible "No change", never a silent success
   const again = host.exec('notes.groove', { patternId: pat, channelId: hat, template: 'hiphop', velocity: 0 }, { actor: USER });
   assert.equal(again.ok, false);
   assert.match(again.message!, /No change/);
@@ -216,7 +203,6 @@ test('notes.groove: one undo step, class from the channel name, clear errors', (
   const empty = host.exec('notes.groove', { patternId: pat, channelId: id('Keys'), template: 'funk' }, { actor: USER });
   assert.match(empty.message!, /No notes to groove/);
 
-  // an explicit instrument overrides the name
   const keys = id('Keys');
   host.exec('notes.replace', { patternId: pat, channelId: keys, notes: grid(16).map((n) => ({ ...n, key: 60 })) }, { actor: USER });
   const k = host.exec<{ instrument: string }>('notes.groove', { patternId: pat, channelId: keys, template: 'funk', instrument: 'kick', velocity: 0 }, { actor: USER });
@@ -224,8 +210,6 @@ test('notes.groove: one undo step, class from the channel name, clear errors', (
   const wantKick = applyGroove(grid(16), { template: 'funk', class: 'kick', velocity: 0, length: 16 * SIX });
   assert.deepEqual(list(keys).map((n) => n.tick), wantKick.map((n) => n.tick));
 });
-
-// ── MCP: transform_notes op "groove" ──────────────────────────────────
 
 function mcp() {
   const d = doc();
@@ -254,7 +238,6 @@ test('transform_notes groove op: lists the templates, grooves drums by name, cha
   const ticks = Object.values(host.project.patterns[pat].notes[snare]).map((n) => n.tick).sort((a, b) => a - b);
   assert.deepEqual(ticks, [4, 12, 20, 28].map((s) => Math.round(s * SIX + sn.offset[s % 16] * SIX)));
 
-  // chained after another op, one undo step for the whole call
   const r2 = await call('transform_notes', { channel: 'Snare', ops: [{ op: 'velocity', set: 100 }, { op: 'groove', template: 'funk', amount: 0, velocity: 1 }] });
   assert.equal(r2.ok, true, r2.message);
   const fv = findGroove('funk')!.classes.snare.vel;

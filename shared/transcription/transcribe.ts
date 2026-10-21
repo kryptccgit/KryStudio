@@ -1,13 +1,3 @@
-// transcribeSong: one song's analysis + per-stem notes / drum hits → a
-// SongTranscription on the project grid (research/15 §3.3), and
-// sectionPatterns: what the builder writes as one pattern per section.
-//
-// The copyright line (§1): 'style' (build_from_reference) keeps the drum
-// programming, the chord changes and the bass RHYTHM (pitches from the chord
-// roots / fifths), never the melody, the lead, the vocal or the exact bass;
-// `mine: true` (the user's own song) may keep the exact bass and lead.
-// 'exact' (audio_to_project) transcribes everything. Pure, no I/O.
-
 import type { AudioAnalysis, DrumHit, StemName, TranscribedNote } from '../analyzer/protocol';
 import type { Playbook, SectionKind } from '../playbooks/types';
 import { listPlaybooks } from '../playbooks';
@@ -25,32 +15,20 @@ import { linkSameAs, songSections } from './sections';
 import { melodyShape, type MelodyShape } from './melody';
 
 export interface TranscriptionInput {
-  /** File name without extension. */
   name: string;
   analysis: AudioAnalysis;
-  /** Drum hits of the drum stem, or of the full mix (default: analysis.drumHits, from the mix). */
   drumHits?: readonly DrumHit[] | null;
-  /** Where drumHits came from (default 'stem' when `stems.drums` is set and drumHits were given, else 'mix'). */
   drumSource?: 'stem' | 'mix';
-  /** Bass stem, mono transcription. */
   bass?: readonly TranscribedNote[] | null;
-  /** Other stem (keys, synths, guitars), poly transcription. */
   other?: readonly TranscribedNote[] | null;
-  /** Vocal stem, mono transcription: melody SHAPE only (never written as notes). */
   vocals?: readonly TranscribedNote[] | null;
-  /** Where bass / other / vocals came from (default 'stem' when `stems` lists any stem, else 'mix'). */
   pitchedSource?: 'stem' | 'mix';
-  /** Stem files on disk (cached separation), passed through to the result. */
   stems?: Partial<Record<StemName, string>>;
-  /** The genre (wins over the guess): its tempo reading is the default factor, its section words name the sections. */
   genre?: GenreId | null;
-  /** Playbooks for the genre guess (default: all). */
   playbooks?: readonly Playbook[];
-  /** A brief study_reference already built for this analysis (skips building one). */
   brief?: ReferenceBrief | null;
 }
 
-/** Defaults of TranscriptionOptions. */
 export const DRUM_GRID = 120;
 export const PITCHED_GRID = 240;
 export const DRUM_FEEL = 0.5;
@@ -96,12 +74,10 @@ function prepare(input: TranscriptionInput, opts: Pick<TranscriptionOptions, 'fa
   return { a, brief, playbook, factor, hits, drumSource, pitchedSource, grid, bass, other, vocals };
 }
 
-/** Cut notes to the song's last bar (drop those starting after it). */
 function clip(notes: GridNote[], endTick: number): GridNote[] {
   return notes.filter((n) => n.tick < endTick).map((n) => (n.tick + n.dur > endTick ? { ...n, dur: Math.max(1, endTick - n.tick) } : n));
 }
 
-/** One song → its transcription on the project grid. */
 export function transcribeSong(input: TranscriptionInput, opts: TranscriptionOptions): SongTranscription {
   const P = prepare(input, opts);
   const { a, grid: g } = P;
@@ -121,14 +97,12 @@ export function transcribeSong(input: TranscriptionInput, opts: TranscriptionOpt
   if (g.factor !== 1 && g.detectedBpm) notes.push(`Read at ${g.factor === 2 ? 'double' : 'half'} time: ${g.bpm} bpm (detected ${Math.round(g.detectedBpm * 10) / 10}).`);
   if (g.shiftedBars) notes.push(`The song has ${g.shiftedBars} bar${g.shiftedBars > 1 ? 's' : ''} before the first detected downbeat: bar 1 starts there.`);
 
-  // Chords first: the bass is checked against them.
   const chords = chordTimeline(a.chords ?? [], g).filter((c) => c.tick < endTick);
   const keyRoot = (() => {
     const k = P.brief?.keyFromChords ?? a.key?.name ?? null;
     return k ? (parseKey(k)?.root ?? null) : null;
   })();
 
-  // Drums.
   if (P.hits.length) {
     const d = drumParts(P.hits, g, { grid: drumGrid, feel: drumFeel, source: P.drumSource });
     for (const p of d.parts) parts.push({ ...p, notes: clip(p.notes, endTick) });
@@ -137,7 +111,6 @@ export function transcribeSong(input: TranscriptionInput, opts: TranscriptionOpt
     if (d.pickup) notes.push(`${d.pickup} drum hit${d.pickup > 1 ? 's' : ''} before bar 1 (a pickup) left out.`);
   } else notes.push('No drum hits: there are no drum parts.');
 
-  // Bass.
   let bassLine: GridNote[] = [];
   if (P.bass.length) {
     const mono = monoCleanup(P.bass, 0.04, 0.03);
@@ -162,8 +135,6 @@ export function transcribeSong(input: TranscriptionInput, opts: TranscriptionOpt
     }
   }
 
-  // Lead: the other stem's top line ('exact', or the user's own song). Worked out before the chords so its notes
-  // stay out of the chord voicings.
   const bars = Math.max(1, g.totalBars);
   if (P.other.length && P.other.length < bars / 2) notes.push(`The other stem is sparse (${P.other.length} notes over ${bars} bars): few chord or lead notes to go by.`);
   let leadPart: TranscribedPart | null = null;
@@ -179,7 +150,6 @@ export function transcribeSong(input: TranscriptionInput, opts: TranscriptionOpt
     }
   }
 
-  // Chords part.
   const polyTicks = P.other
     .filter((n) => !(leadByKey.get(n.key) ?? []).some(([a, b]) => n.startSec >= a && n.startSec < b))
     .map((n) => ({ tick: g.toTick(n.startSec), end: g.toTick(n.startSec + n.durSec), key: n.key }));
@@ -204,7 +174,6 @@ export function transcribeSong(input: TranscriptionInput, opts: TranscriptionOpt
   if (style) notes.push(opts.mine ? 'Your own song: the exact bass and lead were kept.' : 'Style: no melody, lead or vocal notes were copied. Write an original top line (see the melody shape).');
   if (g.pickupBeats) notes.push(`A pickup of ${g.pickupBeats} beat${g.pickupBeats === 1 ? '' : 's'} before bar 1 was left out.`);
 
-  // Sections and pattern reuse.
   const hasVocals = P.vocals.length > 0 || !!input.stems?.vocals;
   const peak: SectionKind = hasVocals ? 'chorus' : 'drop';
   const { sections } = songSections({ analysis: a, grid: g, hits: P.hits, playbook: P.playbook, peak });
@@ -227,10 +196,6 @@ export function transcribeSong(input: TranscriptionInput, opts: TranscriptionOpt
   };
 }
 
-/**
- * The melody shape of the reference for 'style' builds: the vocal line (mono cleanup) when there is one, else the
- * other stem's top line. null with too few notes.
- */
 export function referenceMelodyShape(input: TranscriptionInput, opts: Pick<TranscriptionOptions, 'factor'> = {}): MelodyShape | null {
   const P = prepare(input, opts);
   const g = P.grid;
@@ -239,48 +204,36 @@ export function referenceMelodyShape(input: TranscriptionInput, opts: Pick<Trans
     if (line.length < 4) return null;
     return melodyShape(toGridNotes(line, g, { grid: PITCHED_GRID, feel: 0, mono: true }).notes, g.ticksPerBar, src);
   };
-  // An instrumental's vocal stem is mostly bleed: a handful of scattered "notes" over a huge range. Use it only
-  // when it reads like a sung line (enough notes across the song, a singable range), else the other stem's top line.
   const vocal = shapeOf('vocals');
   const bars = Math.max(1, g.totalBars);
   const sung = !!vocal && vocal.notes >= Math.max(8, bars * 0.5) && vocal.rangeSemis <= 24 && vocal.restRatio < 0.9;
   return sung ? vocal : (shapeOf('other') ?? vocal);
 }
 
-/** The grid a transcription would use (for callers lining up audio or converting other material the same way). */
 export function songGrid(input: TranscriptionInput, opts: Pick<TranscriptionOptions, 'factor'> = {}): TranscriptionGrid {
   return prepare(input, opts).grid;
 }
-
-// ── Per-section patterns ────────────────────────────────────────────────
 
 export interface SectionPart {
   name: string;
   kind: TranscribedPart['kind'];
   drumRole?: TranscribedPart['drumRole'];
-  /** Ticks from the section's first bar; nothing runs past the section's end. */
   notes: GridNote[];
 }
 
 export interface SectionPattern {
-  /** Index into SongTranscription.sections. */
   index: number;
   name: string;
   label: string;
   startBar: number;
   bars: number;
-  /** Ticks of the section's first bar from bar 1, and its length. */
   startTick: number;
   lengthTicks: number;
-  /** The section whose pattern this one plays: itself, or its `sameAs` (then `parts` repeats that section's notes). */
   patternOf: number;
-  /** Parts with notes in this section (vocal audio is never a pattern part). */
   parts: SectionPart[];
 }
 
-/** Notes of sustained parts that start before the section and sound at least this long into it restart on its bar 1. */
 const CARRY_MIN = PPQ / 2;
-/** A note this close before the section start (an early-played downbeat, feel) belongs to the section. */
 const EARLY_TOL = 60;
 
 function sliceNotes(notes: readonly GridNote[], from: number, len: number, carry: boolean): GridNote[] {
@@ -302,7 +255,6 @@ function sliceNotes(notes: readonly GridNote[], from: number, len: number, carry
   return out.sort((a, b) => a.tick - b.tick || a.key - b.key);
 }
 
-/** Per section, per part: the notes the builder writes as that section's pattern (sameAs sections repeat theirs). */
 export function sectionPatterns(t: SongTranscription): SectionPattern[] {
   const tpb = t.beatsPerBar * PPQ;
   const own = (i: number): SectionPart[] => {
@@ -321,7 +273,6 @@ export function sectionPatterns(t: SongTranscription): SectionPattern[] {
   };
   return t.sections.map((s, i) => {
     let src = i;
-    // Follow the chain to the section that has its own pattern (sameAs points at an earlier one).
     for (let guard = 0; guard < t.sections.length && t.sections[src].sameAs !== null && t.sections[src].sameAs! < src; guard++) src = t.sections[src].sameAs!;
     const parts = partsOf(src).map((p) => ({ ...p, notes: p.notes.map((n) => ({ ...n })) }));
     return { index: i, name: s.name, label: s.label, startBar: s.startBar, bars: s.bars, startTick: (s.startBar - 1) * tpb, lengthTicks: s.bars * tpb, patternOf: src, parts };

@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Krypt Voice (research/21) through window.krypt.voice (electron/voice).
-// Entry points: Tools ▸ Krypt Voice…, Home ▸ Audio Tools ▸ Krypt Voice,
-// the playlist ruler / track menus ("Add a voice here…"), the piano roll's
-// Sing my notes, Settings ▸ Voice and the Record my voice dialog. One job
-// at a time (main has one cancel); every outcome ends in visible feedback.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { ActionResult } from '@shared/types';
 import type { SingOutcome, SingRequest, SpeakOutcome, SpeakRequest, VoiceInfo } from '@shared/voice/types';
 import { modal, toast } from '../app/notify';
@@ -13,11 +5,8 @@ import { wm } from '../workspace/WindowManager';
 import { FISH_KEY_URL, doneLine, failureMessage, fishKeyError, isCancelMessage, needsKey, needsModel, pickVoice, type JobKind } from './logic';
 import { getVoice, isBusy, setSing, setSpeak, useVoice } from './store';
 
-// ── The service snapshot ──────────────────────────────────────────────
-
 let subscribed = false;
 
-/** Load the voice list / Kokoro / Fish status once and follow main's updates. Failures show in the dialogs and toast once. */
 export async function ensureVoiceState(force = false): Promise<void> {
   const k = window.krypt?.voice;
   if (!k) {
@@ -32,7 +21,6 @@ export async function ensureVoiceState(force = false): Promise<void> {
         syncVoicePicks();
       });
     } catch {
-      /* no live updates: the dialogs refresh on open */
     }
   }
   const s = getVoice();
@@ -49,7 +37,6 @@ export async function ensureVoiceState(force = false): Promise<void> {
   }
 }
 
-/** Keep each form's voice valid (a removed clone, a voice list that changed). */
 function syncVoicePicks(): void {
   const s = getVoice();
   const sp = pickVoice(s.state, s.speak.voiceId);
@@ -58,8 +45,6 @@ function syncVoicePicks(): void {
   if (sg !== s.sing.voiceId) setSing({ voiceId: sg });
 }
 
-// ── Links out ─────────────────────────────────────────────────────────
-
 export function openModelManager(): void {
   wm.open('modelManager');
   toast.info('Install Kokoro (Speech) in the Model Manager: one download, then local voices work offline.');
@@ -67,7 +52,6 @@ export function openModelManager(): void {
 
 export function openVoiceSettings(): void {
   wm.open('settings');
-  // Settings is one long page: scroll to the Voice section and ring it (the guides' "Show me").
   void import('../guides/show').then((m) => m.showGuideAnchor('settings.voice')).catch(() => undefined);
 }
 
@@ -80,8 +64,6 @@ export async function openFishSite(): Promise<void> {
     toast.error(`Couldn't open the link: ${failureMessage(err)}`);
   }
 }
-
-// ── Preview playback ──────────────────────────────────────────────────
 
 async function playFile(path: string): Promise<void> {
   try {
@@ -117,8 +99,6 @@ export async function stopPreview(): Promise<void> {
   }
 }
 
-// ── Running a job ─────────────────────────────────────────────────────
-
 const failureAction = (message: string): { action: { label: string; run: () => void } } | undefined =>
   needsModel(message)
     ? { action: { label: 'Model Manager', run: openModelManager } }
@@ -140,7 +120,6 @@ async function runJob<T extends SpeakOutcome>(kind: JobKind, preview: boolean, c
       if (j && (j.phase === 'running' || j.phase === 'cancelling')) useVoice.setState({ job: { ...j, progress: p } });
     });
   } catch {
-    /* no progress feed: the bar stays indeterminate */
   }
   let r: ActionResult<T>;
   try {
@@ -201,9 +180,6 @@ export async function cancelJob(): Promise<void> {
   }
 }
 
-// ── Fish key + my voices (Settings ▸ Voice, the Record dialog) ────────
-
-/** Save (verified by main with a tiny request) or remove the key. Returns the visible result line. */
 export async function saveFishKey(key: string | null): Promise<{ ok: boolean; message: string }> {
   if (key !== null) {
     const bad = fishKeyError(key);

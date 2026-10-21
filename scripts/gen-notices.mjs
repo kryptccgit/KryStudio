@@ -1,16 +1,3 @@
-// Generates THIRD-PARTY-NOTICES.md from the real dependency graph:
-//   npm   production deps + the devDeps Vite bundles into the app + Electron
-//   cargo every crate the engine workspace links for Windows, macOS or Linux (SHIP_TARGETS)
-//         (engine, dsp, MCP shim, and any crate added to the workspace later)
-// plus fonts, plugin SDKs (when a plugin host is present), the factory
-// content statement and data derived from third-party datasets (DATASETS
-// below). Licence texts come from the packages themselves.
-//
-//   node scripts/gen-notices.mjs           rewrite THIRD-PARTY-NOTICES.md
-//   node scripts/gen-notices.mjs --check   exit 1 if the file is out of date (CI)
-//
-// Output is deterministic (no timestamps), so --check is stable across machines.
-
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { cargoCrates, classifyText, evaluateLicense, licenseFiles, npmShipped, root } from './lib/deps.mjs';
@@ -32,8 +19,6 @@ try {
   fail(e.message);
 }
 
-// ── licence text selection ────────────────────────────────────────────
-
 const family = (id) => {
   const b = id.replace(/\s+WITH\s+.*$/i, '');
   if (/^BSD/.test(b) || b === '0BSD') return 'BSD';
@@ -42,12 +27,8 @@ const family = (id) => {
   return b;
 };
 
-const canonical = {}; // 'Apache-2.0' | 'MPL-2.0' → full text (first seen)
+const canonical = {};
 
-/**
- * Pick the licence files that match the licence(s) we elect for a package.
- * → { texts: [{name, text}], notes: string[] }
- */
 function textsFor(dir, chosen) {
   const files = licenseFiles(dir);
   const want = new Set(chosen.map(family));
@@ -55,7 +36,6 @@ function textsFor(dir, chosen) {
   const notes = [];
   for (const f of files) {
     const kind = classifyText(f.text);
-    // Canonical full texts: a pure copy (no extra preamble or second licence appended).
     if ((kind === 'Apache-2.0' && /^Apache License/i.test(f.text)) || (kind === 'MPL-2.0' && /^Mozilla Public License/i.test(f.text))) {
       if (!/Permission is hereby granted/i.test(f.text)) canonical[kind] ??= f.text;
     }
@@ -66,8 +46,8 @@ function textsFor(dir, chosen) {
       continue;
     }
     const k = kind !== 'other' ? kind : nameHint;
-    if (k && !want.has(k)) continue; // e.g. LICENSE-APACHE when we elect MIT
-    if (/^\s*GNU (LESSER |AFFERO )?GENERAL PUBLIC LICENSE\s+Version/i.test(f.text)) continue; // a GPL alternative we don't elect
+    if (k && !want.has(k)) continue;
+    if (/^\s*GNU (LESSER |AFFERO )?GENERAL PUBLIC LICENSE\s+Version/i.test(f.text)) continue;
     if ((k === 'Apache-2.0' || k === 'MPL-2.0') && !/Permission is hereby granted/i.test(f.text)) {
       notes.push(`${k}: the full licence text is reproduced once under "Standard licence texts" below.`);
       continue;
@@ -77,10 +57,8 @@ function textsFor(dir, chosen) {
   return { texts, notes: [...new Set(notes)] };
 }
 
-// ── collect entries ───────────────────────────────────────────────────
-
 const problems = [];
-const entries = []; // { group: 'npm'|'cargo', name, version, license, chosen, row, texts, notes, repository }
+const entries = [];
 
 for (const p of npm) {
   const ev = evaluateLicense(p.license);
@@ -90,7 +68,7 @@ for (const p of npm) {
   entries.push({ group: 'npm', name: p.name, version: p.version, license: p.license, chosen, reason: p.reason, texts, notes, repository: p.repository });
 }
 for (const c of cargo.crates) {
-  if (c.use === 'dev') continue; // tests/benches only: never shipped
+  if (c.use === 'dev') continue;
   const ev = evaluateLicense(c.license);
   if (!ev.ok) problems.push(`crate ${c.name}@${c.version}: licence "${c.license}" is not on the allowlist (run npm run license:check)`);
   const chosen = ev.chosen ?? [c.license || 'unknown'];
@@ -98,8 +76,6 @@ for (const c of cargo.crates) {
   entries.push({ group: 'cargo', name: c.name, version: c.version, license: c.license, chosen, use: c.use, usedBy: c.usedBy, texts, notes, repository: c.repository });
 }
 if (problems.length) fail(`unapproved licences:\n  ${problems.join('\n  ')}`);
-
-// ── plugin SDK detection (wave-2 plugin host) ─────────────────────────
 
 /** The standard MIT permission text (taken from our own LICENSE) under a given copyright line. */
 function mitText(copyright) {
@@ -192,8 +168,6 @@ const sdkSections = [];
   }
 }
 
-// ── vendored C++ and run-time DLLs ────────────────────────────────────
-
 const nativeSections = [];
 const VENDORED = {
   'signalsmith-stretch': 'Signalsmith Stretch (audio-clip time-stretch and pitch-shift)',
@@ -242,8 +216,6 @@ nativeSections.push(
   ].join('\n'),
 );
 
-// ── data compiled into the binaries ───────────────────────────────────
-
 {
   const lic = path.join(root, 'engine', 'crates', 'analyzer', 'data', 'CMUDICT-LICENSE.txt');
   if (!existsSync(lic)) fail('engine/crates/analyzer/data/CMUDICT-LICENSE.txt is missing. The CMU Pronouncing Dictionary must keep its licence.');
@@ -266,8 +238,6 @@ nativeSections.push(
   );
 }
 
-// ── fonts ─────────────────────────────────────────────────────────────
-
 const KNOWN_FONTS = {
   'Chakra Petch': 'Copyright 2018 The Chakra Petch Project Authors (https://github.com/cadsondemak/Chakra-Petch)',
   'JetBrains Mono': 'Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)',
@@ -280,8 +250,6 @@ const oflPath = path.join(root, 'public', 'fonts', 'OFL.txt');
 if (fontFamilies.length && !existsSync(oflPath)) fail('public/fonts/OFL.txt is missing (the OFL must travel with the fonts).');
 const oflText = existsSync(oflPath) ? readFileSync(oflPath, 'utf8').replace(/\r\n/g, '\n').trim() : '';
 const oflBody = oflText.slice(Math.max(0, oflText.indexOf('-----------------------------------------------------------')));
-
-// ── bundled ML models (resources/models/<id>/: LICENSE + optional NOTICE) ──
 
 const modelsRoot = path.join(root, 'resources', 'models');
 const modelIds = existsSync(modelsRoot)
@@ -317,14 +285,9 @@ for (const id of modelIds) {
   modelSections.push(lines.join('\n'));
 }
 
-// ── render ────────────────────────────────────────────────────────────
-
 const esc = (s) => String(s ?? '').replace(/\|/g, '\\|');
 const link = (u) => (u ? (/^https?:\/\//.test(u) ? u : esc(u)) : '');
 const shortMember = (n) => n.replace(/^krypt-studio-/, '').replace(/^mcp$/, 'mcp-shim');
-// ── datasets (data derived from third-party datasets that ships in the app) ──
-// Each entry is checked against its generated file: the file must exist and carry the attribution
-// line, so a regenerated file can't silently drop the credit.
 
 const DATASETS = [
   {
@@ -364,11 +327,6 @@ for (const d of DATASETS) {
     ].join('\n'),
   );
 }
-
-// ── sound packs (optional downloads; credited even when the licence doesn't require it) ──
-// One entry per pack in shared/packs/catalog.ts. The catalog is checked as text: every pack id there needs an entry
-// here, and each entry's attribution must appear verbatim in the catalog, so the credit can't drift from what the app
-// shows before download.
 
 const PACK_CREDITS = [
   {
@@ -620,8 +578,7 @@ out(
   '',
 );
 
-// Group identical licence texts.
-const groups = new Map(); // normalized text → { text, owners: [], title }
+const groups = new Map();
 const noText = [];
 for (const e of entries) {
   const owner = `${e.group === 'npm' ? 'npm' : 'crate'} ${e.name} ${e.version}`;

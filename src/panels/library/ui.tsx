@@ -1,12 +1,9 @@
-// Small building blocks shared by the Library panel's parts.
-
 import { forwardRef, type ReactNode } from 'react';
 import { CircleCheck, Clock, FileQuestion, Layers, TriangleAlert, type LucideIcon } from 'lucide-react';
 import type { TrackStatus } from '@shared/library/types';
 import { cls } from '../../utils/format';
 import { statusInfo } from '../../library/logic';
 
-/** Chart / accent colors (validated: dark panel surface, see dataviz checks in the report). */
 export const C = {
   series: '#A855F7',
   minor: '#6366F1',
@@ -23,7 +20,6 @@ export const SmallButton = forwardRef<
     hint?: string;
     tone?: 'ghost' | 'primary' | 'danger' | 'focus';
     icon?: LucideIcon;
-    /** Hide the label (icon only), e.g. at narrow widths. */
     compact?: boolean;
     spinning?: boolean;
   }
@@ -55,7 +51,6 @@ export const SmallButton = forwardRef<
   );
 });
 
-/** Small on/off switch with a label (used for Deep analysis). */
 export function MiniSwitch({ on, onChange, label, hint, disabled, busy }: { on: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean; busy?: boolean }) {
   return (
     <button
@@ -83,7 +78,6 @@ const STATUS_STYLE: Record<TrackStatus, { cls: string; icon: LucideIcon | null }
   missing: { cls: 'text-amber-300', icon: FileQuestion },
 };
 
-/** Track status: icon + label, with the error / explanation as tooltip and hint. */
 export function StatusPill({ status, error }: { status: TrackStatus; error?: string }) {
   const info = statusInfo(status, error);
   const st = STATUS_STYLE[status] ?? STATUS_STYLE.pending;
@@ -105,7 +99,6 @@ export function SectionTitle({ children, right }: { children: ReactNode; right?:
   );
 }
 
-/** A profile card: title, optional badge / actions, a readout line (hover values), body. */
 export function Card({
   title,
   icon: Icon,
@@ -148,7 +141,6 @@ export function Estimated() {
   );
 }
 
-/** Label / value pair (value in mono). */
 export function Stat({ label, value, hint, sub }: { label: string; value: ReactNode; hint?: string; sub?: ReactNode }) {
   return (
     <div className="min-w-0" data-hint={hint}>
@@ -159,7 +151,6 @@ export function Stat({ label, value, hint, sub }: { label: string; value: ReactN
   );
 }
 
-/** Dashed empty state inside a card or pane. */
 export function EmptyNote({ icon: Icon, title, children, action }: { icon?: LucideIcon; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/10 bg-black/20 px-4 py-4 text-center">

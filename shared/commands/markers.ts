@@ -1,29 +1,19 @@
-// Song markers (Wave 12.2b): rename and move. Adding and deleting live in
-// playlist.ts (playlist.addMarker / playlist.removeMarker). Plus the pure
-// "section under a marker" maths the ruler menu and agents use.
-
 import { z } from 'zod';
 import { defineCommand, must, CommandError } from './types';
 import type { Marker } from '../schema/project';
 
 export const MARKER_NAME_MAX = 64;
 
-/** A marker name as stored: trimmed, inner whitespace collapsed; null when empty or too long. */
 export function cleanMarkerName(name: string): string | null {
   const t = name.replace(/\s+/g, ' ').trim();
   return t && t.length <= MARKER_NAME_MAX ? t : null;
 }
 
-/** Markers by time (ties by name, then id), the order the ruler shows them. */
 export function sortedMarkers(markers: Record<string, Marker> | Marker[]): Marker[] {
   const list = Array.isArray(markers) ? [...markers] : Object.values(markers);
   return list.sort((a, b) => a.tick - b.tick || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
-/**
- * The section a marker starts: from its tick to the next marker after it, else to the song end, else one bar.
- * Used by "Loop this section" and agents. Always end > start.
- */
 export function markerSection(markers: Record<string, Marker> | Marker[], id: string, songEnd: number, barTicks: number): { start: number; end: number } | null {
   const list = sortedMarkers(markers);
   const m = list.find((x) => x.id === id);

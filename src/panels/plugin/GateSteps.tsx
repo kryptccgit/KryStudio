@@ -1,9 +1,3 @@
-// Custom steps editor for Krypt Gate/Time slots (shared/plugins/gateSteps.ts):
-// per step a time mode chip (click = next mode, right-click = previous,
-// Alt+click = Play) and a level bar (drag across bars to paint levels), plus
-// step length, step count and the factory step presets. Every edit switches
-// the slot to the "Custom steps" pattern in the same command.
-
 import { useEffect, useRef } from 'react';
 import { Footprints } from 'lucide-react';
 import { PPQ } from '@shared/schema/time';
@@ -27,11 +21,9 @@ import { onFrame } from '../../render/frameLoop';
 import { telemetry } from '../../live/telemetry';
 import { cls } from '../../utils/format';
 
-/** Step length of each GATE_STEP_DIVS entry, in beats. */
 const DIV_BEATS = [0.125, 0.25, 0.5, 1];
 const BAR_H = 54;
 
-/** Chip colours per mode (Play is neutral; the rest use the accent family). */
 const MODE_TONE = [
   'bg-white/[0.05] text-white/60',
   'bg-krypt-indigo/35 text-white',
@@ -65,7 +57,6 @@ export function GateSteps({ insertId, slotId }: { insertId: string; slotId: stri
     void write(next).then((r) => r.ok && !custom && flashHint('Gate/Time switched to Custom steps', 'ok'));
   };
 
-  // Paint levels: one undo entry per drag.
   const paint = (e: React.PointerEvent) => {
     const el = bars.current;
     const d = drag.current;
@@ -79,7 +70,6 @@ export function GateSteps({ insertId, slotId }: { insertId: string; slotId: stri
     void write({ ...steps, steps: steps.steps.map((s, k) => ({ ...s, level: d.levels[k] })) }, d.key);
   };
 
-  // Playhead: light the step under the transport (Trigger Always only; Active param restarts are engine-side).
   useEffect(() => {
     if (!custom || !always) return;
     let lastIdx = -2;

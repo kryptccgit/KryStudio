@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The library track table: stays fast with thousands of rows. Rows are
-// windowed (only the visible ones plus overscan render) and fetched from
-// main in pages of 200 via library.query as you scroll. Filters (search,
-// BPM range, key / mode, status) and sorting run in main. While the queue
-// runs, the visible pages refresh (throttled) so statuses tick over.
-// Row actions: context menu + double-click (Detect tempo & key).
-// ──────────────────────────────────────────────────────────────────────
-
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type DragEvent, type MouseEvent } from 'react';
 import {
   ArrowDown,
@@ -67,8 +58,6 @@ import { EmptyNote, SmallButton, StatusPill } from './ui';
 const ROW_H = 28;
 const REFRESH_MS = 1500;
 
-// ── Paged data ────────────────────────────────────────────────────────
-
 interface PageStore {
   key: string;
   gen: number;
@@ -78,11 +67,6 @@ interface PageStore {
   error: string | null;
 }
 
-/**
- * Pages of a query, fetched on demand. A new query (filters / sort /
- * collection) starts over; `soft` refreshes (queue progress, adds) refetch
- * the wanted pages while the old rows stay on screen.
- */
 function useTrackPages(base: TrackQuery, soft: string) {
   const key = queryKey(base);
   const baseRef = useRef(base);
@@ -105,7 +89,7 @@ function useTrackPages(base: TrackQuery, soft: string) {
         r = { ok: false, message: (err as Error)?.message ?? String(err) };
       }
       st.inflight.delete(id);
-      if (s.current.gen !== gen) return; // a newer query / refresh owns the table
+      if (s.current.gen !== gen) return;
       if (r.ok && r.data) {
         st.total = r.data.total;
         st.pages.set(page, r.data.tracks);
@@ -115,7 +99,6 @@ function useTrackPages(base: TrackQuery, soft: string) {
     })();
   }, []);
 
-  // New query: start over.
   if (s.current.key !== key) {
     s.current = { key, gen: s.current.gen + 1, total: null, pages: new Map(), inflight: new Set(), error: null };
     wanted.current = [0];
@@ -125,7 +108,6 @@ function useTrackPages(base: TrackQuery, soft: string) {
     fetchPage(0);
   }, [key, fetchPage]);
 
-  // Soft refresh (throttled): refetch what's on screen, keep the old rows meanwhile.
   const last = useRef(0);
   const firstSoft = useRef(true);
   useEffect(() => {
@@ -166,8 +148,6 @@ function useTrackPages(base: TrackQuery, soft: string) {
   return { total: st.total, error: st.error, rowAt, ensure, retry, pages: st.pages };
 }
 
-// ── Columns ───────────────────────────────────────────────────────────
-
 type ColId = 'name' | 'bpm' | 'key' | 'duration' | 'lufs' | 'status';
 
 const COLS: Record<ColId, { label: string; width: string; sort?: SortKey; align?: 'right'; hint: string }> = {
@@ -185,12 +165,9 @@ function columnsFor(width: number): ColId[] {
   return ['name', 'bpm', 'key', 'status'];
 }
 
-// ── Filter bar ────────────────────────────────────────────────────────
-
 function FilterBar({ total, narrow }: { total: number | null; narrow: boolean }) {
   const filters = useLibrary((s) => s.filters);
   const [text, setText] = useState(filters.text);
-  // follow outside changes (Show reference sets the search)
   useEffect(() => setText(filters.text), [filters.text]);
   useEffect(() => {
     if (text === filters.text) return;
@@ -276,8 +253,6 @@ function FilterBar({ total, narrow }: { total: number | null; narrow: boolean })
   );
 }
 
-// ── Table ─────────────────────────────────────────────────────────────
-
 export function TrackTable({ collection, width, doc }: { collection: Collection | null; width: number; doc: Document }) {
   const filters = useLibrary((s) => s.filters);
   const sort = useLibrary((s) => s.sort);
@@ -305,7 +280,6 @@ export function TrackTable({ collection, width, doc }: { collection: Collection 
   const [view, setView] = useState({ top: 0, height: 400 });
   const [dropHot, setDropHot] = useState(false);
 
-  // A new query starts at the top (the rows remount once its first page lands).
   const key = queryKey(base);
   const resetScroll = useRef(false);
   useLayoutEffect(() => {
@@ -339,7 +313,6 @@ export function TrackTable({ collection, width, doc }: { collection: Collection 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pagesKey, key]);
 
-  // "Show reference": scroll to the revealed row once it is loaded
   useEffect(() => {
     if (!reveal || total === null) return;
     for (const [page, rows] of data.pages) {
@@ -352,7 +325,6 @@ export function TrackTable({ collection, width, doc }: { collection: Collection 
         return;
       }
     }
-    // Loaded the first page and it isn't there (renamed / filtered out): stop looking.
     if (data.pages.has(0)) useLibrary.setState({ reveal: null });
   });
 

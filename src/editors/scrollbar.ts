@@ -1,7 +1,3 @@
-// Imperative custom scrollbar for canvas editors (we own scrolling, so the
-// thumb is positioned from the controller's view state each time it moves —
-// no React re-render). Thumb drag + track paging, pointer-captured.
-
 export class ScrollbarCtl {
   private pos = 0;
   private view = 1;
@@ -62,7 +58,6 @@ export class ScrollbarCtl {
     return Math.max(24, Math.min(len, (this.view / Math.max(this.content, 1)) * len));
   }
 
-  /** Reflect the current scroll position / viewport / content length (any unit). */
   update(pos: number, view: number, content: number): void {
     this.pos = pos;
     this.view = view;

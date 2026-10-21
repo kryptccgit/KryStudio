@@ -1,8 +1,3 @@
-//! krypt.eq — 7-band parametric EQ on TPT SVFs (exact gain at the centre
-//! frequency, stable under automation). Cuts are Butterworth cascades
-//! (12/24/48 dB/oct). Parameters are smoothed; coefficients update every
-//! 16 samples while moving.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::filters::{Svf, SvfMode, BUTTER_Q_2, BUTTER_Q_4, BUTTER_Q_8};
 use crate::blocks::{db_to_gain, Smooth};
@@ -58,7 +53,6 @@ pub fn descriptor() -> PluginDescriptor {
 
 const CHUNK: usize = 16;
 
-/// Smoothed band state (log2 frequency, dB gain, log2 Q).
 #[derive(Clone, Copy)]
 struct BandSm {
     lf: Smooth,
@@ -85,10 +79,8 @@ impl BandSm {
 
 pub struct Eq {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
-    // [channel][section]
     lc: [[Svf; 4]; 2],
     hc: [[Svf; 4]; 2],
     bands: [[Svf; 5]; 2],
@@ -268,7 +260,6 @@ impl Effect for Eq {
                 let s = &self.band_sm[b];
                 !(s.db.settled() && s.db.cur == 0.0)
             });
-            // inactive bands hold no stale state for when they come back
             for (b, &on) in band_active.iter().enumerate() {
                 if !on {
                     self.bands[0][b].reset();
@@ -342,8 +333,6 @@ mod tests {
         assert!((db - ideal).abs() < 0.3, "{db} vs {ideal}");
     }
 
-    /// The Krypt EQ window draws this response in TypeScript (src/panels/plugin/eqResponse.ts); its unit
-    /// test (test/meters.test.ts) checks the same params and frequencies against these numbers.
     #[test]
     fn combined_response_reference_values() {
         use super::{Eq, P};

@@ -1,6 +1,3 @@
-// A MashupRequest from IPC, checked field by field (never trust a renderer
-// payload). `{ path: '' }` is kept: the IPC handler opens a file dialog for it.
-
 import { z } from 'zod';
 import type { MashupRequest } from '@shared/mashup/types';
 import { toKeyRef } from '@shared/music/keymatch';
@@ -26,7 +23,6 @@ export const zMashupRequest = z.object({
   transitions: z.boolean().optional(),
 });
 
-/** The request, or a human message saying what is wrong with it. */
 export function cleanMashupRequest(raw: unknown): MashupRequest | string {
   const r = zMashupRequest.safeParse(raw);
   if (!r.success) {

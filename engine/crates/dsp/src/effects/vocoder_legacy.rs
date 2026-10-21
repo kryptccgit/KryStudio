@@ -1,28 +1,4 @@
-//! FROZEN COPY of krypt.vocoder as it shipped before Wave 12.2 (test only).
-//! `vocoder::tests` renders it next to the upgraded vocoder to prove that
-//! old projects (old params at their values, new params at their defaults)
-//! sound exactly the same. Never edit this file.
 #![allow(dead_code)]
-
-//! krypt.vocoder — channel (filterbank) vocoder.
-//!
-//! The voice (modulator) and the carrier each run through 8–32 log-spaced
-//! 4th-order band passes (two cascaded TPT SVF band-pass sections,
-//! 0 dB at the centre). An envelope follower on every voice band sets
-//! the gain of the matching carrier band. Carrier bands are normalized by
-//! the carrier's average band level (so the output follows the voice's
-//! level whatever the carrier's), and "Carrier flatten" additionally
-//! divides each band by its own slow envelope (spectral whitening, at most
-//! +40 dB over the average), so dull or bright carriers still take on the
-//! voice's spectrum. The carrier envelopes release slowly (300 ms), so a
-//! carrier's own note endings still come through. Formant shift moves the
-//! carrier bank against the voice bank. Sibilance passes the voice's
-//! content above the top band straight through for consonants.
-//!
-//! Routing: by default the slot's input is the carrier (put it on a synth)
-//! and the sidechain is the voice. Either can be swapped, and the carrier
-//! can be an internal saw pair or noise. With no sidechain routed, the
-//! input is the voice and the internal carrier plays.
 
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::filters::{Svf, SvfMode};
@@ -67,12 +43,8 @@ pub fn descriptor() -> PluginDescriptor {
 
 const MAX_BANDS: usize = 32;
 const CTRL: usize = 16;
-/// Whitening never lifts a band more than 1/FLOOR over the average band.
 const FLOOR: f32 = 0.01;
 const MAX_GAIN: f32 = 1e4;
-/// Output calibration: a white-noise voice over a saw carrier comes out
-/// about 6 dB under the voice's level (sparser, speech-like voices come
-/// out close to their own level).
 const TRIM: f32 = 2.0;
 
 #[derive(Clone, Copy, Default)]
@@ -166,7 +138,6 @@ impl Vocoder {
         let hi = (p.get(P::HighFreq as usize) as f64).min(fs * 0.42).max(lo * 2.0);
         let nb = self.bands;
         let ratio = (hi / lo).powf(1.0 / (nb - 1) as f64);
-        // octave bandwidth per section: wider than the spacing so the bank overlaps
         let bw = ratio.log2() * (0.7 + 1.3 * p.get(P::Width as usize) as f64);
         let q = (2f64.powf(bw)).sqrt() / (2f64.powf(bw) - 1.0);
         let shift = 2f64.powf(p.get(P::Formant as usize) as f64 / 12.0);
@@ -195,9 +166,6 @@ impl Vocoder {
         self.out.reset(self.out.target);
     }
 
-    /// Control-rate band gains from the envelopes:
-    /// g = m · avg^(f−1) / max(c, FLOOR·avg)^f — at f = 0 every carrier band
-    /// is scaled by the average band level, at f = 1 by its own level.
     fn refresh_gains(&mut self) {
         let f = self.flatten;
         let nb = self.bands;
@@ -243,7 +211,6 @@ impl Effect for Vocoder {
             self.snap();
         }
         let sc = sidechain.filter(|s| s[0].len() >= n && s[1].len() >= n);
-        // resolve routing: 0 input, 1 sidechain, 2 saw, 3 noise
         let (voice_from_sc, carrier_src) = match sc {
             Some(_) => (self.voice_sc, self.carrier),
             None => {
@@ -285,7 +252,6 @@ impl Effect for Vocoder {
                 self.refresh_gains();
                 self.ctrl = CTRL;
             }
-            // linear interpolation of the control-rate gains
             let t = 1.0 - self.ctrl as f32 / CTRL as f32;
             self.ctrl -= 1;
             let mut y = [0.0f32; 2];
@@ -302,7 +268,6 @@ impl Effect for Vocoder {
                 let c1 = if mono_carrier { c0 } else { self.car_bp[1][b].tick(car[1] as f64) as f32 };
                 let ce = &mut self.car_env[b];
                 let cl = 0.5 * (c0.abs() + c1.abs());
-                // peak follower: instant attack, so |band| / envelope ≤ 1 (no onset spikes)
                 *ce = if cl > *ce { cl } else { *ce + (cl - *ce) * self.c_rel };
                 if *ce < 1e-9 {
                     *ce = 0.0;

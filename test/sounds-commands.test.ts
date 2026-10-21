@@ -1,5 +1,3 @@
-// presets.* commands (shared/commands/presets.ts) and the capture helpers (shared/sounds/capture.ts), driven
-// through a real DocHost.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -138,7 +136,6 @@ test('sample presets reuse an existing SampleRef with the same path, else add on
   assert.equal(sa, doc.project.channels[b.data!.channelId].generator.sampleId);
   assert.equal(doc.project.samples[sa!].path, 'factory:808/sub-boom.wav');
   assert.equal(doc.project.channels[a.data!.channelId].rootKey, 36);
-  // A sampler preset without a sample keeps the loaded one.
   const env: InstrumentPreset = { ...SAMPLER_808, id: 'user:env', name: 'Env', sample: undefined, channel: undefined };
   assert.equal(exec('presets.applyToChannel', { channelId: kick.id, preset: env }).ok, true);
   assert.equal(doc.project.channels[kick.id].generator.sampleId, kickSample);
@@ -181,7 +178,6 @@ test('addChannel: own insert named after the channel, at an index, with the chai
   assert.equal(c808.rootKey, 36);
   assert.equal(doc.project.channelOrder[doc.project.channelOrder.length - 1], c808.id);
   assert.equal(doc.getHistory().filter((h) => h.label.startsWith('Add ')).length, 2);
-  // Fill the mixer, then one more preset channel fails with a sentence and changes nothing.
   for (let i = doc.project.mixer.insertOrder.length; i < 128; i++) exec('mixer.addInsert', {});
   const v = doc.version;
   const full = exec('presets.addChannel', { preset: PAD });
@@ -219,7 +215,7 @@ test('capture: presetFromChannel is sparse, valid and round-trips through preset
   const { doc, byName, exec } = host();
   const keys = byName('Keys');
   exec('presets.applyToChannel', { channelId: keys.id, preset: LEAD_EDM });
-  exec('channels.setGenParams', { id: keys.id, params: { cutoff: 9000, gain: -3 } }); // cutoff 9000 = the default
+  exec('channels.setGenParams', { id: keys.id, params: { cutoff: 9000, gain: -3 } });
   exec('channels.set', { id: keys.id, volume: 0.5, poly: { mono: true, glideMs: 30 } });
   const p = presetFromChannel(doc.project, CATALOG, keys.id, { name: 'My Lead!', tags: ['Bright', ' wide ', 'bright'], genres: ['edm'] });
   assert.equal(zPreset.safeParse(p).success, true, JSON.stringify(zPreset.safeParse(p).error?.issues));

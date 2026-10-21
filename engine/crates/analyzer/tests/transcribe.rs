@@ -1,5 +1,3 @@
-//! `transcribe` on synthetic signals: mono (pYIN), poly (Basic Pitch), drums.
-
 mod common;
 
 use common::*;
@@ -30,7 +28,6 @@ fn show(n: &[TranscribedNote]) -> String {
     n.iter().map(|n| format!("[{:.3}+{:.3} k{} v{:.2} c{:?}]", n.start_sec, n.dur_sec, n.key, n.vel, n.cents)).collect::<Vec<_>>().join(" ")
 }
 
-/// Melody: (midi, start, dur) with sines + 2 harmonics.
 fn melody(notes: &[(f32, f32, f32)], total: f32) -> Vec<f32> {
     let mut x = silence(total);
     for &(m, t, d) in notes {
@@ -57,7 +54,6 @@ fn mono_melody_with_gaps() {
 
 #[test]
 fn mono_legato_and_detuned() {
-    // Legato line (no gaps), 20 cents sharp, low register (bass/808 range).
     let det = 0.2;
     let seq = [(40.0, 0.0, 0.5), (43.0, 0.5, 0.5), (45.0, 1.0, 0.5), (47.0, 1.5, 0.5), (40.0, 2.0, 1.0)];
     let mut x = silence(3.3);
@@ -82,7 +78,6 @@ fn mono_legato_and_detuned() {
 
 #[test]
 fn mono_repeated_notes_and_key_range() {
-    // Same pitch re-attacked (staccato-ish with tiny dips) + an out-of-range note.
     let mut x = silence(3.0);
     for k in 0..4 {
         add(&mut x, 0.3 + k as f32 * 0.5, &tone(midi_hz(69.0), 0.45, &[0.3]), 0.4);
@@ -105,7 +100,6 @@ fn mono_repeated_notes_and_key_range() {
 fn poly_basic_pitch_chords() {
     let dir = model_dir("basic-pitch");
     assert!(dir.join("nmp.onnx").is_file(), "bundled Basic Pitch missing at {}", dir.display());
-    // C major triad, then F major (C4 F4 A4), then a G3 bass + B4 D5 dyad; piano-ish decaying tones.
     let chords: [(&[f32], f32, f32); 3] = [(&[60.0, 64.0, 67.0], 0.5, 1.0), (&[60.0, 65.0, 69.0], 1.75, 1.0), (&[55.0, 71.0, 74.0], 3.0, 1.0)];
     let mut x = silence(4.5);
     for (notes, t, d) in chords {
@@ -136,14 +130,10 @@ fn poly_basic_pitch_chords() {
             }
         }
     }
-    // Spurious notes: upper partials of these strongly harmonic synthetic
-    // tones (e.g. D6 = 3rd harmonic of G4). At most 6 beyond the 9 real ones,
-    // all quieter than the real notes.
     assert!(r.notes.len() <= 15, "{} notes: {}", r.notes.len(), show(&r.notes));
     let real_min = r.notes.iter().filter(|n| chords.iter().any(|c| c.0.contains(&(n.key as f32)))).map(|n| n.vel).fold(1.0f32, f32::min);
     let ghost_max = r.notes.iter().filter(|n| !chords.iter().any(|c| c.0.contains(&(n.key as f32)))).map(|n| n.vel).fold(0.0f32, f32::max);
     assert!(ghost_max < real_min, "ghost vel {ghost_max} vs real {real_min}");
-    // Key range restriction.
     let mut a = args(TranscribeMode::Poly);
     a.min_key = Some(62);
     a.max_key = Some(70);
@@ -177,7 +167,6 @@ fn poly_errors_name_the_model() {
 
 #[test]
 fn drums_roles() {
-    // Bar at 100 BPM: kick, hat, snare, hat, kick+hat, hat, snare, open hat.
     let step = 0.3;
     let mut x = silence(3.2);
     let mut want: Vec<(f32, DrumRole)> = Vec::new();
@@ -220,10 +209,7 @@ fn drums_groove_counts_and_velocity() {
     eprintln!("groove drums: kick {} snare {} hat {} open {} perc {}", count(DrumRole::Kick), count(DrumRole::Snare), count(DrumRole::Hat), count(DrumRole::Openhat), count(DrumRole::Perc));
     assert_eq!(count(DrumRole::Kick), 8);
     assert_eq!(count(DrumRole::Snare), 8);
-    // 32 eighth-note hats; the 8 under snares are masked by the snare and come
-    // from the hat stream running through them.
     assert!((30..=32).contains(&(count(DrumRole::Hat) + count(DrumRole::Openhat))), "hats {}", count(DrumRole::Hat));
-    // Timing: every kick on the grid (0.25 s offset, 1 s apart) within 15 ms.
     for h in r.hits.iter().filter(|h| h.role == DrumRole::Kick) {
         let ph = ((h.time_sec - 0.25) / 1.0).round();
         assert!((h.time_sec - 0.25 - ph).abs() < 0.015, "kick at {}", h.time_sec);
@@ -231,10 +217,6 @@ fn drums_groove_counts_and_velocity() {
     assert!(count(DrumRole::Perc) <= 1);
 }
 
-/// A big-room kick: a click and a pitch sweep from 400 Hz that only reaches the
-/// low band (< 150 Hz) after ~30 ms, then a long 50 Hz tail (common in EDM and
-/// house). Its attack sits in the body band, so it used to read as a perc hit
-/// with the kick proper as a second onset ~30 ms later, often missed.
 fn big_room_kick() -> Vec<f32> {
     let n = (0.45 * SR) as usize;
     let mut ph = 0.0f32;
@@ -268,8 +250,6 @@ fn drums_big_room_kick_four_on_the_floor_over_a_sub() {
         }
         add(&mut x, t + beat / 2.0, &hat(b as u64 + 40, 0.03), 0.3);
     }
-    // A sustained sub under the drop, tuned to the kick's tail as producers do (a detuned one beats, and the beating
-    // reads as low-band onsets of its own; sidechained mixes duck it, and the drum stem has none).
     let sub = tone(50.0, x.len() as f32 / SR, &[]);
     mix(&mut x, &sub, 0.12);
     let r = transcribe_signal(&at22(&x), &args(TranscribeMode::Drums), &JobCtx::detached()).unwrap();
@@ -283,8 +263,6 @@ fn drums_big_room_kick_four_on_the_floor_over_a_sub() {
     assert!(percs <= 3, "the kick's attack is not a perc hit: {percs} perc");
 }
 
-/// Hits of `role` (hats: closed or open) scored against `want` (s) within
-/// 30 ms, one hit per want: (matched, hits reported).
 fn score(hits: &[krypt_studio_analyzer::protocol::DrumHit], roles: &[DrumRole], want: &[f32]) -> (usize, usize) {
     let got: Vec<f32> = hits.iter().filter(|h| roles.contains(&h.role)).map(|h| h.time_sec).collect();
     let mut used = vec![false; got.len()];
@@ -298,7 +276,6 @@ fn score(hits: &[krypt_studio_analyzer::protocol::DrumHit], roles: &[DrumRole], 
     (tp, got.len())
 }
 
-/// Bus-limiter ducking after each of `kicks` (s): −`depth_db`, back in ~80 ms.
 fn duck(x: &mut [f32], kicks: &[f32], depth_db: f32) {
     let floor = 10f32.powf(-depth_db / 20.0);
     for (i, v) in x.iter_mut().enumerate() {
@@ -308,7 +285,6 @@ fn duck(x: &mut [f32], kicks: &[f32], depth_db: f32) {
     }
 }
 
-/// A rim / stick click: a 1.7 kHz ping and a noise tick, gone in ~15 ms.
 fn rim(seed: u64) -> Vec<f32> {
     let mut rng = Rng::new(seed);
     (0..(0.04 * SR) as usize)
@@ -319,10 +295,6 @@ fn rim(seed: u64) -> Vec<f32> {
         .collect()
 }
 
-/// Neon Fog's failure: trap at 140 bpm, 16th hats that ring, a long 808
-/// under every kick and the hats ducked by the kick (a bus limiter). The
-/// hat a 16th after a kick sat on the 808's swell and became a kick, and
-/// the hats under kicks and claps were lost.
 #[test]
 fn drums_fast_16th_hats_over_kicks_808_and_claps() {
     let bpm = 140.0;
@@ -339,7 +311,6 @@ fn drums_fast_16th_hats_over_kicks_808_and_claps() {
         want_h.push(t);
         if [0, 6, 11].contains(&(s % 16)) {
             add(&mut x, t, &k, 0.9);
-            // The 808: a long 49 Hz tone under each kick (overlapping ones beat).
             add(&mut x, t, &bass_note(31.0, 1.2, &[0.5, 0.1], 1.5), 0.5);
             want_k.push(t);
         }
@@ -361,10 +332,6 @@ fn drums_fast_16th_hats_over_kicks_808_and_claps() {
     assert!(th as f32 >= 0.95 * nh as f32, "hat precision {th}/{nh}");
 }
 
-/// House: kick on every beat, the clap on top of the kicks on 2 and 4,
-/// 16th closed hats with an open hat on each offbeat, rim clicks. The clap
-/// must not be lost on the kick (nor a snare added to the other kicks), and
-/// a rim is a perc, not a snare.
 #[test]
 fn drums_clap_on_kick_and_rims() {
     let bpm = 124.0;
@@ -407,8 +374,6 @@ fn drums_clap_on_kick_and_rims() {
     assert!(th as f32 >= 0.9 * want_h.len() as f32 && th as f32 >= 0.95 * nh as f32, "hats {th}/{} of {nh}", want_h.len());
 }
 
-/// Hats only on the offbeats, a kick on every beat: the hat stream is a
-/// quarter-note stream between the kicks, not 8ths under them.
 #[test]
 fn drums_offbeat_hats_stay_offbeat() {
     let beat = 60.0 / 124.0;
@@ -431,7 +396,6 @@ fn drums_offbeat_hats_stay_offbeat() {
     assert_eq!((th, nh), (want_h.len(), want_h.len()));
 }
 
-/// Transcription speed (run with --ignored, release).
 #[test]
 #[ignore]
 fn perf_transcription() {
@@ -448,8 +412,6 @@ fn perf_transcription() {
     }
 }
 
-/// Degenerate inputs never panic: tiny, silent and noise-only signals in
-/// every mode (and through `analyze`).
 #[test]
 fn degenerate_inputs_are_handled() {
     use krypt_studio_analyzer::analyze::{analyze_channels, Options};
@@ -473,14 +435,11 @@ fn degenerate_inputs_are_handled() {
             assert!(r.notes.iter().all(|n| n.dur_sec > 0.0 && n.start_sec >= 0.0 && n.vel > 0.0 && n.vel <= 1.0), "{mode:?} {name}");
         }
     }
-    // Silence: nothing to report.
     let a = analyze_channels("s", &[silence(5.0)], SR, &Options { sections: true, beat_model_dir: None, ..Default::default() }, &JobCtx::detached()).unwrap();
     assert!(a.tempo.is_none() && a.key.is_none() && a.swing.is_none() && a.beats.is_none());
     assert_eq!(a.onset_rate, 0.0);
 }
 
-/// A bass note: harmonics `amps` (index 0 = fundamental), exponential decay,
-/// 4 ms attack, 10 ms release.
 fn bass_note(m: f32, secs: f32, amps: &[f32], decay: f32) -> Vec<f32> {
     let f = midi_hz(m);
     (0..(secs * SR) as usize)
@@ -494,9 +453,6 @@ fn bass_note(m: f32, secs: f32, amps: &[f32], decay: f32) -> Vec<f32> {
 
 #[test]
 fn mono_sub_bass_weak_fundamental_and_a0() {
-    // E1 G1 A1 C2 D1 E2 C1 B1 A0 A#0 B0: 808 sine, a weak fundamental, no
-    // fundamental at all. The short envelope ripples once per period on such
-    // notes; they must come out whole (not chopped into re-attacks).
     let ns = [28.0, 31.0, 33.0, 36.0, 26.0, 40.0, 24.0, 35.0, 21.0, 22.0, 23.0];
     let mut a = args(TranscribeMode::Mono);
     a.max_key = Some(60);
@@ -516,7 +472,6 @@ fn mono_sub_bass_weak_fundamental_and_a0() {
             assert!((got.dur_sec - 0.5).abs() < 0.04, "{label} note {i}: dur {}", got.dur_sec);
         }
     }
-    // Back-to-back repeated sub notes (no gap) still split at each attack.
     let mut x = silence(0.2);
     for _ in 0..4 {
         x.extend(bass_note(28.0, 0.4, &[0.3, 0.5, 0.3], 6.0));
@@ -533,9 +488,6 @@ fn mono_sub_bass_weak_fundamental_and_a0() {
 
 #[test]
 fn mono_fast_legato_bass_with_octave_jumps() {
-    // A trap bass line like a real HT-Demucs bass stem: 808-ish (sine + 2nd harmonic), legato (no gaps, one
-    // continuous phase), 0.13-0.25 s notes jumping octaves. pYIN alone left a hole at every change (~58% of the
-    // sounding time covered); the low-line reader must cover it with the right keys at the right times.
     let seq: [(f32, f32); 16] = [
         (36.0, 0.18), (48.0, 0.25), (36.0, 0.20), (48.0, 0.25), (36.0, 0.17), (39.0, 0.15), (51.0, 0.23), (63.0, 0.14),
         (39.0, 0.20), (51.0, 0.16), (39.0, 0.19), (51.0, 0.18), (36.0, 0.15), (48.0, 0.24), (60.0, 0.13), (36.0, 0.30),
@@ -559,7 +511,6 @@ fn mono_fast_legato_bass_with_octave_jumps() {
         let k = starts.iter().rposition(|&s| tt >= s).unwrap();
         let since = tt - starts[k];
         ph += 2.0 * PI * midi_hz(seq[k].0) / SR;
-        // each note re-attacks a little (decay inside the note), the line never stops
         let env = (0.75 + 0.25 * (-since * 8.0).exp()) * ((tt - t0) / 0.004).min(1.0) * ((end - tt) / 0.01).clamp(0.0, 1.0);
         *out = 0.45 * env * (ph.sin() + 0.45 * (2.0 * ph).sin());
     }

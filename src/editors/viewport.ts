@@ -1,11 +1,5 @@
-// Pure viewport math shared by every timeline editor (piano roll, playlist,
-// event lanes). We own scrolling: canvases are viewport-sized and the scroll
-// offset is view state (research/06 §1.4). No DOM in here — unit-tested.
-
 export interface TimeView {
-  /** Tick at the left edge of the content area. */
   scrollTick: number;
-  /** Horizontal zoom. */
   pxPerTick: number;
 }
 
@@ -21,7 +15,6 @@ export function xToTick(v: TimeView, x: number): number {
   return v.scrollTick + x / v.pxPerTick;
 }
 
-/** Ticks visible in a viewport `w` px wide. */
 export function viewTicks(v: TimeView, w: number): number {
   return w / v.pxPerTick;
 }
@@ -36,20 +29,15 @@ export function zoomAt(v: TimeView, anchorX: number, factor: number, minPx: numb
   return { pxPerTick, scrollTick: Math.max(0, t - anchorX / pxPerTick) };
 }
 
-/** Exponential, delta-proportional wheel zoom: one notch (~100) ≈ ×1.28; trackpad pinch streams stay smooth. */
 export function wheelZoomFactor(deltaY: number): number {
   return Math.exp(-clamp(deltaY, -400, 400) * 0.0025);
 }
 
-/** Clamp a scroll offset to [0, content - view] (never negative). */
 export function clampScroll(scroll: number, contentLen: number, viewLen: number): number {
   return clamp(scroll, 0, Math.max(0, contentLen - viewLen));
 }
 
-// ── Key rows (piano roll vertical axis: key 127 at the top) ──────────
-
 export interface KeyView {
-  /** Pixels scrolled from the top (key 127). */
   scrollY: number;
   rowH: number;
 }
@@ -64,21 +52,17 @@ export function yToKey(v: KeyView, y: number): number {
   return 127 - Math.floor((y + v.scrollY) / v.rowH);
 }
 
-/** Inclusive [lo, hi] key range visible in a viewport `h` px tall (clamped 0..127). */
 export function visibleKeys(v: KeyView, h: number): [number, number] {
   const hi = clamp(yToKey(v, 0), 0, 127);
   const lo = clamp(yToKey(v, h - 1), 0, 127);
   return [lo, hi];
 }
 
-/** Zoom rows keeping the key under `anchorY` fixed. */
 export function zoomRowsAt(v: KeyView, anchorY: number, factor: number, minH: number, maxH: number): KeyView {
   const rowH = clamp(v.rowH * factor, minH, maxH);
-  const contentY = (anchorY + v.scrollY) / v.rowH; // fractional row index
+  const contentY = (anchorY + v.scrollY) / v.rowH;
   return { rowH, scrollY: Math.max(0, contentY * rowH - anchorY) };
 }
-
-// ── Lanes (playlist tracks: variable heights) ────────────────────────
 
 export interface LaneLayout {
   ids: string[];
@@ -100,7 +84,6 @@ export function buildLanes(ids: string[], heightOf: (id: string, i: number) => n
   return { ids, tops, heights, total: y };
 }
 
-/** Lane index at a CONTENT y (0 = top of first lane); -1 above, ids.length below. */
 export function laneAt(l: LaneLayout, contentY: number): number {
   if (contentY < 0) return -1;
   if (contentY >= l.total) return l.ids.length;
@@ -114,7 +97,6 @@ export function laneAt(l: LaneLayout, contentY: number): number {
   return lo;
 }
 
-/** Inclusive [first, last] lane indexes intersecting [scrollY, scrollY + h). Empty → [0, -1]. */
 export function visibleLanes(l: LaneLayout, scrollY: number, h: number): [number, number] {
   if (l.ids.length === 0) return [0, -1];
   const a = clamp(laneAt(l, Math.max(0, scrollY)), 0, l.ids.length - 1);
@@ -122,12 +104,6 @@ export function visibleLanes(l: LaneLayout, scrollY: number, h: number): [number
   return [a, b];
 }
 
-// ── Drag edge auto-scroll ────────────────────────────────────────────
-
-/**
- * Pixels to scroll this frame when the pointer is near/past an edge of
- * [min, max] (negative = toward min). 0 when well inside.
- */
 export function edgeScrollStep(pos: number, min: number, max: number, edge = 16, maxStep = 22): number {
   if (pos < min + edge) return -Math.min(maxStep, 3 + (min + edge - pos) / 3);
   if (pos > max - edge) return Math.min(maxStep, 3 + (pos - (max - edge)) / 3);

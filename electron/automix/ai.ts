@@ -1,10 +1,3 @@
-// Auto Mix: a prompt → AutoMixIntent through the connected AI (research/20 §2).
-// Only when the user saved an API key for the built-in agent (Anthropic, OpenAI or
-// OpenRouter: the selected provider, or ANTHROPIC_API_KEY): one short
-// structured-output call with a JSON schema and an 8 s timeout. Everything that comes back is clamped
-// (shared/automix/intent.ts clampIntent); any failure returns null and the
-// caller falls back to the keyword parser.
-
 import Anthropic from '@anthropic-ai/sdk';
 import type { AutoMixIntent } from '@shared/automix/types';
 import { AUTO_MIX_PRESETS } from '@shared/automix/presets';
@@ -19,7 +12,6 @@ export const AI_TIMEOUT_MS = 8000;
 
 const STEP = { type: 'integer', enum: [-2, -1, 0, 1, 2] } as const;
 
-/** The strict schema the model fills (every field required; 0 / "" = not asked). */
 export const INTENT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -46,12 +38,10 @@ function selectedProvider(deps: MainDeps): AgentProvider {
   return isAgentProvider(p) ? p : 'anthropic';
 }
 
-/** Is an AI reachable right now (a saved key for the selected provider, or ANTHROPIC_API_KEY)? */
 export function aiAvailable(deps: MainDeps): boolean {
   return !!deps.getSettings().agent?.hasApiKey || !!process.env.ANTHROPIC_API_KEY;
 }
 
-/** The same reading through an OpenAI-compatible provider (OpenAI, OpenRouter): JSON mode, then clamped. */
 async function compatIntent(deps: MainDeps, p: AgentProvider, prompt: string, signal?: AbortSignal): Promise<AutoMixIntent | null> {
   const key = providerKey(deps.userDataDir, p);
   if (!key) return null;
@@ -77,7 +67,6 @@ Answer with one JSON object with exactly these keys: presetId, targetLufs, ${INT
   return clampIntent(JSON.parse(text), 'ai');
 }
 
-/** The AI reader: null (fall back to keywords) whenever no key is set up or the call fails. */
 export function createAiIntent(deps: MainDeps): AiIntentFn {
   return async (prompt, signal) => {
     if (!aiAvailable(deps)) return null;
@@ -92,7 +81,6 @@ export function createAiIntent(deps: MainDeps): AiIntentFn {
     }
     const client = agentClient(deps.userDataDir, { maxRetries: 0 });
     if (!client || !prompt.trim()) return null;
-    // The tool loop module is loaded only here (it imports the tool registry, which imports Auto Mix).
     const { DEFAULT_MODEL, supportsFallbacks } = await import('../agent/loop');
     const model = deps.getSettings().agent ? modelFor(deps.getSettings().agent, 'anthropic') : DEFAULT_MODEL;
     try {

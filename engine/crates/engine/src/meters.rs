@@ -1,30 +1,15 @@
-//! Meters and scopes (docs/ENGINE_PROTOCOL.md §15).
-//!
-//! - **Gain reduction**: after each effect's block the core publishes `Effect::meter()` (dB, >= 0) into
-//!   one atomic per FX slot (max since the last read). Telemetry sends the non-zero ones as
-//!   `TelemetryFrame.gr` keyed "insertId/slotId"; offline renders average them per slot
-//!   (`RenderResult.gainReduction`).
-//! - **Watched slots**: a renderer window asks for up to `TAPS` slots over its telemetry socket
-//!   (`{"t":"watch","slots":["insertId/slotId", ...]}`). The core copies each watched slot's output
-//!   into a lock-free ring (atomics only, no allocation); the telemetry thread feeds a
-//!   `krypt_studio_dsp::scope::SlotScope` from it and sends `TelemetryFrame.scopes[key]`.
-
 use crate::program::{MAX_FX, NONE};
 use krypt_studio_dsp::scope::{ScopeData, SlotScope};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::*};
 
-/// Slots that can be watched at once (all windows together).
 pub const TAPS: usize = 4;
-/// Ring length per tap (frames, power of two): ≈ 0.34 s at 48 kHz, read every 16 ms.
 pub const TAP_FRAMES: usize = 16384;
 const MASK: u64 = TAP_FRAMES as u64 - 1;
 
 pub struct Tap {
-    /// FX slot index watched by this tap; NONE = off. Written by the telemetry thread.
     pub fx: AtomicU32,
-    /// Frames written so far (monotonic); stored with Release after the samples.
     written: AtomicU64,
     l: Box<[AtomicU32]>,
     r: Box<[AtomicU32]>,
@@ -36,7 +21,6 @@ impl Tap {
         Self { fx: AtomicU32::new(NONE), written: AtomicU64::new(0), l: ring(), r: ring() }
     }
 
-    /// [RT] Append samples (`None` = silence: the chain slept through this block).
     #[inline]
     fn push(&self, src: Option<(&[f32], &[f32])>, n: usize) {
         let w = self.written.load(Relaxed);
@@ -52,7 +36,6 @@ impl Tap {
         self.written.store(w + n as u64, Release);
     }
 
-    /// Copy everything written since `from` (at most half the ring: older frames were overwritten).
     fn read(&self, from: &mut u64, l: &mut Vec<f32>, r: &mut Vec<f32>) {
         let w = self.written.load(Acquire);
         let start = (*from).max(w.saturating_sub(TAP_FRAMES as u64 / 2)).min(w);
@@ -71,12 +54,9 @@ impl Tap {
     }
 }
 
-/// Audio thread ⇄ telemetry / render state (one per `core::Shared`).
 pub struct MeterShared {
-    /// Gain reduction per FX slot, dB as f32 bits (max since the last `take_gr`; positive floats order like u32).
     gr: Box<[AtomicU32]>,
     pub taps: [Tap; TAPS],
-    /// Some tap is on (one load per effect when nothing is watched).
     pub watching: AtomicBool,
 }
 
@@ -95,7 +75,6 @@ impl MeterShared {
         }
     }
 
-    /// [RT] Publish an effect's meter after its block.
     #[inline]
     pub fn publish_gr(&self, fx: usize, db: Option<f32>) {
         if let (Some(db), Some(a)) = (db, self.gr.get(fx)) {
@@ -105,12 +84,10 @@ impl MeterShared {
         }
     }
 
-    /// Max gain reduction since the last call (dB, 0 = none).
     pub fn take_gr(&self, fx: usize) -> f32 {
         self.gr.get(fx).map(|a| f32::from_bits(a.swap(0, Relaxed))).filter(|v| v.is_finite()).unwrap_or(0.0)
     }
 
-    /// [RT] After FX slot `fx` produced `l`/`r` (or None: silence), copy it to any tap watching it.
     #[inline]
     pub fn tap(&self, fx: u32, src: Option<(&[f32], &[f32])>, n: usize) {
         if !self.watching.load(Relaxed) {
@@ -124,9 +101,6 @@ impl MeterShared {
     }
 }
 
-// ── Telemetry side ────────────────────────────────────────────────────────
-
-/// Non-zero gain reductions since the last frame, keyed "insertId/slotId" (0.1 dB resolution).
 pub fn collect_gr<'a>(m: &MeterShared, fx_names: &'a [(u32, String)]) -> Option<BTreeMap<&'a str, f32>> {
     let mut out = BTreeMap::new();
     for (slot, key) in fx_names {
@@ -139,13 +113,11 @@ pub fn collect_gr<'a>(m: &MeterShared, fx_names: &'a [(u32, String)]) -> Option<
     (!out.is_empty()).then_some(out)
 }
 
-/// What a client sends up its telemetry socket.
 #[derive(serde::Deserialize)]
 struct WatchMsg {
     t: String,
     #[serde(default)]
     slots: Vec<String>,
-    /// Watched slots whose integrated loudness / true peak start over.
     #[serde(default)]
     reset: Vec<String>,
 }
@@ -158,7 +130,6 @@ struct Watched {
     scope: SlotScope,
 }
 
-/// The watch set of every connected client and the scopes being computed.
 #[derive(Default)]
 pub struct Watcher {
     by_client: HashMap<String, Vec<String>>,
@@ -169,8 +140,6 @@ pub struct Watcher {
 }
 
 impl Watcher {
-    /// A text message from a client: `{"t":"watch","slots":[...]}` replaces that client's set.
-    /// Returns false for anything else (ignored).
     pub fn on_message(&mut self, client: &str, text: &str) -> bool {
         let Ok(m) = serde_json::from_str::<WatchMsg>(text) else { return false };
         if m.t != "watch" {
@@ -187,7 +156,6 @@ impl Watcher {
         self.by_client.remove(client);
     }
 
-    /// Keys watched by any client (sorted, at most TAPS).
     pub fn wanted(&self) -> Vec<String> {
         let mut v: Vec<String> = self.by_client.values().flatten().cloned().collect();
         v.sort();
@@ -196,12 +164,9 @@ impl Watcher {
         v
     }
 
-    /// Reconcile the taps with the watch set, pull new audio and snapshot every watched slot.
-    /// `restart`: the transport just started (integrated loudness and true peak start over).
     pub fn update(&mut self, m: &MeterShared, fx_names: &[(u32, String)], sample_rate: u32, restart: bool, full: bool) -> Option<BTreeMap<String, ScopeData>> {
         let wanted = self.wanted();
         let slot_of = |key: &str| fx_names.iter().find(|(_, k)| k == key).map(|(s, _)| *s);
-        // drop what is no longer wanted (or whose slot vanished / moved) and sample-rate changes
         self.active.retain(|w| {
             let keep = wanted.contains(&w.key) && slot_of(&w.key) == Some(w.fx) && w.scope.sample_rate() == sample_rate.clamp(8000, 384_000);
             if !keep {
@@ -238,23 +203,16 @@ impl Watcher {
     }
 }
 
-// ── Offline render: gain reduction per slot ───────────────────────────────
-
-/// `RenderResult.gainReduction[]` (shared/engine/protocol.ts): one dynamics slot over a render.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GrStat {
     pub insert_id: String,
     pub slot_id: String,
-    /// Mean gain reduction over the whole render (dB).
     pub avg_db: f32,
-    /// Largest gain reduction (dB).
     pub max_db: f32,
-    /// Share of the render (0..1) spent reducing by more than 1 dB.
     pub active: f32,
 }
 
-/// Accumulates `take_gr` once per render block.
 #[derive(Default)]
 pub struct GrAccum {
     slots: Vec<(u32, String, f64, f32, u32)>,
@@ -278,7 +236,6 @@ impl GrAccum {
         }
     }
 
-    /// Slots that reduced at all, in key order.
     pub fn finish(self) -> Vec<GrStat> {
         let n = self.blocks.max(1) as f64;
         let r2 = |x: f64| ((x * 100.0).round() / 100.0) as f32;
@@ -308,7 +265,7 @@ mod tests {
         m.publish_gr(3, Some(1.0));
         m.publish_gr(4, Some(0.0));
         m.publish_gr(5, None);
-        m.publish_gr(MAX_FX + 1, Some(9.0)); // out of range: ignored
+        m.publish_gr(MAX_FX + 1, Some(9.0));
         let names = vec![(3, "ins/a".to_string()), (4, "ins/b".to_string()), (5, "ins/c".to_string())];
         let g = collect_gr(&m, &names).unwrap();
         assert_eq!(g.len(), 1);
@@ -327,8 +284,6 @@ mod tests {
         assert!(!w.on_message("a", "garbage"));
         assert!(w.update(&m, &names, 48000, false, true).is_some());
         assert!(m.watching.load(Relaxed));
-        // the core taps slot 9 (watched) and slot 7 (not watched)
-        // 0.6 s in 100 ms telemetry reads (the momentary window is 400 ms)
         let x: Vec<f32> = (0..28800).map(|i| 0.1 * (std::f32::consts::TAU * 997.0 * i as f32 / 48000.0).sin()).collect();
         let mut s = None;
         for part in x.chunks(4800) {
@@ -342,10 +297,8 @@ mod tests {
         let d = &s["ins1/an"];
         assert!((d.lufs_m.unwrap() + 20.0).abs() < 0.3, "{:?}", d.lufs_m);
         assert_eq!(d.spectrum.as_ref().unwrap().len(), krypt_studio_dsp::scope::SCOPE_BINS);
-        // bandwidth: a full snapshot (spectrum + scope, every 2nd frame) stays small
         let full = serde_json::to_string(d).unwrap().len();
         assert!(full < 3000, "{full} bytes");
-        // a second client, then both leave: the tap switches off
         assert!(w.on_message("b", r#"{"t":"watch","slots":["ins1/eq","ins1/an"]}"#));
         let s = w.update(&m, &names, 48000, false, false).unwrap();
         assert_eq!(s.len(), 2);

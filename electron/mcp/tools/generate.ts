@@ -1,8 +1,3 @@
-// generate_notes: the piano roll Generate dialog for agents. Runs the
-// notes.generate command (shared/commands/generate.ts) on one channel of a
-// pattern as ONE undo step, and answers with what it wrote (notes, bars, key,
-// chords, seed) so the agent can keep the take or re-roll it.
-
 import { z } from 'zod';
 import { parseKey } from '@shared/music/theory';
 import { ticksPerBar } from '@shared/schema/time';

@@ -1,11 +1,5 @@
-//! The loop slicer (krypt.slicer) through the engine: `generator.slices`
-//! reaches the instrument, keys pick slices at their recorded pitch whatever
-//! the channel's root key, and a slice edit re-creates the instance while a
-//! param edit does not. Reuses the factory-sample helpers of tests_rack.rs.
-
 use super::*;
 
-/// 0.05 s of the factory kick (48 kHz mono) in output frames.
 const CUT: usize = 2400;
 
 fn slicer_project(slices: Value, root_key: u8, key: u8) -> Value {
@@ -38,21 +32,16 @@ fn peak(o: &Rendered, a: usize, b: usize) -> f32 {
 
 #[test]
 fn slicer_channel_plays_the_slices_of_its_generator() {
-    // Slice 1 is the kick's first 50 ms, then silence.
     let first = render(&slicer_project(two(), 60, 60));
     assert!(peak(&first, 0, CUT - 200) > 0.05, "slice 1 silent");
     assert!(peak(&first, CUT + 10, first.l.len()) == 0.0, "slice 1 played past slice 2's start");
-    // No slices: the whole kick plays on the first key.
     let whole = render(&slicer_project(Value::Null, 60, 60));
     assert!(peak(&whole, CUT + 200, 2 * CUT) > 1e-3, "the whole sample stopped early");
-    // Slice 2 (next key) is the kick from 50 ms on, sample for sample.
     let second = render(&slicer_project(two(), 60, 61));
     let diff = (100..CUT).fold(0f32, |m, i| m.max((second.l[i] - whole.l[i + CUT]).abs()));
     assert!(peak(&second, 0, CUT) > 1e-3 && diff < 1e-5, "slice 2 differs from the kick at 50 ms by {diff}");
-    // The channel's root key never transposes a slice (keys pick slices, not pitch).
     let low_root = render(&slicer_project(two(), 48, 60));
     assert!(first.l == low_root.l, "root key changed the slice");
-    // A key past the last slice is silent.
     assert!(peak(&render(&slicer_project(two(), 60, 62)), 0, CUT) == 0.0);
 }
 

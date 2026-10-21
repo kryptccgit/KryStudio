@@ -1,8 +1,3 @@
-// Home hub + Guides logic: the live card pills (never guessing), the recent
-// projects list, the "open to Home at launch?" decision, the rotating tips,
-// the Home-only key handling, the guides markup parser, guide data integrity
-// (unique ids, every deep link is a real action, every stock plugin has a
-// line) and the generated shortcuts table.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -37,8 +32,6 @@ import { blockInlines, guideActionIds, inlineText, parseGuide, parseInline, type
 const blockText = (b: GuideBlock): string => ('text' in b ? inlineText(b.text) : '');
 import { buildShortcutSections, fallbackLabel } from '../src/guides/shortcuts';
 import { DEFAULT_KEYMAP, applyKeymapOverrides, findKeyConflicts, isBareCombo } from '../src/input/keymap';
-
-// ── Fixtures ──────────────────────────────────────────────────────────
 
 const mcp = (over: Partial<McpStatus> = {}): McpStatus => ({ enabled: true, pipeName: 'p', http: { enabled: false, url: null }, clients: [], shimPath: null, ...over });
 const client = (name: string) => ({ clientId: name.toLowerCase(), name, connectedAt: 1, calls: 0 });
@@ -93,8 +86,6 @@ const engine = (state: EngineStatus['state'], device: Partial<NonNullable<Engine
   engineVersion: '1',
   restarts: 0,
 });
-
-// ── Pills ─────────────────────────────────────────────────────────────
 
 test('studio pill: project name, unsaved dot, recovered warning; nothing without a name', () => {
   assert.deepEqual(studioPill({ name: 'Neon Fog', dirty: false }), { text: 'Neon Fog', tone: 'neutral', dot: false, hint: 'Neon Fog is open' });
@@ -189,8 +180,6 @@ test('settings pill: device name when open, "No audio device", engine states', (
   assert.equal(settingsPill(engine('stopped'))?.text, 'Engine stopped');
 });
 
-// ── Recent projects ───────────────────────────────────────────────────
-
 test('splitProjectPath: name without .kstudio, parent folder', () => {
   assert.deepEqual(splitProjectPath('C:\\Beats\\Neon Fog.kstudio'), { name: 'Neon Fog', folder: 'C:\\Beats' });
   assert.deepEqual(splitProjectPath('D:/x/y/Song.KSTUDIO'), { name: 'Song', folder: 'D:/x/y' });
@@ -218,8 +207,6 @@ test('shapeRecent: de-duplicates case-insensitively, drops the open project, cap
   assert.deepEqual(shapeRecent(['x.kstudio'], { limit: 0 }), []);
 });
 
-// ── Launch decision ───────────────────────────────────────────────────
-
 test('open to Home: on by default, off when the setting is off, never when launched with a file', () => {
   assert.equal(shouldOpenHome({ openToHome: undefined, openedWithFile: false }), true, 'older settings files lack the field');
   assert.equal(shouldOpenHome({ openToHome: true, openedWithFile: false }), true);
@@ -239,8 +226,6 @@ test('tips rotate and wrap; every tip is unique and short', () => {
   for (const t of TIPS) assert.ok(t.length <= 130, `tip too long for one line: ${t}`);
 });
 
-// ── Keys while Home covers the window ─────────────────────────────────
-
 test('bare combos (blocked on Home) vs shortcuts that keep working', () => {
   for (const k of ['Space', 'L', 'Shift+M', 'NumpadAdd', 'Enter']) assert.equal(isBareCombo(k), true, k);
   for (const k of ['Ctrl+S', 'Ctrl+Shift+H', 'Alt+F8', 'F1', 'F5', 'F11', 'Alt+Q']) assert.equal(isBareCombo(k), false, k);
@@ -254,8 +239,6 @@ test('Home and Guides shortcuts are bound and clash with nothing', () => {
   assert.equal(guides?.keys, 'F1');
   for (const b of [home!, guides!]) assert.deepEqual(findKeyConflicts(map, b.keys, b.command, b.context), [], b.keys);
 });
-
-// ── Guides markup ─────────────────────────────────────────────────────
 
 test('inline markup: bold, code, keys, action links, plain text', () => {
   const runs = parseInline('Press [[Ctrl+S]] to **save** the `.kstudio`, then [[action:library|open the Library]].');
@@ -319,8 +302,6 @@ continues here.
   assert.deepEqual(guideActionIds(b), ['studio', 'mixer']);
 });
 
-// ── Guide data integrity ──────────────────────────────────────────────
-
 test('guides: unique ids, known groups, a default article, every one parses into real content', () => {
   const ids = ARTICLES.map((a) => a.id);
   assert.equal(new Set(ids).size, ids.length, 'duplicate guide id');
@@ -332,7 +313,6 @@ test('guides: unique ids, known groups, a default article, every one parses into
     const blocks = parseGuide(a.body);
     assert.ok(blocks.length >= 3, `${a.id}: too short`);
     assert.ok(blocks.some((b) => b.type === 'h2' || b.type === 'shortcuts'), `${a.id}: no sections`);
-    // No markup left unparsed (a typo like "[[action:x]]" or an unclosed "**").
     for (const r of blockInlines(blocks)) {
       if (r.t !== 'text') continue;
       assert.ok(!/\[\[|\]\]|\*\*|\{\{/.test(r.v), `${a.id}: stray markup in "${r.v.slice(0, 60)}"`);
@@ -367,8 +347,6 @@ test('every stock plugin in the generated catalog has a friendly guide line, and
   for (const id of Object.keys(PLUGIN_NOTES)) assert.ok(stock.some((p) => p.id === id), `PLUGIN_NOTES has a stale id ${id}`);
 });
 
-// ── Generated shortcuts table ─────────────────────────────────────────
-
 test('shortcuts table: every default binding appears once per command, combos merged, editors separated', () => {
   const labels: Record<string, string> = { 'edit.redo': 'Redo', 'transport.togglePlay': 'Play / stop', 'view.home': 'Home' };
   const sections = buildShortcutSections(applyKeymapOverrides(DEFAULT_KEYMAP, null), (c) => labels[c]);
@@ -383,14 +361,11 @@ test('shortcuts table: every default binding appears once per command, combos me
   assert.equal(sections[0].title, 'Playback');
   assert.ok(sections.some((s) => s.title.startsWith('Piano roll')));
   assert.ok(sections.find((s) => s.title === 'Windows and views')?.rows.some((r) => r.command === 'view.home'));
-  // An unbound command disappears; a rebound one shows its new keys.
   const custom = buildShortcutSections(applyKeymapOverrides(DEFAULT_KEYMAP, { 'transport.panic': [], 'file.save': ['Ctrl+Alt+S'] }), () => undefined).flatMap((s) => s.rows);
   assert.equal(custom.some((r) => r.command === 'transport.panic'), false);
   assert.deepEqual(custom.find((r) => r.command === 'file.save')?.keys, ['Ctrl+Alt+S']);
   assert.equal(fallbackLabel('view.toggle.channelRack'), 'Channel rack');
 });
-
-// ── "Master your music" (research/23 §3) ──────────────────────────────
 
 const src = (f: string): string => readFileSync(path.resolve(process.cwd(), 'src', f), 'utf8');
 
@@ -398,7 +373,6 @@ test('Master your music: Master a song always; Master an album only once its act
   const { song, album } = masterCardActions();
   assert.equal(song, 'masterSong');
   assert.ok(isHomeActionId(song));
-  // The album button never shows without a real action behind it (src/automix registers masterAlbum).
   assert.equal(album, (HOME_ACTION_IDS as readonly string[]).includes('masterAlbum') ? 'masterAlbum' : null);
 });
 

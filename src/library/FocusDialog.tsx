@@ -1,6 +1,3 @@
-// "Use as AI focus": the collection whose style profile agents compose
-// from, plus the user's own brief ("dark, sparse, lots of space").
-
 import { useState } from 'react';
 import { Crosshair, X } from 'lucide-react';
 import type { Collection } from '@shared/library/types';

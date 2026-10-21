@@ -1,5 +1,3 @@
-// electron/system/engineSupervisor.ts: pure Node, no 'electron' import (unit-testable).
-// Owns the krypt-engine.exe sidecar: spawn, line-JSON RPC, crash restart, shutdown.
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import fs from 'node:fs';
@@ -39,8 +37,6 @@ export class EngineSupervisor {
     }
     if (!fs.existsSync(exe)) return { ok: false, message: `Engine binary missing: ${exe}` };
     this.stopping = false;
-    // NOT detached: libuv puts the child in a kill-on-close Job Object, so the
-    // engine dies with us even if Electron is force-killed.
     const child = spawn(exe, [], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child = child;
     createInterface({ input: child.stdout }).on('line', (l) => this.onLine(l));
@@ -66,14 +62,13 @@ export class EngineSupervisor {
     });
   }
 
-  /** Graceful stop; resolves only after the process has exited (so start() can follow). */
   async stop(): Promise<void> {
     this.stopping = true;
     const child = this.child;
     if (!child) return;
     const exited = new Promise<void>((r) => child.once('exit', () => r()));
     await this.request('shutdown', {}, 1000);
-    child.stdin.end(); // EOF also makes the engine exit
+    child.stdin.end();
     const killTimer = setTimeout(() => child.kill(), 1500);
     await exited;
     clearTimeout(killTimer);
@@ -112,7 +107,7 @@ export class EngineSupervisor {
       this.onEvent({ event: 'gaveUp', message: 'Audio engine crashed 4 times in 60 s' });
       return;
     }
-    const delay = 250 * 2 ** (this.crashTimes.length - 1); // 250, 500, 1000 ms
+    const delay = 250 * 2 ** (this.crashTimes.length - 1);
     setTimeout(() => {
       const r = this.start();
       this.onEvent({ event: r.ok ? 'restarted' : 'restartFailed', message: r.message });

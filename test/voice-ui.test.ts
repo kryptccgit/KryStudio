@@ -1,7 +1,3 @@
-// Krypt Voice renderer logic (src/voice/logic.ts + src/voice/sing.ts): voice groups and blocks, the text box (tags at
-// the cursor, tags stripped for local voices, limits), speed, placement, forms → SpeakRequest / SingRequest, stages,
-// failures, the Fish key and own-voice checks, finding the recorded take, the Sing my notes labels (over the shared
-// planner); plus the entry points, the mock, the guide article and its anchors being wired.
 import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -59,7 +55,6 @@ function repoRoot(): string {
     try {
       if (statSync(path.join(dir, 'package.json')).isFile()) return dir;
     } catch {
-      /* keep climbing */
     }
     dir = path.dirname(dir);
   }
@@ -91,7 +86,6 @@ test('voices: groups, engines, blocks and the default pick', () => {
   assert.equal(voiceBlock(st(true, true), null)?.kind, 'missing');
   assert.equal(voiceBlock(st(true, true), 'fish:host'), null);
   assert.equal(voiceBlock(null, 'fish:host'), null, 'unknown state never blocks (the service decides)');
-  // a message from main wins
   assert.equal(voiceBlock({ ...st(false, false), local: { installed: false, modelId: null, message: 'Kokoro is downloading' } }, 'local:af_heart')?.message, 'Kokoro is downloading');
 
   assert.equal(pickVoice(st(true, true), 'fish:host'), 'fish:host', 'remembered and still listed');
@@ -276,7 +270,6 @@ test('Sing my notes: syllable labels on the roll (holds, extra notes, extra syll
   assert.equal(mappingLine({ syllables: 0, notes: 0 }), 'No notes here: draw a melody first');
   assert.equal(mappingLine({ syllables: 0, notes: 4 }), 'Type the lyrics: 4 notes to sing');
 
-  // A render's mapping (singplan.mappingRows: one row per note, "_" on held notes) → the same labels as the preview.
   const rows = plannedRows(parseLyrics('hold to-night_'), melody);
   assert.equal(rows.length, melody.length);
   const fromOutcome = labelsFromOutcome(rows, melody);

@@ -1,11 +1,3 @@
-//! `tts` tests. The model tests need Kokoro and ONNX Runtime:
-//!
-//!   KRYPT_TEST_KOKORO=<dir with model_quantized.onnx (or model.onnx) + <voice>.bin or voices/<voice>.bin>
-//!     (default: %APPDATA%\Krypt Studio\models\kokoro, where the Model Manager installs it)
-//!   ORT_DYLIB_PATH=<…\onnxruntime.dll>   (default: <repo>/resources/bin/onnxruntime.dll)
-//!
-//! and are skipped (pass trivially, with a note on stderr) without them.
-
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -27,7 +19,6 @@ fn test_dylib() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../resources/bin").join(runtime::DYLIB))
 }
 
-/// Model dir when the model AND ONNX Runtime are available; else None (skip).
 fn setup(test: &str) -> Option<PathBuf> {
     let Some(dir) = model_dir() else {
         eprintln!("{test}: skipped (no Kokoro model; set KRYPT_TEST_KOKORO)");
@@ -74,7 +65,6 @@ fn chunks_and_style_rows() {
     let pieces = text_chunks(&long);
     assert!(pieces.len() >= 3, "{}", pieces.len());
     assert!(pieces.iter().all(|c| c.phonemes.chars().count() <= MAX_CHUNK));
-    // Every word of the long text survives the split.
     assert_eq!(pieces.iter().map(|p| p.words.len()).sum::<usize>(), 300);
     let table: Vec<f32> = (0..510 * 256).map(|i| (i / 256) as f32).collect();
     assert_eq!(style_for(&table, 10)[0], 10.0);
@@ -83,7 +73,6 @@ fn chunks_and_style_rows() {
 
 #[test]
 fn word_samples_follow_durations() {
-    // "ab cd": tokens a b ␠ c d; durations incl. pads: [2, 1, 1, 1, 2, 2, 3]
     let words = vec![WordSpan { text: "ab".into(), start: 0, end: 2 }, WordSpan { text: "cd".into(), start: 3, end: 5 }];
     let src = vec![0, 1, 2, 3, 4];
     let dur = vec![2.0, 1.0, 1.0, 1.0, 2.0, 2.0, 3.0];
@@ -137,14 +126,12 @@ fn smoke_speaks_with_word_timings() {
     assert!(r.duration_sec > 2.0 && r.duration_sec < 8.0, "duration {}", r.duration_sec);
     let peak = x.iter().fold(0f32, |m, v| m.max(v.abs()));
     assert!(peak > 0.05 && peak <= 0.99, "peak {peak}");
-    // Words: all 12, in order, inside the audio.
     let texts: Vec<&str> = r.words.iter().map(|w| w.text.as_str()).collect();
     assert_eq!(texts, ["Hello", "world", "this", "is", "Krypt", "Voice", "It", "runs", "on", "your", "own", "computer"]);
     for w in r.words.windows(2) {
         assert!(w[0].start_sec <= w[0].end_sec && w[0].end_sec <= w[1].start_sec + 0.05, "{:?}", w);
     }
     assert!(r.words.last().unwrap().end_sec <= r.duration_sec + 1e-3);
-    // Warm run for the speed figure.
     let t = Instant::now();
     let r2 = run(&args(text, "am_michael", &out, &dir), &ctx).unwrap();
     let warm = t.elapsed().as_secs_f32();
@@ -162,7 +149,6 @@ fn deterministic_output() {
     assert_eq!(read_wav(&d.join("a.wav")).0, read_wav(&d.join("b.wav")).0);
 }
 
-/// Device benchmark (prints only): `cargo test ... tts::tests::bench_devices -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn bench_devices() {
@@ -207,14 +193,12 @@ fn bench_devices() {
     }
 }
 
-/// The "Sing my notes" chain on real Kokoro speech: tts → syllables → sing.
 #[test]
 fn speech_to_syllables_to_song() {
     let Some(dir) = setup("speech_to_syllables_to_song") else { return };
     let d = scratch("chain");
     let ctx = JobCtx::detached();
     let speech = d.join("speech.wav");
-    // 8 syllables: "la la la la, sing a long song"
     run(&args("La la la la, sing a long song.", "af_heart", &speech, &dir), &ctx).unwrap();
     let (x, sr) = read_wav(&speech);
     let free = crate::syllables::detect(&x, sr as f32, None, &ctx).unwrap();
@@ -233,9 +217,6 @@ fn speech_to_syllables_to_song() {
     let (y, r) = crate::sing::render(&x, f64::from(sr), &segs, 0.2, 0.04, &ctx).unwrap();
     eprintln!("sing on speech: {:.1} s in {:.3} s; f0s {:?}", y.len() as f64 / f64::from(sr), t.elapsed().as_secs_f64(), r.iter().map(|s| s.f0_hz).collect::<Vec<_>>());
     assert!(r.iter().filter(|s| s.f0_hz.is_some()).count() >= 6, "{r:?}");
-    // Each voiced note's median pitch lands near its key. Synthetic voices land within ±20 cents
-    // (sing tests); real speech keeps some movement (creaky phrase ends, YIN slips): ±75 here,
-    // ~25 cents typical. Krypt Tune runs on the result.
     for (i, (s, m)) in r.iter().zip(melody).enumerate() {
         if s.f0_hz.is_none() {
             continue;

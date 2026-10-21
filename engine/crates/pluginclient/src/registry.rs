@@ -1,11 +1,3 @@
-//! Registry of scanned third-party plugins (`vst3:<CID>` / `clap:<id>`).
-//!
-//! Electron main owns the scan cache and sends the descriptors with
-//! `plugins.register`; the CLI render reads them from `--plugins <file>`.
-//! The engine only needs ids, kinds and param ranges, so we convert to the
-//! dsp crate's `PluginDescriptor` (whose strings are `&'static`: they are
-//! interned once and live for the process, a bounded set).
-
 use krypt_studio_dsp::{ParamSpec, PluginDescriptor, PluginKind};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -26,7 +18,6 @@ impl Format {
     }
 }
 
-/// True for ids this crate hosts.
 pub fn is_external_id(id: &str) -> bool {
     id.starts_with("vst3:") || id.starts_with("clap:")
 }
@@ -65,21 +56,17 @@ struct ExtDesc {
     description: String,
     #[serde(default)]
     params: Vec<ExtParam>,
-    /// Absolute path of the .vst3 / .clap the plugin lives in.
     path: String,
     #[serde(default)]
     format: Option<String>,
 }
 
-/// One registered plugin.
 #[derive(Clone)]
 pub struct Entry {
     pub desc: Arc<PluginDescriptor>,
     pub format: Format,
-    /// The id without the format prefix (CLAP id / VST3 CID hex).
     pub raw_id: String,
     pub path: String,
-    /// Plugin-side param id for each descriptor param (same order).
     pub param_ids: Arc<[u32]>,
 }
 
@@ -128,7 +115,6 @@ fn convert(d: &ExtDesc) -> Result<Entry, String> {
             max,
             default: (p.default as f32).clamp(min, max),
             unit: intern(&p.unit),
-            // The engine only maps plain values here; unknown scales are linear.
             scale: intern(if p.scale == "log" && min > 0.0 { "log" } else { "linear" }),
             step: p.step.filter(|s| *s > 0.0).map(|s| s as f32),
             options: p.options.as_ref().map(|o| o.iter().map(|s| intern(s)).collect()),
@@ -151,8 +137,6 @@ fn convert(d: &ExtDesc) -> Result<Entry, String> {
     Ok(Entry { desc: Arc::new(desc), format, raw_id, path: d.path.clone(), param_ids: ids.into() })
 }
 
-/// Register (add or replace) descriptors from a JSON array. Returns how
-/// many were accepted and the per-entry problems.
 pub fn register_json(list: &serde_json::Value) -> (usize, Vec<String>) {
     let Some(arr) = list.as_array() else {
         return (0, vec!["plugins must be an array".into()]);
@@ -172,7 +156,6 @@ pub fn register_json(list: &serde_json::Value) -> (usize, Vec<String>) {
     (ok, errs)
 }
 
-/// Read a scan-cache-like file: either `[desc...]` or `{"plugins":[desc...]}`.
 pub fn register_file(path: &std::path::Path) -> Result<usize, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{} is not valid JSON: {e}", path.display()))?;

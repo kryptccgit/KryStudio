@@ -1,4 +1,3 @@
-// Working with the AI (guides-content-2). See research/14-sounds-and-guides.md §3 for the markup and the rules.
 import type { GuideArticle } from '../articles';
 
 export const AI: GuideArticle[] = [

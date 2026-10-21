@@ -1,7 +1,3 @@
-// The built-in agent's FROZEN system prompt (research/04 §8.2: no project
-// data, no timestamps here — it is the cached prefix). Project state goes in
-// the user turns instead.
-
 import { KPN_REFERENCE } from '@shared/kpn';
 
 export const AGENT_SYSTEM_PROMPT = `You are Krypt Agent, the AI co-producer built into Krypt Studio, a free pattern-based DAW (Channel Rack, patterns, Playlist, Mixer — FL Studio style). You work on the project the user has open, live, only through your tools. The user sees every edit as it lands and can undo it.

@@ -1,4 +1,3 @@
-// KPN (Krypt Pattern Notation) parser, canonical printer and symbolic stats.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { parse, print, printKpn, formatIssues, symbolicStats, chordSymbolToMidi, defaultGrid, type KpnNote, type PrintNote, type PrintTrack } from '@shared/kpn';
@@ -17,8 +16,6 @@ lead {oct=5}: ^5:4 ^3:2 ^1 ^2:4 ^3:4 | ^1:8 r:8 | r:4 ^5:2 ^6 ^5:4 ^3:4 | ^2:12 
 const midi = (n: KpnNote | PrintNote) => Math.round(n.vel * 127);
 const track = (r: ReturnType<typeof parse>, name: string) => r.tracks.find((t) => t.name === name)!;
 const firstError = (text: string) => parse(text).errors[0]?.message ?? '';
-
-// ── Parsing the research examples ───────────────────────────────────────
 
 test('Trap A: header, grids, holds, /32 lines, velocities, 808 slides', () => {
   const r = parse(TRAP);
@@ -96,12 +93,9 @@ test('merge-mode example: _ clears, digits are velocities, bar lines checked per
   assert.deepEqual(track(r, 'kick').clears, [{ tick: 0, dur: 240 }]);
 });
 
-// ── Grid lines ──────────────────────────────────────────────────────────
-
 test('grid: bar-line errors name the bar and the count (short and long)', () => {
   assert.equal(firstError('pattern "x" bars=2\nhat: x.x. x.x. x.x. x.x | x.x. x.x. x.x. x.x.'), 'line 2 (hat), bar 1: has 15/16 steps at the bar line (1 short)');
   assert.equal(firstError('pattern "x" bars=2\nhat: x.x. x.x. x.x. x.x.x. | x.x. x.x. x.x. x.x.'), 'line 2 (hat), bar 1: has 18/16 steps at the bar line (2 too many)');
-  // After the bad bar the cursor re-syncs, so bar 2 is checked on its own.
   const r = parse('pattern "x" bars=3\nhat: x.x. x.x. x.x. x.x | x.x. x.x. x.x. x.x. | x.x. x.x. x.x. x.x');
   assert.deepEqual(r.errors.map((e) => e.bar ?? null), [1, null]);
   assert.match(r.errors[1].message, /47 steps total, expected 48/);
@@ -136,8 +130,6 @@ test('drum key defaults to 60, or the callback (channel root key), or {pitch=}',
   assert.equal(track(r, 'kick').notes[0].key, 48);
   assert.equal(track(r, 'perc').notes[0].key, 64);
 });
-
-// ── Melodic lines ───────────────────────────────────────────────────────
 
 test('tokens: velocity marks, chords with per-note velocity, prefix slide, @ positions', () => {
   const r = parse('pattern "m" bars=2\nlead {vel=90}: C4:2 D4! E4? F4v33 [C4 E4v70 G4]:4 r:4 | @2.9 ~A4:8');
@@ -222,8 +214,6 @@ test('never throws on garbage', () => {
     assert.equal(typeof r.ok, 'boolean');
   }
 });
-
-// ── Canonical printer ───────────────────────────────────────────────────
 
 const N = (tick: number, dur: number, key: number, vel = 100, slide = false): PrintNote => ({ tick, dur, key, vel: vel / 127, slide });
 
@@ -347,8 +337,6 @@ test('property: random drum lines round-trip exactly as grids (200 cases)', () =
     assert.deepEqual(sigOf(r.tracks[0]?.notes ?? []), sigOf(notes), `case ${c}:\n${text}`);
   }
 });
-
-// ── Symbolic stats ──────────────────────────────────────────────────────
 
 test('symbolic stats: key estimate, chords per bar, out-of-key notes, ranges, low clashes', () => {
   const r = parse(VERSE);

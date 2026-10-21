@@ -1,9 +1,3 @@
-// Library panel header: the shown collection (name, tags, counts, actions,
-// the deep-analysis switch), the global analysis queue (progress, current
-// file, ETA, pause / resume), notices that need the user (failures, missing
-// files, deep analysis without a stem model, the fast-scan tip, a missing
-// analyzer), and the Tracks / Style profile tabs.
-
 import { useRef, type ReactNode } from 'react';
 import {
   BarChart3,
@@ -50,7 +44,6 @@ export function CollectionHeader({ collection, width, doc, sidebar }: { collecti
   const busy = useLibrary((x) => (collection ? x.busy[collection.id] : undefined));
   const pickerRef = useRef<HTMLButtonElement>(null);
   const moreRef = useRef<HTMLButtonElement>(null);
-  // Without the sidebar the title doubles as the collection picker.
   const narrow = !sidebar;
   const compact = width < 700;
   const tight = width < 520;
@@ -200,7 +193,6 @@ function QueueStrip() {
   );
 }
 
-/** A compact notice pill: short text + actions; the full explanation is its hint / tooltip. */
 function Notice({ tone, icon: Icon, text, hint, actions }: { tone: 'danger' | 'warn' | 'info'; icon: typeof Info; text: ReactNode; hint: string; actions?: ReactNode }) {
   return (
     <div

@@ -1,37 +1,3 @@
-// Applying presets (shared/sounds). The preset OBJECT travels in the args
-// (commands do no I/O): the renderer / MCP tools look it up (factory data or
-// the main-process sounds service) and pass it in. One command = one undo step
-// ("Load preset Anthem Supersaw").
-//
-// CONTRACT (implementation: sounds-core):
-//  - presets.applyToChannel: generator type + params REPLACED by the preset's
-//    (sanitised against the catalog; unknown param = CommandError naming it),
-//    generator.preset = {id, name}; sample preset → the sample is added to the
-//    pool (reusing an existing SampleRef with the same path) and set;
-//    channel settings applied (volumeDb → linear volume, mono/glide/rootKey/
-//    cut groups). withFx (default true) and preset.fx present → the channel's
-//    insert chain is REPLACED by the preset chain; when that insert is master
-//    or shared with other channels, the channel first gets its own new insert
-//    (named after the channel). rename = true → channel name = preset name.
-//    Returns { channelId, insertId }.
-//  - presets.addChannel: a new channel (+ its own insert) with the preset, at
-//    `index` (default end), named `name` ?? preset name. Returns the same.
-//  - presets.applyChain: replace (default) or append the insert's FX slots with
-//    the chain; insert settings applied; insertId may be 'master'. Returns
-//    { insertId, slotIds }.
-//
-// Details beyond the contract:
-//  - mono / glide belong to the sound: a preset that doesn't set them gets the
-//    plugin's defaults (an 808 is mono + 60 ms glide, everything else poly), so
-//    a pad loaded onto a former 808 channel plays chords again. rootKey, cut
-//    groups, volume and pan are kept unless the preset sets them (they are
-//    tied to the notes already written and to the mix).
-//  - a shared insert the channel leaves keeps its routing: the channel's new
-//    insert feeds it (a drum bus stays in the path), the master gets fed
-//    directly.
-//  - removed FX slots null the automation clips that targeted them (same as
-//    mixer.removeSlot).
-
 import { z } from 'zod';
 import { defineCommand, must, plural, CommandError } from './types';
 import { DEFAULT_CHANNEL_VOLUME, MAX_FX_SLOTS, MAX_INSERTS, paletteColor, type Channel, type MixerInsert, type Project } from '../schema/project';
@@ -50,7 +16,6 @@ const KICK808 = 'krypt.kick808';
 const dbToGain = (db: number): number => Math.pow(10, db / 20);
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
-/** A new mixer insert routed to `routeTo` (default master). */
 function addInsert(d: Project, name: string, color: string, ctx: CommandContext, routeTo?: string): string {
   if (d.mixer.insertOrder.length >= MAX_INSERTS) throw new CommandError(`The mixer is full (${MAX_INSERTS} inserts). Delete an unused insert first, or load the preset without its effects.`);
   const id = ctx.newId(ID_PREFIX.insert);
@@ -75,10 +40,8 @@ function addInsert(d: Project, name: string, color: string, ctx: CommandContext,
   return id;
 }
 
-/** Validate a whole chain before touching the document: unknown effects / params name the preset. */
 function checkChain(fx: readonly PresetFx[], presetName: string, ctx: CommandContext): Array<{ type: string; params: Record<string, number>; mix: number; enabled: boolean; rack?: PresetRack }> {
   return fx.map((f) => {
-    // Effect racks (Wave 12.2): a 'krypt.fxrack' slot carries its chains + macros; rackFromSpec validates them.
     if (f.rack && f.type !== FX_RACK_PLUGIN) throw new CommandError(`Preset "${presetName}": only an effect rack (${FX_RACK_PLUGIN}) can carry a rack, not "${f.type}"`);
     if (f.rack && f.rack.kind !== 'effect') throw new CommandError(`Preset "${presetName}": a mixer slot takes an effect rack, not an ${f.rack.kind} rack`);
     const desc = findPlugin(ctx.catalog, f.type);
@@ -94,7 +57,6 @@ function checkChain(fx: readonly PresetFx[], presetName: string, ctx: CommandCon
   });
 }
 
-/** Remove every FX slot of an insert (automation clips aimed at them become unassigned). */
 function clearSlots(d: Project, ins: MixerInsert): void {
   for (const sid of ins.slotOrder) {
     for (const aut of Object.values(d.automations)) if (aut.target?.startsWith(`insert/${ins.id}/slot/${sid}/`)) aut.target = null;
@@ -108,10 +70,9 @@ const sameParams = (a: Record<string, number>, b: Record<string, number>): boole
   return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
 };
 
-/** The insert already holds exactly this chain (effects, params, mix, bypass): reloading keeps its slots (a no-op). */
 function sameChain(ins: MixerInsert, chain: ReturnType<typeof checkChain>): boolean {
   if (ins.slotOrder.length !== chain.length) return false;
-  if (chain.some((f) => f.rack) || ins.slotOrder.some((sid) => ins.slots[sid]?.rack)) return false; // racks always reload
+  if (chain.some((f) => f.rack) || ins.slotOrder.some((sid) => ins.slots[sid]?.rack)) return false;
   return ins.slotOrder.every((sid, i) => {
     const s = ins.slots[sid];
     const f = chain[i];
@@ -119,7 +80,6 @@ function sameChain(ins: MixerInsert, chain: ReturnType<typeof checkChain>): bool
   });
 }
 
-/** Replace an insert's effects with `chain` (kept as they are when identical). */
 function replaceSlots(d: Project, ins: MixerInsert, chain: ReturnType<typeof checkChain>, ctx: CommandContext, presetName?: string): string[] {
   if (sameChain(ins, chain)) return [...ins.slotOrder];
   clearSlots(d, ins);
@@ -138,7 +98,6 @@ function addSlots(d: Project, ins: MixerInsert, chain: ReturnType<typeof checkCh
   return ids;
 }
 
-/** The sample pool entry for `path`: an existing SampleRef with that path, else a new one. */
 function sampleFor(d: Project, path: string, ctx: CommandContext): string {
   const existing = Object.values(d.samples).find((s) => s.path === path);
   if (existing) return existing.id;
@@ -148,7 +107,6 @@ function sampleFor(d: Project, path: string, ctx: CommandContext): string {
   return id;
 }
 
-/** Everything about the preset that can fail, checked before the first write. */
 function checkInstrumentPreset(preset: InstrumentPreset, ctx: CommandContext) {
   const desc = findPlugin(ctx.catalog, preset.plugin);
   if (!desc) throw new CommandError(`Preset "${preset.name}" needs the instrument "${preset.plugin}", which this build doesn't have`);
@@ -170,7 +128,6 @@ function checkInstrumentPreset(preset: InstrumentPreset, ctx: CommandContext) {
 interface Applied {
   channelId: string;
   insertId: string;
-  /** The channel moved off a shared / master insert onto its own new one. */
   splitFrom?: string;
   slotIds: string[];
 }
@@ -181,21 +138,18 @@ function applyPreset(d: Project, ch: Channel, preset: InstrumentPreset, withFx: 
   const chain = withFx && preset.fx ? checkChain(preset.fx, preset.name, ctx) : null;
   if (chain && chain.length > MAX_FX_SLOTS) throw new CommandError(`Preset "${preset.name}" has ${chain.length} effects; an insert holds at most ${MAX_FX_SLOTS}`);
 
-  // Instrument + params (replaced, never merged) + sample.
   let sampleId: string | null = null;
   if (preset.sample) sampleId = sampleFor(d, preset.sample, ctx);
-  else if (desc.usesSample) sampleId = ch.generator.sampleId; // a sampler preset without its own sample keeps the loaded one
+  else if (desc.usesSample) sampleId = ch.generator.sampleId;
   const g = ch.generator;
   const label = { id: preset.id, name: preset.name.slice(0, 64) };
   if (rackKindOf(preset.plugin)) {
-    // Racks (Wave 12.2): the chains, inner samples and macro maps come from the preset; always written fresh.
     const rack = preset.rack ? rackFromSpec(d, ctx.catalog, preset.rack, ctx, `Preset "${preset.name}"`) : emptyRack(rackKindOf(preset.plugin)!);
     ch.generator = { type: preset.plugin, params, sampleId: null, preset: label, rack };
   } else if (g.type !== preset.plugin || !sameParams(g.params, params) || g.sampleId !== sampleId || g.preset?.id !== label.id || g.preset?.name !== label.name || g.state !== undefined) {
     ch.generator = { type: preset.plugin, params, sampleId, preset: label };
   }
 
-  // Channel settings.
   const c = preset.channel ?? {};
   const is808 = preset.plugin === KICK808;
   if (c.volumeDb !== undefined) ch.volume = clamp(dbToGain(c.volumeDb), 0, 1.25);
@@ -206,14 +160,13 @@ function applyPreset(d: Project, ch: Channel, preset: InstrumentPreset, withFx: 
   if (c.cutGroup !== undefined) ch.poly.cutGroup = c.cutGroup;
   if (c.cutBy !== undefined) ch.poly.cutBy = c.cutBy;
 
-  // Effects: the channel's own insert gets the preset chain.
   let insertId = ch.insertId;
   let splitFrom: string | undefined;
   let slotIds: string[] = [];
   if (chain) {
     const cur = d.mixer.inserts[insertId];
     const shared = !cur || cur.isMaster || d.channelOrder.some((id) => id !== ch.id && d.channels[id]?.insertId === insertId);
-    if (shared && chain.length === 0) return { channelId: ch.id, insertId, slotIds }; // nothing to put on an own insert
+    if (shared && chain.length === 0) return { channelId: ch.id, insertId, slotIds };
     if (shared) {
       splitFrom = cur?.id;
       insertId = addInsert(d, ch.name, ch.color, ctx, cur && !cur.isMaster ? cur.id : undefined);
@@ -243,7 +196,7 @@ export const presetsAddChannel = defineCommand({
   description: 'Add a channel (with its own mixer insert) playing an instrument preset.',
   args: z.object({ preset: zInstrumentPreset, name: z.string().min(1).max(64).optional(), index: z.number().int().min(0).optional(), withFx: z.boolean().default(true) }),
   run(d, a, ctx) {
-    checkInstrumentPreset(a.preset, ctx); // fail before creating anything
+    checkInstrumentPreset(a.preset, ctx);
     const name = (a.name ?? a.preset.name).slice(0, 64);
     const color = paletteColor(d.channelOrder.length);
     const insertId = addInsert(d, name, color, ctx);
@@ -259,7 +212,7 @@ export const presetsAddChannel = defineCommand({
       pitch: 0,
       mute: false,
       insertId,
-      rootKey: is808 ? 36 : 60, // 808s play true pitch; steps land on C2
+      rootKey: is808 ? 36 : 60,
       swing: 1,
       poly: { mono: is808, glideMs: is808 ? 60 : 0, cutGroup: 0, cutBy: 0 },
     };
@@ -296,10 +249,6 @@ export const presetsApplyChain = defineCommand({
   },
 });
 
-/**
- * Which preset a channel's sound came from, e.g. right after the sound was saved as a user preset (the preset bar
- * then shows the saved name). The sound itself doesn't change, so this is not an undo step of its own.
- */
 export const presetsMarkChannel = defineCommand({
   id: 'presets.markChannel',
   label: (a) => (a.preset ? `Name sound ${a.preset.name}` : 'Clear preset name'),

@@ -1,7 +1,3 @@
-// Symbolic "hearing": exact stats computed from the notes themselves (no
-// audio inference) — key estimate, out-of-key notes, chords per bar, ranges
-// and density. Used by render_preview (research/04 §6.5, "symbolic").
-
 import { inScale, noteName, parseKey, NOTE_NAMES_FLAT, NOTE_NAMES_SHARP, type Key } from '../music/theory';
 import { PPQ, ticksPerBar, type TimeSig } from '../schema/time';
 import { prefersFlats } from './print';
@@ -16,18 +12,14 @@ export interface SymbolicNote {
 export interface SymbolicChannel {
   name: string;
   notes: SymbolicNote[];
-  /** Drum / unpitched channels are excluded from key, chord and out-of-key analysis. */
   drum?: boolean;
 }
 
 export interface ChannelStats {
   name: string;
   notes: number;
-  /** Notes per beat over the analysed span. */
   density: number;
-  /** "C2–G4" (pitched) or null for drum channels. */
   range: string | null;
-  /** Mean MIDI velocity. */
   avgVel: number;
   outOfKey: number;
 }
@@ -39,12 +31,9 @@ export interface SymbolicStats {
   density: number;
   channels: ChannelStats[];
   key: { given: string | null; estimated: string | null; confidence: number };
-  /** Share of pitched notes outside the given key (or the estimated key when none was given). */
   outOfKeyRatio: number | null;
   outOfKeyNotes: string[];
-  /** Best-guess chord per bar from all pitched channels ("-" = nothing sounding). */
   chords: string[];
-  /** Minor 2nds / clusters below C3 in the same bar between channels (mud warnings). */
   lowClashes: string[];
 }
 
@@ -66,7 +55,6 @@ function correlate(a: number[], b: number[]): number {
   return da && db ? num / Math.sqrt(da * db) : 0;
 }
 
-/** Krumhansl–Schmuckler key estimate from duration-weighted pitch classes. */
 export function estimateKey(weights: number[]): { key: string; confidence: number } | null {
   if (weights.every((w) => w === 0)) return null;
   let best = { key: 'C', confidence: -2 };
@@ -77,7 +65,6 @@ export function estimateKey(weights: number[]): { key: string; confidence: numbe
     if (maj > best.confidence) best = { key: NOTE_NAMES_SHARP[r], confidence: maj };
     if (min > best.confidence) best = { key: `${NOTE_NAMES_SHARP[r]}m`, confidence: min };
   }
-  // Prefer conventional flat spellings for flat keys.
   const flatMap: Record<string, string> = { 'A#': 'Bb', 'D#': 'Eb', 'G#': 'Ab', 'C#': 'Db', 'F#': 'F#' };
   const m = /^([A-G]#?)(m?)$/.exec(best.key);
   if (m && m[2] === '' && flatMap[m[1]] && m[1] !== 'F#') best.key = flatMap[m[1]];
@@ -164,7 +151,7 @@ export function symbolicStats(channels: SymbolicChannel[], opts: { lengthTicks: 
         out++;
         if (outOfKeyNotes.length < 10) {
           const bar = Math.floor(n.tick / barTicks) + 1;
-          const step = Math.round((n.tick % barTicks) / (PPQ / 4)) + 1; // 16th steps in any meter (was 1/16 of a bar)
+          const step = Math.round((n.tick % barTicks) / (PPQ / 4)) + 1;
           outOfKeyNotes.push(`${ch.name} ${noteName(n.key, 'scientific', flats)} @${bar}.${step}`);
         }
       }

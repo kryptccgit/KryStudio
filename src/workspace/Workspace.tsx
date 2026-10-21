@@ -1,6 +1,3 @@
-// The dockview workspace: panel components, Krypt tabs + header actions,
-// the empty-state watermark and the theme. Only this folder imports dockview.
-
 import { Component, Suspense, lazy, useEffect, useState, type ComponentType, type ErrorInfo, type ReactNode } from 'react';
 import {
   DockviewReact,
@@ -28,8 +25,6 @@ import { LibraryPanel } from '../panels/library/LibraryPanel';
 import { GuidesPanel } from '../guides/GuidesPanel';
 import { SessionView } from '../panels/session/SessionView';
 import { cls } from '../utils/format';
-
-// ── Panels owned by another agent: load if present, else a placeholder ─
 
 const pianoRollModules = import.meta.glob('../panels/pianoRoll/PianoRoll.tsx');
 const playlistModules = import.meta.glob('../panels/playlist/Playlist.tsx');
@@ -62,8 +57,6 @@ function external(mods: Record<string, () => Promise<unknown>>, exportName: stri
 
 const PianoRoll = external(pianoRollModules, 'PianoRoll', 'Piano Roll');
 const Playlist = external(playlistModules, 'Playlist', 'Playlist');
-
-// ── Error boundary per panel: one broken window never kills the app ───
 
 class PanelBoundary extends Component<{ title: string; children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -105,7 +98,6 @@ function frame(title: string, render: (p: IDockviewPanelProps) => ReactNode) {
     return (
       <PanelBoundary title={title}>
         <Suspense fallback={<Loading />}>
-          {/* data-tour-panel: the tours (src/tours) point at a whole window by it */}
           <div className="h-full w-full overflow-hidden bg-[#0c0c12] text-white" data-tour-panel={props.api.id}>
             {render(props)}
           </div>
@@ -132,8 +124,6 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   library: frame('Library', () => <LibraryPanel />),
   session: frame('Session', () => <SessionView />),
 };
-
-// ── Tabs + header actions ─────────────────────────────────────────────
 
 function KryptTab(props: IDockviewPanelHeaderProps) {
   const [title, setTitle] = useState(props.api.title ?? '');
@@ -270,7 +260,6 @@ const kryptTheme: DockviewTheme = {
 };
 
 export function Workspace({ className }: { className?: string }) {
-  // Keep plugin windows in sync with the document (deleted channel → close, rename → retitle).
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | null = null;
     const off = useDocStore.subscribe((s, prev) => {
@@ -284,8 +273,6 @@ export function Workspace({ className }: { className?: string }) {
     return () => {
       off();
       if (t) clearTimeout(t);
-      // Don't detach the dockview API here: StrictMode re-runs effects without
-      // re-firing onReady, and the API outlives this effect anyway.
       wm.save();
     };
   }, []);

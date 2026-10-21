@@ -253,11 +253,6 @@ export function TextInput({
   );
 }
 
-/**
- * Numeric input with a local editing buffer (kryptguidelines §3.6): keep a
- * string buffer while focused so clearing all digits doesn't snap to min;
- * emit the parsed number live; clamp to [min,max] only on blur/Enter.
- */
 export function NumberInput({
   value,
   onChange,

@@ -1,12 +1,3 @@
-//! `tts`: Krypt Voice local text → speech with Kokoro-82M (research/21).
-//! Contract: docs/ANALYZER_PROTOCOL.md § Text to speech.
-//!
-//! text → sentences → G2P (g2p.rs, English, no GPL) → Kokoro token ids
-//! (vocab.rs) → one inference per sentence (kokoro.rs; sentences over
-//! [`MAX_CHUNK`] tokens are split at punctuation) → edge silence trimmed →
-//! joined with short pauses → mono 24 kHz WAV, with word timings from the
-//! model's predicted durations.
-
 pub mod g2p;
 pub mod kokoro;
 pub mod lts;
@@ -22,16 +13,11 @@ use crate::{JobCtx, JobError};
 
 use g2p::{Phonemized, WordSpan};
 
-/// Tokens per inference. Kokoro's context is 510; it rushes past ~400.
 pub const MAX_CHUNK: usize = 400;
-/// Pause after a sentence / after a clause split (seconds).
 const SENTENCE_PAUSE: f32 = 0.22;
 const CLAUSE_PAUSE: f32 = 0.12;
-/// Silence kept around each trimmed chunk (seconds).
 const EDGE_KEEP: f32 = 0.03;
 
-/// The English voices of Kokoro-82M v1.0 (what the Model Manager installs):
-/// (id, display name, description). a* = US English, b* = UK English.
 pub const ENGLISH_VOICES: [(&str, &str, &str); 28] = [
     ("af_heart", "Heart", "US English · female · warm (best)"),
     ("af_bella", "Bella", "US English · female · bright"),
@@ -67,12 +53,10 @@ fn fail(m: impl Into<String>) -> JobError {
     JobError::Failed(m.into())
 }
 
-/// `<dir>/<voice>.bin` (Model Manager layout) or `<dir>/voices/<voice>.bin` (a copy of the HF repo).
 pub fn voice_file(dir: &Path, voice: &str) -> Option<PathBuf> {
     [dir.join(format!("{voice}.bin")), dir.join("voices").join(format!("{voice}.bin"))].into_iter().find(|p| p.is_file())
 }
 
-/// The voice's style table: rows of 256 floats (510 rows in v1.0).
 pub fn load_voice(path: &Path) -> Result<Vec<f32>, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Cannot read the voice file {}: {e}", path.display()))?;
     if bytes.is_empty() || bytes.len() % (4 * kokoro::STYLE_DIM) != 0 {
@@ -81,14 +65,12 @@ pub fn load_voice(path: &Path) -> Result<Vec<f32>, String> {
     Ok(bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect())
 }
 
-/// Style vector for an utterance of `n_tokens` (without pads).
 pub fn style_for(table: &[f32], n_tokens: usize) -> &[f32] {
     let rows = table.len() / kokoro::STYLE_DIM;
     let r = n_tokens.min(rows.saturating_sub(1));
     &table[r * kokoro::STYLE_DIM..(r + 1) * kokoro::STYLE_DIM]
 }
 
-/// Splits a caller-supplied phoneme string at sentence punctuation.
 fn phoneme_chunks(ph: &str) -> Vec<Phonemized> {
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -108,12 +90,10 @@ fn phoneme_chunks(ph: &str) -> Vec<Phonemized> {
     out.into_iter().flat_map(|p| g2p::split_long(p, MAX_CHUNK)).collect()
 }
 
-/// Text → chunks for inference (each ≤ MAX_CHUNK tokens), with word spans.
 pub fn text_chunks(text: &str) -> Vec<Phonemized> {
     g2p::sentences(text).iter().map(|s| g2p::phonemize(s)).filter(|p| !p.phonemes.trim().is_empty()).flat_map(|p| g2p::split_long(p, MAX_CHUNK)).collect()
 }
 
-/// First / last sample above the trim threshold, widened by EDGE_KEEP.
 fn trim_bounds(x: &[f32]) -> (usize, usize) {
     let peak = x.iter().fold(0f32, |m, v| m.max(v.abs()));
     if peak <= 0.0 {
@@ -126,14 +106,12 @@ fn trim_bounds(x: &[f32]) -> (usize, usize) {
     (first.saturating_sub(keep), (last + keep).min(x.len()))
 }
 
-/// Word timings (in samples of this chunk's raw waveform) from per-token durations.
-/// `src[t]` = character index of token t (no pads); `dur` has one entry per id incl. pads.
 pub fn word_samples(words: &[WordSpan], src: &[usize], dur: &[f32], wav_len: usize) -> Vec<(String, usize, usize)> {
     let total: f64 = dur.iter().map(|&d| f64::from(d.max(0.0))).sum();
     if total <= 0.0 || wav_len == 0 {
         return Vec::new();
     }
-    let spf = wav_len as f64 / total; // ≈ SAMPLES_PER_FRAME
+    let spf = wav_len as f64 / total;
     let mut cum = Vec::with_capacity(dur.len() + 1);
     cum.push(0f64);
     for &d in dur {
@@ -144,7 +122,6 @@ pub fn word_samples(words: &[WordSpan], src: &[usize], dur: &[f32], wav_len: usi
         let first = src.iter().position(|&c| c >= w.start && c < w.end);
         let last = src.iter().rposition(|&c| c >= w.start && c < w.end);
         if let (Some(a), Some(b)) = (first, last) {
-            // token t ↔ dur[t + 1] (dur[0] is the leading pad)
             let s = (cum[a + 1] * spf).round() as usize;
             let e = (cum[b + 2] * spf).round() as usize;
             out.push((w.text.clone(), s.min(wav_len), e.min(wav_len)));
@@ -246,7 +223,6 @@ pub fn run(args: &TtsArgs, ctx: &JobCtx) -> Result<TtsResult, JobError> {
     })
     .map_err(|e| if ctx.cancelled() { JobError::Cancelled } else { fail(format!("Speech synthesis failed: {e}")) })?;
     ctx.check()?;
-    // Never clip.
     let peak = out.iter().fold(0f32, |m, v| m.max(v.abs()));
     if peak > 0.99 {
         let g = 0.99 / peak;

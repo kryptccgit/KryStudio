@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Piano roll ▸ Tools ▸ Generate…: the MIDI generators (rhythm, chords,
-// arpeggio, melody, bassline). Scale-aware (toolbar scale, else the key the
-// pattern is in), seeded (the dice re-rolls; same seed = same notes), live
-// preview on the roll, 4 Variations side by side (click one to apply it),
-// audition through the channel, and Apply = ONE undo step (notes.generate).
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { create } from 'zustand';
 import { AudioLines, Dice5, Drum, Music, Piano, Play, Spline, Square, WandSparkles, Waves, type LucideIcon } from 'lucide-react';
@@ -34,9 +26,7 @@ import { cls } from '../../utils/format';
 import type { PianoRollController } from './controller';
 import { usePianoRollView } from './store';
 
-// ── Remembered settings (session) ─────────────────────────────────────
-
-type KeyChoice = { root: number; scale: string } | null; // null = auto
+type KeyChoice = { root: number; scale: string } | null;
 
 interface GenPrefs {
   kind: GeneratorKind;
@@ -81,8 +71,6 @@ const SCALE_LABELS: Record<string, string> = {
   chromatic: 'Chromatic',
 };
 
-// ── Small controls ────────────────────────────────────────────────────
-
 function KeyBox({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <div className="flex items-center gap-2">
@@ -108,7 +96,6 @@ function SmallButton({ icon: Icon, label, onClick, title, active }: { icon: Luci
   );
 }
 
-/** Progression picker: presets, "surprise me", or custom numerals. */
 function ProgressionField({ value, onChange }: { value: string | undefined; onChange: (v: string) => void }) {
   const v = value ?? 'auto';
   const preset = v === 'auto' || PROGRESSIONS.some((p) => p.id === v);
@@ -147,8 +134,6 @@ function ChordSourceField({ value, onChange, hasChords, allowNone }: { value: st
     </Field>
   );
 }
-
-// ── Per-generator options ─────────────────────────────────────────────
 
 function RhythmFields({ o, set, rootKey }: { o: Partial<RhythmOptions>; set: (p: Partial<RhythmOptions>) => void; rootKey: number }) {
   const mode = o.mode ?? 'euclid';
@@ -421,9 +406,6 @@ function BassFields({ o, set, hasChords }: { o: Partial<BassOptions>; set: (p: P
   );
 }
 
-// ── Variations ────────────────────────────────────────────────────────
-
-/** A tiny piano-roll drawing of one take. */
 function Thumb({ plan }: { plan: GeneratePlan }) {
   const W = 120;
   const H = 46;
@@ -488,8 +470,6 @@ function Variations({ plans, seeds, onPick, current }: { plans: Array<GeneratePl
   );
 }
 
-// ── The dialog ────────────────────────────────────────────────────────
-
 function GenerateBody({ ctl, close, initialRange }: { ctl: PianoRollController; close: () => void; initialRange: { fromBar: number; bars: number } }) {
   const p = usePrefs();
   const set = (patch: Partial<GenPrefs>): void => usePrefs.setState(patch);
@@ -514,16 +494,13 @@ function GenerateBody({ ctl, close, initialRange }: { ctl: PianoRollController; 
   });
   const key = JSON.stringify(args(p.seed));
 
-  // live preview of the current take on the roll
   const [preview, setPreview] = useState<{ plan: GeneratePlan } | { error: string } | null>(null);
   useEffect(() => {
     const raf = requestAnimationFrame(() => setPreview(ctl.previewGenerate(args(p.seed))));
     return () => cancelAnimationFrame(raf);
-    // args are compared by value (key)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctl, key]);
 
-  // four takes side by side
   const seeds = [0, 1, 2, 3].map((i) => variationSeed(p.seed, i));
   const variations = useMemo(
     () =>
@@ -655,7 +632,6 @@ function GenerateBody({ ctl, close, initialRange }: { ctl: PianoRollController; 
   );
 }
 
-/** Default bar range: the selection's bars, else the whole pattern. */
 function defaultRange(ctl: PianoRollController): { fromBar: number; bars: number } {
   const p = getProject();
   const t = ctl.getTarget();
@@ -671,7 +647,6 @@ function defaultRange(ctl: PianoRollController): { fromBar: number; bars: number
   return { fromBar: 1, bars: pat ? Math.max(1, Math.ceil(patternLength(pat, ts) / bar)) : 1 };
 }
 
-/** Tools ▸ Generate… (and the toolbar wand). Works on an empty channel too. */
 export function openGenerateDialog(ctl: PianoRollController): void {
   if (!ctl.getTarget()) {
     flashHint('Select a pattern and a channel first', 'warn');
@@ -686,7 +661,7 @@ export function openGenerateDialog(ctl: PianoRollController): void {
     icon: WandSparkles,
     width: 540,
     doc: ctl.rootDocument(),
-    near: ctl.rootRect() ?? undefined, // beside the roll: the live preview stays visible
+    near: ctl.rootRect() ?? undefined,
     subtitle: ctl.selectionSize ? `Replaces or adds to the ${ctl.selectionSize} selected notes` : 'Writes into this channel of the pattern',
     render: (close) => <GenerateBody ctl={ctl} close={close} initialRange={initialRange} />,
     onClose: () => {

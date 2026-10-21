@@ -1,15 +1,3 @@
-//! `separate`: stem separation with HT-Demucs v4 (ONNX, run by ONNX Runtime
-//! through `ort` with the DirectML execution provider when it initialises,
-//! else CPU). Contract: docs/ANALYZER_PROTOCOL.md § Stem separation.
-//!
-//! Pipeline: decode → stereo → resample to 44.1 kHz → normalise (demucs
-//! `separate.py`) → model-length chunks with 25 % overlap and demucs'
-//! triangular transition weights (`apply_model`, shifts=0) → STFT/iSTFT
-//! around the forward-only graph (htdemucs.rs) → de-normalise → resample back
-//! → `<outDir>/<stem>.wav` (32-bit float stereo, source rate, source length).
-//! Output is streamed: memory is the decoded track plus one segment of state,
-//! whatever the length.
-
 mod chunks;
 mod htdemucs;
 pub(crate) mod onnx_patch;
@@ -30,7 +18,6 @@ use resample::StreamResampler;
 use runtime::Device;
 use writer::StemFiles;
 
-/// Model ids this build can run.
 pub const MODELS: &[&str] = &[htdemucs::ID];
 const OVERLAP: f64 = 0.25;
 
@@ -56,7 +43,6 @@ pub fn run(args: &SeparateArgs, ctx: &JobCtx) -> Result<StemsResult, JobError> {
     let graph = htdemucs::load_graph(model_dir)?;
     runtime::runtime().map_err(|e| JobError::Failed(format!("Stem separation is unavailable: {e}")))?;
 
-    // ── Decode ──
     ctx.progress("decoding", -1.0);
     let src = krypt_studio_dsp::decode::decode_file(Path::new(&args.path))?;
     let src_rate = src.sample_rate.round() as u32;
@@ -78,12 +64,10 @@ pub fn run(args: &SeparateArgs, ctx: &JobCtx) -> Result<StemsResult, JobError> {
     };
     ctx.check()?;
 
-    // ── Model ──
     ctx.progress("separating", -1.0);
     let mut model = open_model(&graph, model_dir, want, ctx)?;
     ctx.progress("separating", 0.0);
 
-    // demucs separate.py: normalise by the mono reference's mean/std.
     let (ref_mean, ref_std) = reference_stats(&mix[0], &mix[1]);
     for ch in &mut mix {
         for v in ch.iter_mut() {
@@ -91,7 +75,6 @@ pub fn run(args: &SeparateArgs, ctx: &JobCtx) -> Result<StemsResult, JobError> {
         }
     }
 
-    // ── Chunks → overlap-add → (resample) → WAV ──
     let total = mix[0].len();
     let plan = ChunkPlan::new(total, htdemucs::SEGMENT, OVERLAP);
     let weight = transition_weight(plan.segment);
@@ -149,7 +132,6 @@ pub fn run(args: &SeparateArgs, ctx: &JobCtx) -> Result<StemsResult, JobError> {
     ctx.progress("writing", -1.0);
     for (st, rs) in back.iter_mut().enumerate() {
         if let Some(rs) = rs {
-            // Flush the resampler's delay line until the stem is full length.
             rs.finish(frames, &mut |b: &[&[f32]]| files.write(st, b[0], b[1]))?;
         }
     }
@@ -182,15 +164,12 @@ pub fn run(args: &SeparateArgs, ctx: &JobCtx) -> Result<StemsResult, JobError> {
     })
 }
 
-/// Opens the model on the requested device. `auto` tries DirectML first and
-/// falls back to the CPU with a logged warning.
 fn open_model(graph: &[u8], model_dir: &Path, want: Want, ctx: &JobCtx) -> Result<HtDemucs, JobError> {
     let cpu = || HtDemucs::new(graph, model_dir, Device::Cpu).map_err(|e| JobError::Failed(format!("Cannot load {}: {e}", htdemucs::LABEL)));
     match want {
         Want::Cpu => cpu(),
         Want::DirectMl => HtDemucs::new(graph, model_dir, Device::DirectMl)
             .map_err(|e| JobError::Failed(format!("DirectML is not available ({e}). Choose CPU or Auto for stem separation."))),
-        // DirectML is Windows-only; macOS / Linux run the CPU build quietly.
         Want::Auto if !cfg!(windows) => cpu(),
         Want::Auto => match runtime::directml().and_then(|_| HtDemucs::new(graph, model_dir, Device::DirectMl)) {
             Ok(m) => Ok(m),
@@ -202,8 +181,6 @@ fn open_model(graph: &[u8], model_dir: &Path, want: Want, ctx: &JobCtx) -> Resul
     }
 }
 
-/// demucs separate.py: `ref = wav.mean(0)`; returns `(ref.mean(), ref.std())`
-/// (unbiased), with a unit std for digital silence.
 fn reference_stats(l: &[f32], r: &[f32]) -> (f32, f32) {
     let n = l.len() as f64;
     let mono = |i: usize| 0.5 * (f64::from(l[i]) + f64::from(r[i]));
@@ -213,9 +190,6 @@ fn reference_stats(l: &[f32], r: &[f32]) -> (f32, f32) {
     (mean as f32, if std > 1e-8 { std as f32 } else { 1.0 })
 }
 
-/// Inference devices that initialise on this machine ('cpu' always first).
-/// The DirectML probe runs once per process and never panics; a missing or
-/// broken ONNX Runtime only means "no directml" here (`separate` reports it).
 pub fn devices() -> Vec<String> {
     let mut d = vec![Device::Cpu.id().to_string()];
     if runtime::directml().is_ok() {

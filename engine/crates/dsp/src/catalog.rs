@@ -1,14 +1,8 @@
-//! Registers every stock plugin: its descriptor (ids/params match the seed
-//! shared/plugins/catalog.gen.json except the changes listed in
-//! tests/catalog_seed.rs) and its constructor.
-
 use crate::effects::{
     analyzer, chorus, clipper, comp, delay, drive, duck, eq, filter, flanger, gate, imager, limiter, phaser, pitch, reverb, squash,
     transient, utility, vocoder,
 };
-// wave 12.2 devices
 use crate::effects::{glue, grain, heat, tapeecho};
-// Auto Mix (research/20)
 use crate::effects::deesser;
 use crate::instruments::{audioclip, drumsynth, fm, kick808, multisampler, sampler, slicer, triosc, wavetable};
 use crate::{Effect, Instrument, PluginDescriptor};
@@ -31,7 +25,6 @@ pub fn descriptors() -> Vec<PluginDescriptor> {
         duck::descriptor(),
         utility::descriptor(),
         analyzer::descriptor(),
-        // wave 2 (appended so existing order never changes)
         fm::descriptor(),
         wavetable::descriptor(),
         chorus::descriptor(),
@@ -43,16 +36,12 @@ pub fn descriptors() -> Vec<PluginDescriptor> {
         squash::descriptor(),
         imager::descriptor(),
         pitch::descriptor(),
-        // wave 5: real instruments (sound packs)
         multisampler::descriptor(),
-        // wave 12.2: devices
         heat::descriptor(),
         tapeecho::descriptor(),
         grain::descriptor(),
         glue::descriptor(),
-        // Auto Mix: the vocal de-esser
         deesser::descriptor(),
-        // research/13 §8.5: the loop slicer
         slicer::descriptor(),
     ]
 }
@@ -105,13 +94,6 @@ pub fn create_effect(id: &str, sample_rate: f32, max_frames: usize) -> Option<Bo
     })
 }
 
-// ── Racks (Wave 12.2, research/16-ableton-parity.md §2.3) ────────────────
-// `krypt.rack`, `krypt.drumrack` and `krypt.fxrack` are composites that the
-// ENGINE builds from `Generator.rack` / `FxSlot.rack` (engine/src/rack.rs),
-// so the stock factory above can't create them. They are therefore listed
-// here and NOT in `descriptors()` (whose every entry the factory creates);
-// the engine's stock host appends them, so `--dump-catalog` includes them.
-
 pub const RACK_PLUGIN: &str = "krypt.rack";
 pub const DRUM_RACK_PLUGIN: &str = "krypt.drumrack";
 pub const FX_RACK_PLUGIN: &str = "krypt.fxrack";
@@ -130,7 +112,6 @@ fn macro_params() -> Vec<crate::ParamSpec> {
         .collect()
 }
 
-/// The three rack devices: params `macro1`..`macro8` (0..1, default 0).
 pub fn rack_descriptors() -> Vec<PluginDescriptor> {
     use crate::PluginKind;
     vec![

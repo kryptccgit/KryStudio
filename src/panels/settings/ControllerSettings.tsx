@@ -1,10 +1,3 @@
-// Settings → Controllers: gamepads (Xbox, PlayStation, Switch, generic) and
-// the keyboard / numpad as MIDI controllers (shared/live/controllers.ts, run
-// by src/input/controllers.ts). Each map is a virtual MIDI input: notes play
-// the selected channel and record, CCs link to any knob ("Link to
-// controller…"), commands run the transport. Maps are global settings, like
-// controller links; every change saves at once and confirms or toasts.
-
 import { useMemo, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight, Gamepad2, Keyboard, Loader2, Plus, Trash2, X } from 'lucide-react';
 import {
@@ -85,7 +78,6 @@ function defaultAction(kind: ActionKind, map: ControllerMap, analog: boolean): C
   }
 }
 
-/** The family to label a map's inputs with: its pad if connected, else the first pad, else generic. */
 function familyOf(map: ControllerMap, pads: ConnectedPad[]): PadFamily {
   if (map.gamepad) return padFamily(map.gamepad);
   return pads[0]?.family ?? 'generic';

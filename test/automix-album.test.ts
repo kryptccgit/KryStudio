@@ -1,7 +1,3 @@
-// Mastering upgrades (research/23 §1-2), the pure parts: reference reading / target / closeness
-// (shared/automix/reference.ts), the planner on a song's insert with a tone / width aim, album placement,
-// loudness offsets and tone blending (shared/automix/album.ts), and the dialogs' pure logic
-// (src/automix/logic.ts reference bits, src/automix/albumLogic.ts).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import type { Analysis } from '@shared/engine/protocol';
@@ -47,8 +43,6 @@ const analysis = (o: Partial<Analysis> = {}): Analysis => ({
   ...o,
 });
 
-// ── Reference ───────────────────────────────────────────────────────────
-
 test('referenceSoundOf: loudness, tone vs the mids, width and a one-line summary; silent / spectrum-less files refused', () => {
   const s = referenceSoundOf(analysis(), { path: 'C:/Music/Big Song.mp3' });
   assert.ok(typeof s === 'object');
@@ -79,11 +73,10 @@ test('closeness: mean absolute band difference over the five bands, before → a
   const before = { sub: 2, low: 4, lowMid: 2, mid: 0, highMid: -6, high: -11 };
   const after = { sub: 5, low: 7, lowMid: 0.5, mid: 0, highMid: -3, high: -7 };
   assert.equal(toneDistance(ref, ref), 0);
-  assert.equal(toneDistance(before, ref), 4); // (4+4+2+4+6)/5
+  assert.equal(toneDistance(before, ref), 4);
   const c = closeness(before, after, ref);
   assert.deepEqual(c, { before: 4, after: 1.1, gained: 2.9 });
   assert.match(closenessLine(c.before, c.after), /^Closer to the reference by 2\.9 dB \(4\.0 → 1\.1 dB/);
-  // an already-loud master barely moves: say why, and what works instead
   assert.match(closenessLine(8.4, 8.3, '"neon-fog"', { limitedSource: true }), /^Only 0\.1 dB closer to "neon-fog" .*already mastered loud.*limiter off/);
   assert.match(closenessLine(8.4, 8.3, '"neon-fog"'), /^Closer to "neon-fog" by 0\.1 dB/);
   assert.equal(isLimitedSource({ lufs: -10.3, truePeak: -0.2 }), true);
@@ -135,13 +128,10 @@ test('planner: a master chain on any insert (album songs), aiming at a given ton
   assert.equal(k.slots[k.slotOrder[k.slotOrder.length - 1]].type, 'krypt.limiter', "the song's limiter is last");
   assert.ok(findKryptSlot(k, 'limiter', true));
   assert.equal(doc.project.mixer.inserts[p.mixer.masterId].slotOrder.length, p.mixer.inserts[p.mixer.masterId].slotOrder.length, 'the Master is untouched');
-  // width math: side energy scales with the multiplier squared
   assert.ok(Math.abs(widthFactor(0.2, 0.2) - 1) < 1e-9);
   assert.ok(widthFactor(0.1, 0.3) > 1 && widthFactor(0.3, 0.1) < 1);
   assert.equal(widthFactor(0.001, 0.9), 1.6, 'clamped');
 });
-
-// ── Album ───────────────────────────────────────────────────────────────
 
 test('placeSongs: back to back on bars, a 2-bar gap, ranges that never overlap; lengths as playlist.addAudio makes them', () => {
   const ts = { num: 4, den: 4 };
@@ -149,12 +139,12 @@ test('placeSongs: back to back on bars, a 2-bar gap, ranges that never overlap; 
   const bar = 3840;
   assert.equal(slots[0].startTick, 0);
   assert.equal(slots[0].lengthTicks, clipTicks(120, 120));
-  assert.equal(slots[0].bars, '1-60'); // 120 s at 120 bpm = 60 bars
+  assert.equal(slots[0].bars, '1-60');
   assert.equal(slots[1].startTick, 62 * bar, '2 empty bars after bar 60');
-  assert.equal(slots[1].bars, '63-93'); // 61 s = 30.5 bars from bar 63 → ends inside bar 93
+  assert.equal(slots[1].bars, '63-93');
   assert.equal(slots[2].startTick, 95 * bar);
   for (let i = 1; i < slots.length; i++) assert.ok(slots[i].startTick >= slots[i - 1].endBar * bar + 2 * bar);
-  assert.equal(placeSongs([10], 100, { num: 3, den: 4 })[0].bars, '1-6'); // 10 s at 100 bpm in 3/4 = 5.6 bars
+  assert.equal(placeSongs([10], 100, { num: 3, den: 4 })[0].bars, '1-6');
 });
 
 test("albumLoudnessTargets: keep the album's dynamics (the loudest on target, ≤ 4 LU under) or all on target", () => {
@@ -166,11 +156,10 @@ test("albumLoudnessTargets: keep the album's dynamics (the loudest on target, �
 
 test('albumToneTargets: the curve + half the shared deviation + a quarter of each song\'s own', () => {
   const curve = { sub: 4, low: 6, lowMid: -1, mid: 0, highMid: -5, high: -8 };
-  const a = { sub: 4, low: 6, lowMid: -1, mid: 0, highMid: -7, high: -12 }; // dark
-  const b = { sub: 4, low: 6, lowMid: -1, mid: 0, highMid: -5, high: -8 }; // on the curve
+  const a = { sub: 4, low: 6, lowMid: -1, mid: 0, highMid: -7, high: -12 };
+  const b = { sub: 4, low: 6, lowMid: -1, mid: 0, highMid: -5, high: -8 };
   const { targets, deviation } = albumToneTargets(curve, [a, b]);
   assert.equal(deviation.high, -2);
-  // D = -2; a: d = -4 → -8 + 0.5·(-2) + 0.25·(-2) = -9.5; b: d = 0 → -8 - 1 + 0.25·2 = -8.5
   assert.equal(targets[0].high, -9.5);
   assert.equal(targets[1].high, -8.5);
   assert.equal(targets[0].mid, 0);
@@ -189,8 +178,6 @@ test('names: the album tab, Windows-safe export files that never reuse a name', 
   assert.equal(exportFileName('Song', 'wav', new Set(['song (MASTERED).wav'])), 'Song (mastered) 2.wav');
   assert.equal(exportFileName('Song', 'mp3', new Set(['Song (mastered).mp3', 'Song (mastered) 2.mp3'])), 'Song (mastered) 3.mp3');
 });
-
-// ── Dialog logic ────────────────────────────────────────────────────────
 
 test('Auto Mix form + reference: requests carry it for master / full only; the target follows it (clamped); the ceiling defaults to −1', () => {
   const presets: AutoMixPreset[] = [presetById('loud-trap')!, balanced];

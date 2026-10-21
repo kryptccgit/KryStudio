@@ -1,13 +1,3 @@
-// Rebuilds resources/krypt.ico from resources/krypt.png as a multi-size icon
-// (16/24/32/48/64/128/256). NSIS + the Windows taskbar both look ugly with a
-// single-size PNG-as-ICO, so we always ship the full set.
-//
-// `png-to-ico` requires a SQUARE input. The Krypt master PNG isn't square,
-// so we pad it with a transparent canvas via Jimp before handing it off —
-// the same trick used across the suite.
-//
-// Run after the logo changes: `npm run make-ico`.
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

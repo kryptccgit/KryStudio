@@ -1,14 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The tour runtime: which tour runs, which step, the snapshot the done
-// predicates read, and the actions ("Do it for me", step prep, recovery
-// buttons) performed through the same commands the user would trigger.
-//
-//   startTour('first-beat')   nextStep()   prevStep()   requestCloseTour()
-//
-// The overlay (./TourOverlay.tsx) polls checkStep() a few times a second
-// while a tour runs; nothing runs when no tour is active.
-// ──────────────────────────────────────────────────────────────────────
-
 import { create } from 'zustand';
 import { patternLength } from '@shared/schema/project';
 import { dispatch, getProject, withGroup } from '../doc/store';
@@ -46,22 +35,17 @@ export interface TourRun {
   tourId: TourId;
   index: number;
   choice?: AiChoice;
-  /** The snapshot when the step started (done predicates compare against it). */
   base: TourSnapshot;
   keys: string[];
   assisted: boolean;
-  /** The step is done: a short "Nice!" before the next one. */
   completing: boolean;
 }
 
 interface ToursState {
   run: TourRun | null;
-  /** The first-launch offer card is showing. */
   offer: boolean;
   memory: TourMemory;
 }
-
-// ── Memory (localStorage; the app works without it) ───────────────────
 
 function storageOk(): boolean {
   try {
@@ -87,7 +71,6 @@ function saveMemory(m: TourMemory): void {
   try {
     localStorage.setItem(TOURS_KEY, JSON.stringify(m));
   } catch {
-    /* best effort: a locked-down profile just loses the memory */
   }
 }
 
@@ -100,8 +83,6 @@ export function tourStorageOk(): boolean {
 export function markOffered(): void {
   saveMemory({ ...useTours.getState().memory, offered: true });
 }
-
-// ── Snapshot ──────────────────────────────────────────────────────────
 
 function visiblePanels(open: string[]): string[] {
   if (!wm.ready) return [];
@@ -122,7 +103,6 @@ function exportDialogOpen(): boolean {
   }
 }
 
-/** Master a song's state (src/automix with a song file). Auto Mix on a project reads as idle and closed. */
 function masterState(): TourMaster {
   try {
     const a = getAutoMix();
@@ -140,7 +120,6 @@ function masterState(): TourMaster {
   }
 }
 
-/** A plain copy of what the tours look at. Cheap: a few store reads and one walk over the channels. */
 export function takeSnapshot(extra: { keys?: string[]; assisted?: boolean } = {}): TourSnapshot {
   const p = getProject();
   const home = getHome();
@@ -176,8 +155,6 @@ export function takeSnapshot(extra: { keys?: string[]; assisted?: boolean } = {}
   };
 }
 
-// ── The run ───────────────────────────────────────────────────────────
-
 export function ctxOf(run: TourRun | null): TourCtx {
   return run?.choice ? { choice: run.choice } : {};
 }
@@ -199,7 +176,6 @@ function enter(run: Omit<TourRun, 'base' | 'keys' | 'assisted' | 'completing'>):
   if (step?.onEnter) void perform(step.onEnter, ctxOf(next));
 }
 
-/** Start a tour (from the top). Replaces a running one. */
 export function startTour(id: string): void {
   const tour = tourById(id);
   if (!tour) {
@@ -207,12 +183,10 @@ export function startTour(id: string): void {
     return;
   }
   installKeyWatch();
-  // "Next tour" from the last card of another one: that one counts as finished.
   const prev = useTours.getState().run;
   let memory = useTours.getState().memory;
   if (prev && prev.index >= currentSteps(prev).length - 1) memory = noteFinished(memory, prev.tourId);
   saveMemory(noteStarted(memory, tour.id));
-  // Every tour but the first works in the Studio (the first one starts on the title bar's + button).
   if (tour.id !== 'first-beat') showStudio();
   enter({ tourId: tour.id, index: 0 });
 }
@@ -233,12 +207,10 @@ export function prevStep(): void {
   if (!run || run.index === 0) return;
   const index = run.index - 1;
   const steps = currentSteps(run);
-  // Back to the chooser forgets the choice, so the path can change.
   const choice = steps[index]?.do === 'choose' ? undefined : run.choice;
   enter({ tourId: run.tourId, index, choice });
 }
 
-/** Tour 4's chooser: remember the path and go on. */
 export function chooseAi(choice: AiChoice): void {
   const run = useTours.getState().run;
   if (!run) return;
@@ -261,7 +233,6 @@ export function closeTour(): void {
 
 let confirming = false;
 
-/** Esc / the × button: ask first when the user is in the middle of a tour. */
 export async function requestCloseTour(): Promise<void> {
   const run = useTours.getState().run;
   if (!run || confirming) return;
@@ -282,7 +253,6 @@ export async function requestCloseTour(): Promise<void> {
   }
 }
 
-/** Poll (the overlay calls this a few times a second): advance when the step's done predicate holds. */
 export function checkStep(): void {
   const run = useTours.getState().run;
   if (!run || run.completing) return;
@@ -294,12 +264,10 @@ export function checkStep(): void {
   const at = run;
   setTimeout(() => {
     const now = useTours.getState().run;
-    // Still the same step (not closed, skipped or restarted meanwhile).
     if (now && now.tourId === at.tourId && now.index === at.index && now.completing) nextStep();
   }, 700);
 }
 
-/** "Do it for me". */
 export async function doItForMe(): Promise<void> {
   const run = useTours.getState().run;
   const step = currentStep(run);
@@ -310,14 +278,11 @@ export async function doItForMe(): Promise<void> {
   await perform(action, ctxOf(run));
 }
 
-// ── Keys pressed during a step ────────────────────────────────────────
-
 let keyWatch = false;
 
 function installKeyWatch(): void {
   if (keyWatch) return;
   keyWatch = true;
-  // Window capture runs before the keymap (document capture), so keys the keymap swallows are seen too.
   window.addEventListener(
     'keydown',
     (e) => {
@@ -330,8 +295,6 @@ function installKeyWatch(): void {
     true,
   );
 }
-
-// ── Actions ───────────────────────────────────────────────────────────
 
 function command(id: string): void {
   if (!runCommand(id)) toast.error(`Couldn't run "${id}" right now.`);
@@ -408,7 +371,6 @@ async function installChosen(c: TourCtx): Promise<void> {
   await installClientSnippet(cfg);
 }
 
-/** Perform a tour action. Every path ends in visible feedback (the change itself, a hint or a toast). */
 export async function perform(a: TourAction, c: TourCtx = ctxOf(useTours.getState().run)): Promise<void> {
   try {
     switch (a.kind) {

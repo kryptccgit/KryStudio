@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Recording target (Home ▸ Recording Studio): where recorded audio goes.
-// `Project.recording` names an insert every take plays through (the vocal
-// chain lives there, so each new take sounds finished at once) and a track
-// takes land on when it is free. main reads it when it places a take
-// (electron/input/liveInput.ts → playlist.addAudio / takes.createGroup with
-// insertId). Deleting the insert or the track clears its half.
-// Pure: no I/O.
-// ──────────────────────────────────────────────────────────────────────
-
 import { z } from 'zod';
 import { defineCommand, must, CommandError, type CommandDef } from './types';
 import { zChainPreset } from '../sounds/schema';

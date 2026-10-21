@@ -1,23 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// ParamRef — a string address for every automatable value in a project.
-// Used by automation clips, MCP tools (`params.set`), knob context menus
-// ("create automation clip", "link to controller") and the engine.
-//
-//   transport/bpm | transport/swing | transport/masterVolume
-//   channel/<chId>/volume | pan | pitch
-//   channel/<chId>/gen/<paramId>
-//   insert/<insId>/volume | pan | stereoSep
-//   insert/<insId>/slot/<slotId>/mix
-//   insert/<insId>/slot/<slotId>/<paramId>
-//   insert/<insId>/route/<targetInsId>
-//
-// Inside racks (Wave 12.2b; <host> = channel/<chId> for instrument / drum
-// racks, insert/<insId>/slot/<slotId> for effect racks):
-//   <host>/rack/<chainId>/volume | pan
-//   <host>/rack/<chainId>/inst/<paramId>              (instrument / drum racks)
-//   <host>/rack/<chainId>/dev/<deviceId>/<paramId|mix>
-// ──────────────────────────────────────────────────────────────────────
-
 import type { FxSlot, Generator, Project } from './project';
 import { DRUM_RACK_PLUGIN, FX_RACK_PLUGIN, RACK_PLUGIN, type MacroTarget, type RackChain } from './rack';
 import type { ParamSpec, PluginCatalog, PluginDescriptor } from '../plugins/types';
@@ -34,10 +14,8 @@ export type ParsedParamRef =
   | { scope: 'route'; insertId: string; targetId: string }
   | { scope: 'rack'; host: RackParamHost; target: MacroTarget };
 
-/** Which rack a `rack` ParamRef lives in: a channel's instrument / drum rack or a mixer slot's effect rack. */
 export type RackParamHost = { kind: 'channel'; channelId: string } | { kind: 'slot'; insertId: string; slotId: string };
 
-/** The `<host>/rack/…` tail (p = all segments, i = index of "rack"). */
 function parseRackTail(p: string[], i: number): MacroTarget | null {
   if (p[i] !== 'rack' || !p[i + 1]) return null;
   const chainId = p[i + 1];
@@ -48,7 +26,6 @@ function parseRackTail(p: string[], i: number): MacroTarget | null {
   return null;
 }
 
-/** ParamRef of a param inside a rack (named like a macro target). */
 export function rackParamRef(host: RackParamHost, target: MacroTarget): ParamRef {
   return formatParamRef({ scope: 'rack', host, target });
 }
@@ -102,8 +79,6 @@ export function formatParamRef(r: ParsedParamRef): ParamRef {
   }
 }
 
-// ── Built-in (non-plugin) parameter specs ─────────────────────────────
-
 export const BUILTIN_SPECS = {
   bpm: { id: 'bpm', name: 'Tempo', min: 10, max: 999, default: 140, unit: 'bpm', scale: 'linear' },
   swing: { id: 'swing', name: 'Swing', min: 0, max: 1, default: 0, unit: '%', scale: 'linear' },
@@ -117,13 +92,9 @@ export const BUILTIN_SPECS = {
   route: { id: 'route', name: 'Send level', min: 0, max: 2, default: 1, unit: '', scale: 'gain' },
 } satisfies Record<string, ParamSpec>;
 
-/** A rack chain's volume: linear, 1 = 0 dB, max 2 (the engine's built-in rack target spec). */
 export const RACK_CHAIN_VOLUME: ParamSpec = { id: 'volume', name: 'Chain volume', min: 0, max: 2, default: 1, unit: '', scale: 'gain' };
 export const RACK_CHAIN_PAN: ParamSpec = { id: 'pan', name: 'Chain pan', min: -1, max: 1, default: 0, unit: '', scale: 'linear' };
 
-// ── Params inside racks ───────────────────────────────────────────────
-
-/** The chain a rack ParamRef names (null if the host isn't a rack of the right kind or the chain is gone). */
 function rackChainAt(project: Project, host: RackParamHost, chainId: string): RackChain | null {
   if (host.kind === 'channel') {
     const g = project.channels[host.channelId]?.generator;
@@ -135,13 +106,11 @@ function rackChainAt(project: Project, host: RackParamHost, chainId: string): Ra
   return s.rack?.chains[chainId] ?? null;
 }
 
-/** What a rack ParamRef points at: the chain, plus the instrument or device it addresses. */
 function rackParamTarget(project: Project, host: RackParamHost, t: MacroTarget): { chain: RackChain; inst?: Generator; dev?: FxSlot } | null {
   const chain = rackChainAt(project, host, t.chainId);
   if (!chain) return null;
   if (t.kind === 'chain') return { chain };
   if (t.kind === 'instrument') {
-    // Effect racks ignore instruments (the engine never plays them).
     if (host.kind !== 'channel' || !chain.instrument) return null;
     return { chain, inst: chain.instrument };
   }
@@ -149,7 +118,6 @@ function rackParamTarget(project: Project, host: RackParamHost, t: MacroTarget):
   return dev ? { chain, dev } : null;
 }
 
-/** Spec of a param inside a rack: chain volume / pan, a device's mix, or the inner plugin's own spec. */
 function rackParamSpec(project: Project, catalog: PluginCatalog, host: RackParamHost, t: MacroTarget): ParamSpec | null {
   const at = rackParamTarget(project, host, t);
   if (!at) return null;
@@ -164,7 +132,6 @@ export function findPlugin(catalog: PluginCatalog, type: string): PluginDescript
   return catalog.plugins.find((p) => p.id === type);
 }
 
-/** Resolve the ParamSpec for a ref (null if the target doesn't exist). */
 export function paramSpecFor(project: Project, catalog: PluginCatalog, ref: ParamRef): ParamSpec | null {
   const r = parseParamRef(ref);
   if (!r) return null;
@@ -196,7 +163,6 @@ export function paramSpecFor(project: Project, catalog: PluginCatalog, ref: Para
   }
 }
 
-/** A short human name for a ref: the spec name, prefixed by its chain inside racks ("Keys · Cutoff"). */
 export function paramLabel(project: Project, catalog: PluginCatalog, ref: ParamRef): string | null {
   const spec = paramSpecFor(project, catalog, ref);
   const r = parseParamRef(ref);
@@ -205,7 +171,6 @@ export function paramLabel(project: Project, catalog: PluginCatalog, ref: ParamR
   return `${rackParamTarget(project, r.host, r.target)!.chain.name} · ${spec.name}`;
 }
 
-/** Current plain value of a param (falls back to the spec default for sparse params). */
 export function getParamValue(project: Project, catalog: PluginCatalog, ref: ParamRef): number | null {
   const r = parseParamRef(ref);
   const spec = paramSpecFor(project, catalog, ref);
@@ -235,10 +200,6 @@ export function getParamValue(project: Project, catalog: PluginCatalog, ref: Par
   }
 }
 
-/**
- * Write a plain value into a (draft) project. Clamps to the spec.
- * Returns an error message, or null on success.
- */
 export function setParamValue(draft: Project, catalog: PluginCatalog, ref: ParamRef, value: number): string | null {
   const r = parseParamRef(ref);
   if (!r) return `Invalid parameter reference "${ref}"`;

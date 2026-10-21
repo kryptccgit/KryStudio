@@ -1,13 +1,8 @@
-// Rhythm generator: Euclidean (pulses spread as evenly as possible over
-// steps, Toussaint / Bjorklund) or density by metric weight, with accents,
-// ghost notes and 32nd rolls. One pitch: drums, or any channel.
-
 import type { RhythmOptions } from './options';
 import { RATE_TICKS } from './options';
 import { makeRng } from './random';
 import { vel3, type GenContext, type GenNote, type GenOutput } from './context';
 
-/** Bjorklund's algorithm: E(3,8) = x..x..x. ; rotation shifts the start left. */
 export function euclid(pulses: number, steps: number, rotation = 0): boolean[] {
   const n = Math.max(1, Math.floor(steps));
   const k = Math.max(0, Math.min(n, Math.floor(pulses)));
@@ -30,12 +25,10 @@ export function euclid(pulses: number, steps: number, rotation = 0): boolean[] {
   return out.slice(r).concat(out.slice(0, r)).map((v) => v === 1);
 }
 
-/** "x..x..x." for a pattern. */
 export function euclidString(p: boolean[]): string {
   return p.map((h) => (h ? 'x' : '.')).join('');
 }
 
-/** Metric weight of a tick in its bar: 1 downbeat, .8 beats, .55 8ths, .35 16ths, .2 finer. */
 export function metricWeight(tick: number, barTicks: number, beatTicks: number): number {
   const t = ((tick % barTicks) + barTicks) % barTicks;
   if (t === 0) return 1;
@@ -77,7 +70,7 @@ export function generateRhythm(o: RhythmOptions, ctx: GenContext): GenOutput {
   const notes: GenNote[] = [];
   const dur = Math.max(1, Math.round(step * o.gate));
   const accent = Math.min(1, o.velocity + 0.17);
-  let busy = -1; // a roll covers the slots it spans
+  let busy = -1;
   slots.forEach((s, i) => {
     const end = Math.min(ctx.end, s.tick + step);
     if (!s.hit) {
@@ -85,7 +78,6 @@ export function generateRhythm(o: RhythmOptions, ctx: GenContext): GenOutput {
       return;
     }
     const v = (accentAt(s.tick, i) ? accent : o.velocity) + rng.jitter(0.04);
-    // a roll: the hit becomes 32nds up to the next hit (at most 1 beat), louder toward the end
     const nearBarEnd = (s.tick - ctx.start) % ctx.barTicks >= ctx.barTicks - ctx.beatTicks;
     const sub = step / 2;
     if (o.rolls > 0 && sub >= 60 && fill.chance(o.rolls * (nearBarEnd ? 0.9 : 0.25))) {

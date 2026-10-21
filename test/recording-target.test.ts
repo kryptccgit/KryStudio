@@ -1,7 +1,3 @@
-// The Recording Studio's recording target (shared/commands/recording.ts, Project.recording): recording.setupVocals
-// (insert + track + vocal chain, one undo step, reused on a second run), recording.setTarget, takes routed through the
-// target insert (playlist.addAudio / takes.createGroup insertId), the target track preferred by freeTrack, and the
-// target cleared when its insert or track is deleted.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';

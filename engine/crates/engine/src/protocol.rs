@@ -1,6 +1,3 @@
-//! JSON shapes of shared/engine/protocol.ts, plus the stdout writer.
-//! stdout carries ONLY protocol JSON lines; free-form diagnostics go to stderr.
-
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::Write;
@@ -73,23 +70,14 @@ pub struct RenderRequest {
     pub tail_sec: Option<f64>,
     #[serde(default)]
     pub analyze: Option<bool>,
-    /// One offline pass that also writes every mixer insert's post-fader
-    /// output to its own file; `path` is then a folder (render.rs, stems).
     #[serde(default)]
     pub stems: Option<bool>,
-    /// With `stems`: only these insert ids (default: every insert that isn't
-    /// silent over the range). Master is always written.
     #[serde(default)]
     pub stem_inserts: Option<Vec<String>>,
     #[serde(default)]
     pub loops: Option<f64>,
-    /// Wave 2 (export dialog): scale the rendered audio so its peak hits
-    /// -0.1 dBFS before writing (silence is left untouched). Absent = off.
     #[serde(default)]
     pub normalize: Option<bool>,
-    /// `format: "mp3"` only: bitrate in kbit/s (128, 192, 256 or 320;
-    /// absent = 320). Any other number is refused with a sentence. Ignored
-    /// by the WAV formats.
     #[serde(default, rename = "mp3Kbps")]
     pub mp3_kbps: Option<f64>,
 }
@@ -111,18 +99,14 @@ pub struct RenderResult {
     pub lufs_integrated: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub analysis: Option<Value>,
-    /// `stems` renders: one entry per file written, in insert order, Master last.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stem_results: Option<Vec<StemResult>>,
-    /// MP3 renders only: what was encoded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mp3: Option<Mp3RenderInfo>,
-    /// meters (§15): gain reduction per dynamics slot over the render (slots that reduced at all).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gain_reduction: Option<Vec<crate::meters::GrStat>>,
 }
 
-/// `RenderResult.stemResults[]` (shared/engine/protocol.ts).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StemResult {
@@ -133,34 +117,23 @@ pub struct StemResult {
     pub analysis: Option<Value>,
 }
 
-/// `RenderResult.mp3` (shared/engine/protocol.ts `Mp3RenderInfo`).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Mp3RenderInfo {
-    /// Rate of the MP3: the render rate, or 44.1 / 48 kHz when the render
-    /// rate isn't one the encoder takes (32, 44.1, 48 kHz).
     pub sample_rate: u32,
     pub kbps: u32,
-    /// Audio samples per channel in the file (at `sample_rate`).
     pub samples: u64,
-    /// Encoder priming samples before the audio (672 with Windows' encoder).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoder_delay: Option<u32>,
-    /// Samples after the audio up to the end of the last MPEG frame.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_padding: Option<u32>,
-    /// iTunes gapless info for an ID3v2 `COMM` frame (language `eng`,
-    /// description `iTunSMPB`): `" 00000000 <delay> <padding> <samples> ..."`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub itun_smpb: Option<String>,
 }
 
-/// Where log lines go.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum OutMode {
-    /// Engine protocol: logs become `log` events on stdout.
     Protocol,
-    /// CLI modes: stdout is reserved for the result; logs go to stderr.
     Cli,
 }
 

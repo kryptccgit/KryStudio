@@ -1,49 +1,20 @@
-// Factory effect-chain presets: master chains per genre, buses, inserts, sends
-// (owned by the playbooks author; see research/10-sound-and-craft.md).
-//
-// Every chain uses stock krypt.* effects only, with PLAIN-unit params exactly
-// as the catalog specs them (test/playbooks.test.ts checks each value against
-// clampToSpec). Playbooks ask for chains by ROLE + genre + tags through
-// shared/sounds/select.ts; nothing outside this file names a chain id.
-//
-// Master chains carry `targetLufs`: the integrated loudness they reached on
-// busy test mixes whose pre-master level was about -13.5 LUFS with peaks over
-// 0 dBFS (the Neon Fog demo and a four-on-the-floor test mix, rendered with
-// `krypt-studio-engine --render --analyze`). A quieter mix lands lower: raise
-// the limiter Gain by the difference. Every ceiling is -1 dBTP (true peak on).
-//
-// Sends hold 100% wet effects (slot mix 1): feed them with route sends and set
-// the amount there. Their EQ keeps the returns out of the low mids.
-
 import type { ChainPreset, PresetFx } from '../types';
 import { DEVICE_CHAIN_PRESETS } from './deviceChains';
 
 const fx = (type: string, params: Record<string, number>, mix?: number): PresetFx => (mix === undefined ? { type, params } : { type, params, mix });
 
-// Builders for the effects used most, so each chain reads as a signal path.
 const eq = (params: Record<string, number>): PresetFx => fx('krypt.eq', params);
 const comp = (params: Record<string, number>, mix?: number): PresetFx => fx('krypt.comp', params, mix);
 const limiter = (inputGain: number, release = 60): PresetFx => fx('krypt.limiter', { inputGain, ceiling: -1, release, truePeak: 1 });
 const clipper = (drive: number, softness: number, ceiling = -1): PresetFx => fx('krypt.clipper', { drive, ceiling, softness, oversample: 2 });
-/**
- * krypt.drive always runs at slot mix 1: it has 35 samples of latency and the engine blends a slot's dry signal
- * without delay compensation, so a parallel (mix < 1) drive comb-filters around 700 Hz. Tone is its post low pass.
- */
 const drive = (mode: keyof typeof DRIVE, amount: number, tone: number, output = 0): PresetFx => fx('krypt.drive', { mode: DRIVE[mode], drive: amount, tone, output });
 
-/** krypt.delay / krypt.filter / krypt.flanger sync divisions (index into the catalog options). */
 const DIV = { '1/16': 3, '1/8T': 5, '1/8': 6, '1/8D': 7, '1/4T': 8, '1/4': 9, '1/4D': 10, '1/2': 11, '1 bar': 12, '2 bars': 13, '4 bars': 14 } as const;
-/** krypt.drive modes. */
 const DRIVE = { tape: 0, tube: 1, hard: 2, fold: 3, bitcrush: 4 } as const;
-/** krypt.reverb modes. */
 const VERB = { room: 0, hall: 1, plate: 2 } as const;
-/** krypt.filter types. */
 const FILTER = { lp12: 0, lp24: 1, hp12: 2, hp24: 3, bandpass: 4, notch: 5 } as const;
 
 const chain = (c: Omit<ChainPreset, 'kind' | 'author'>): ChainPreset => ({ kind: 'chain', author: 'Krypt', ...c });
-
-// ── Master ────────────────────────────────────────────────────────────
-// Tone EQ → glue comp → (colour) → mono lows → clipper → true-peak limiter.
 
 const MASTER: ChainPreset[] = [
   chain({
@@ -262,8 +233,6 @@ const MASTER: ChainPreset[] = [
   }),
 ];
 
-// ── Drum bus ──────────────────────────────────────────────────────────
-
 const DRUM_BUS: ChainPreset[] = [
   chain({
     id: 'factory:chain/drum-bus/punchy-glue',
@@ -322,8 +291,6 @@ const DRUM_BUS: ChainPreset[] = [
   }),
 ];
 
-// ── Drum channel inserts ──────────────────────────────────────────────
-
 const DRUMS: ChainPreset[] = [
   chain({
     id: 'factory:chain/drums/kick-punch',
@@ -378,8 +345,6 @@ const DRUMS: ChainPreset[] = [
     description: 'Percussion insert for congas, rims, shakers and toms: low cut, tightened tails, a faint dotted-eighth ping-pong that spreads the groove.',
   }),
 ];
-
-// ── 808 / bass inserts ────────────────────────────────────────────────
 
 const BASS: ChainPreset[] = [
   chain({
@@ -438,8 +403,6 @@ const BASS: ChainPreset[] = [
     description: 'Reese, growl or wobble insert: heavy tube drive, multiband squash for dense harmonics, mono under 180 Hz and wide mids. Layer a clean sub under it.',
   }),
 ];
-
-// ── Music inserts ─────────────────────────────────────────────────────
 
 const LEAD: ChainPreset[] = [
   chain({
@@ -645,8 +608,6 @@ const VOCAL: ChainPreset[] = [
   }),
 ];
 
-// ── Sends (100% wet returns) ──────────────────────────────────────────
-
 const REVERB_SENDS: ChainPreset[] = [
   chain({
     id: 'factory:chain/reverb-send/plate',
@@ -738,8 +699,6 @@ const DELAY_SENDS: ChainPreset[] = [
   }),
 ];
 
-// ── Character ─────────────────────────────────────────────────────────
-
 const CHARACTER: ChainPreset[] = [
   chain({
     id: 'factory:chain/character/lofi-tape',
@@ -793,8 +752,6 @@ const CHARACTER: ChainPreset[] = [
     description: 'Gentle tube saturation with a warm tilt. Thickens thin synths, keys and buses without obvious distortion.',
   }),
 ];
-
-// ── Transition (automate the named param) ─────────────────────────────
 
 const TRANSITION: ChainPreset[] = [
   chain({

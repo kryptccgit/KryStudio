@@ -1,15 +1,9 @@
-//! Real-time safety: no heap (de)allocation in note_on / note_off / choke /
-//! set_param / set_voice_mode / process / all_off / reset. Uses the
-//! assert_no_alloc allocator (aborts the test binary on any allocation
-//! inside a guarded closure, debug builds).
-
 mod common;
 use common::*;
 
 use assert_no_alloc::assert_no_alloc;
 use krypt_studio_dsp::{create_effect, create_instrument, descriptor, descriptors, NoteExtras, PluginKind, ProcessContext};
 
-// The checking allocator exists in debug builds only (release: a no-op pass).
 #[cfg(debug_assertions)]
 #[global_allocator]
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
@@ -40,7 +34,6 @@ fn instruments_do_not_allocate_on_the_audio_thread() {
                 for k in 0..3u8 {
                     inst.note_off(100 + k as usize, 48 + k * 3 + round as u8 % 12);
                 }
-                // an event beyond this block is carried to the next one
                 inst.note_on(BLOCK + 10, 70, 70.0, 0.5, NoteExtras::default());
                 let ctx = ProcessContext { sample_rate: SR, bpm: 128.0, beats_per_bar: 4.0, playing: true, beat_pos: round as f64, frames: BLOCK };
                 inst.process(&ctx, [&mut l, &mut r]);

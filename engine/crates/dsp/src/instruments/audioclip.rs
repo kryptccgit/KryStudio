@@ -1,15 +1,3 @@
-//! krypt.audioclip — plays a sample at its original speed (sample-rate
-//! converted with windowed sinc, no key tracking) from `sample_start`, for
-//! playlist audio clips.
-//!
-//! Time-stretch / pitch-shift ("Stretch" group) is NOT done here: the
-//! engine reads those params (`stretch_request`), renders a stretched copy
-//! of the sample off the audio thread (Signalsmith Stretch, engine
-//! `variants.rs`) and hands it to this instrument with `set_sample`, so the
-//! real-time path always plays a plain buffer. At identity (ratio 1, 0 st)
-//! the engine passes the original sample: playback is bit-identical to a
-//! clip without stretch params.
-
 use std::sync::Arc;
 
 use super::sampler::sanitize_sr;
@@ -22,7 +10,6 @@ use crate::{Instrument, NoteExtras, PluginDescriptor, PluginKind, ProcessContext
 param_table! {
     Gain => lin("gain", "Gain", -24.0, 24.0, 0.0, "dB", "Playback"),
     Reverse => toggle("reverse", "Reverse", false, "Playback"),
-    // Stretch group (wave 3A). Rendered ahead of time by the engine, so not automatable.
     Pitch => not_automatable(lin("pitch", "Pitch", -24.0, 24.0, 0.0, "st", "Stretch")),
     Formant => not_automatable(toggle("formant", "Keep formants", true, "Stretch")),
     TempoSync => not_automatable(toggle("tempo_sync", "Follow tempo", false, "Stretch")),
@@ -49,29 +36,20 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
-/// What the engine must render for an audio-clip channel.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StretchRequest {
-    /// Output duration ÷ input duration:
-    /// `stretch × (tempo_sync && src_bpm > 0 ? src_bpm / project_bpm : 1)`.
     pub ratio: f64,
-    /// Pitch shift in semitones.
     pub semitones: f64,
-    /// Formant compensation while pitched (only meaningful when `semitones != 0`).
     pub keep_formants: bool,
-    /// `tempo_sync` is on but `src_bpm` is 0 (unknown): the tempo factor is 1.
     pub missing_src_bpm: bool,
 }
 
 impl StretchRequest {
-    /// Ratio 1 and 0 st: play the original sample (the pre-stretch code path).
     pub fn is_identity(&self) -> bool {
         self.ratio == 1.0 && self.semitones == 0.0
     }
 }
 
-/// The stretch request for this channel's plain param values. `get(id)` returns
-/// a param's (already clamped) value, or None for a missing param (= its default).
 pub fn stretch_request(get: impl Fn(&str) -> Option<f32>, project_bpm: f64) -> StretchRequest {
     let specs = param_specs();
     let val = |p: P| -> f64 {
@@ -169,7 +147,6 @@ impl Voice for ClipVoice {
     fn legato(&mut self, _sh: &ClipShared, _pitch: f32, _glide_ms: f32) {}
 
     fn release(&mut self, _sh: &ClipShared) {
-        // short de-click fade at the clip end
         if !self.fading {
             self.fading = true;
             self.fade_step = 1.0 / (4.0 * 0.001 * self.sr);
@@ -299,7 +276,6 @@ impl Instrument for AudioClip {
     }
 
     fn note_on(&mut self, offset: usize, key: u8, pitch: f32, velocity: f32, extras: NoteExtras) {
-        // never slide: every clip start is a fresh voice
         let extras = NoteExtras { slide: false, ..extras };
         self.vm.note_on(offset, key, pitch, velocity, extras);
     }
@@ -347,19 +323,16 @@ mod tests {
         let r = req(&[], 140.0);
         assert!(r.is_identity() && r.keep_formants && !r.missing_src_bpm);
         assert_eq!(req(&[("stretch", 2.0)], 140.0).ratio, 2.0);
-        // ratio = stretch × src_bpm / project_bpm when following the tempo
         assert_eq!(req(&[("tempo_sync", 1.0), ("src_bpm", 120.0)], 60.0).ratio, 2.0);
         assert!((req(&[("tempo_sync", 1.0), ("src_bpm", 120.0), ("stretch", 1.5)], 60.0).ratio - 3.0).abs() < 1e-12);
         assert!(req(&[("tempo_sync", 1.0), ("src_bpm", 128.0)], 128.0).is_identity(), "source tempo = project tempo");
         assert_eq!(req(&[("tempo_sync", 0.0), ("src_bpm", 120.0)], 60.0).ratio, 1.0, "src_bpm alone does nothing");
         let r = req(&[("tempo_sync", 1.0), ("stretch", 0.5)], 60.0);
         assert!(r.missing_src_bpm && r.ratio == 0.5, "unknown source tempo: the factor is 1");
-        // clamped to the specs; fractional pitch kept
         assert_eq!(req(&[("pitch", 30.0)], 120.0).semitones, 24.0);
         assert_eq!(req(&[("pitch", -0.5)], 120.0).semitones, -0.5);
         assert_eq!(req(&[("stretch", 10.0)], 120.0).ratio, 4.0);
         assert!(!req(&[("formant", 0.0), ("pitch", 3.0)], 120.0).keep_formants);
-        // ids the UI / MCP tools set
         let ids: Vec<&str> = param_specs().iter().map(|s| s.id).collect();
         assert_eq!(ids, ["gain", "reverse", "pitch", "formant", "tempo_sync", "src_bpm", "stretch"]);
         assert!(param_specs()[2..].iter().all(|s| s.automatable == Some(false) && s.group == Some("Stretch")));
@@ -367,7 +340,6 @@ mod tests {
 
     #[test]
     fn stretch_params_never_touch_realtime_playback() {
-        // The engine applies them by handing over a rendered variant; the voice code is unchanged.
         let n = 256 * 40;
         let l: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.031).sin() * 0.5).collect();
         let r: Vec<f32> = l.iter().map(|v| -v * 0.7).collect();

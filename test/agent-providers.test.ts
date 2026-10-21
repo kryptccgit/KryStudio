@@ -1,6 +1,3 @@
-// The built-in chat's providers (shared/agent/providers.ts): key checks per provider (a key for another provider says
-// which), key files (Anthropic keeps its old one), model choice per provider, and the settings merge (provider, models,
-// key flags; hasApiKey follows the selected provider).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { AGENT_PROVIDERS, AGENT_PROVIDER_IDS, isAgentProvider, keyFileFor, keyProblem, modelFor } from '@shared/agent/providers';
@@ -60,7 +57,6 @@ test('settings: provider and models merge; hasApiKey follows the selected provid
   const junk = mergeSettings(models, { agent: { ...models.agent, provider: 'gemini', models: { openai: 42 } } });
   assert.equal(junk.agent.provider, 'openai', 'an unknown provider keeps the previous one');
   assert.deepEqual(junk.agent.models, {});
-  // Settings saved before providers existed still load.
   const legacy = mergeSettings(DEFAULT_SETTINGS, { agent: { model: 'claude-opus-5-5', hasApiKey: true } });
   assert.equal(legacy.agent.provider, 'anthropic');
   assert.equal(legacy.agent.hasApiKey, true);

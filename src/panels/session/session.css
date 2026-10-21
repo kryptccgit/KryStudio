@@ -1,4 +1,3 @@
-/* Session view: the "queued" pulse (a clip or a stop waiting for its quantize boundary). */
 @keyframes krypt-session-queued {
   0%,
   100% {

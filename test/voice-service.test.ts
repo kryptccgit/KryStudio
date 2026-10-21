@@ -1,11 +1,3 @@
-// Krypt Voice service (electron/voice) with fakes: a fake analyzer (tts /
-// syllables / sing write real WAV files), a fake fetch standing in for Fish
-// Audio, an in-memory key store and a fake recorder. Covers speak (Local and
-// Cloud), the render cache, placement + one undo step, "Sing my notes" end to
-// end (the segments sent to `sing` match the notes), voice rules (no
-// community voices), Fish errors as sentences, the Fish key, "my voice"
-// (recorder takes only, consent, the consent line), the busy guard + cancel,
-// and the MCP tools.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -152,8 +144,6 @@ function rig(o: { key?: string | null; words?: boolean; model?: boolean; fetch?:
 
 const clipsOf = (doc: DocHost) => Object.values(doc.project.playlist.clips).filter((c) => c.kind === 'audio');
 
-// ── State / voices ──────────────────────────────────────────────────────
-
 test('state: Kokoro voices from the model package, Fish voices only with a key, messages say why', async () => {
   const r = rig({ voicesJson: ['af_heart', { id: 'bm_george', name: 'George' }, 'jf_alpha', 'garbage'] });
   const s = await r.svc.state();
@@ -178,8 +168,6 @@ test('state: without voices.json the known English Kokoro set is offered (af_hea
   assert.equal(s.voices[0].id, 'local:af_heart');
   assert.ok(s.voices.length >= 10);
 });
-
-// ── speak (Local) ───────────────────────────────────────────────────────
 
 test('speak (Local): renders with the analyzer, adds ONE clip on a new track (Follow tempo off), one undo step', async () => {
   const r = rig();
@@ -253,8 +241,6 @@ test('speak (Local): emotion tags are dropped with a note; other languages go to
   assert.match((await r.svc.speak({ text: 'hi', voiceId: 'local:zz_nobody' })).message!, /has no voice/);
 });
 
-// ── speak (Cloud) ───────────────────────────────────────────────────────
-
 test('speak (Cloud): POST /v1/tts with the free model, the key as Bearer, WAV; logged as sent to Fish Audio, never the key', async () => {
   const r = rig({ key: GOOD_KEY });
   const out = await r.svc.speak({ text: '[excited] Krypt Studio!', voiceId: 'fish:fishnarrator01', speed: 1.1 });
@@ -309,8 +295,6 @@ test('speak (Cloud): a revoked key gives the human 401 sentence at render time',
   assert.match(out.message!, /didn't accept your API key.*Settings ▸ Voice/);
 });
 
-// ── Fish key ────────────────────────────────────────────────────────────
-
 test('setFishKey: verified with a request that spends nothing; bad keys and offline are sentences and nothing is saved', async () => {
   const r = rig();
   const bad = await r.svc.setFishKey('wrong-key-0123456789abc');
@@ -336,8 +320,6 @@ test('setFishKey: verified with a request that spends nothing; bad keys and offl
   assert.equal(r.store.key, null);
   assert.ok(!(await r.svc.state()).voices.some((v) => v.engine === 'fish'));
 });
-
-// ── sing ────────────────────────────────────────────────────────────────
 
 function melody(r: ReturnType<typeof rig>, notes: Array<[number, number, number]>) {
   r.doc.exec('notes.add', { patternId: r.patId, channelId: r.keys.id, notes: notes.map(([tick, dur, key]) => ({ tick, dur, key })) }, { actor: USER });
@@ -425,8 +407,6 @@ test('sing (Cloud): each line spoken by Fish, syllables found locally, then sung
   assert.match(out.message!, /your lyrics were sent to Fish Audio/);
 });
 
-// ── Busy guard / cancel ─────────────────────────────────────────────────
-
 test('busy guard: a rendering job blocks a tab switch and a second job; cancel stops it; previews do not guard', async () => {
   let release!: () => void;
   const hold = new Promise<void>((res) => (release = res));
@@ -450,8 +430,6 @@ test('busy guard: a rendering job blocks a tab switch and a second job; cancel s
   release();
   assert.ok((await pv).ok);
 });
-
-// ── My voice ────────────────────────────────────────────────────────────
 
 function take(r: ReturnType<typeof rig>, name: string, secs: number, register = true): string {
   const p = path.join(r.recDir, name);
@@ -500,7 +478,6 @@ test('cloneMyVoice: the recording must start with the consent line; then a PRIVA
   const s = await r.svc.state();
   assert.ok(s.voices.some((v) => v.id === out.data!.id && v.mine));
   assert.ok(r.logs.some((l) => /sent to Fish Audio.*create a private voice model/.test(l)));
-  // Speak with it: Fish gets the clone's reference id.
   const sp = await r.svc.speak({ text: 'this is me', voiceId: out.data!.id, preview: true });
   assert.ok(sp.ok, sp.message);
   assert.equal(JSON.parse(String(r.fetch.calls.find((c) => c.url.endsWith('/v1/tts'))!.body)).reference_id, 'myclone000001');
@@ -510,8 +487,6 @@ test('cloneMyVoice: the recording must start with the consent line; then a PRIVA
   assert.ok(!(await r.svc.state()).voices.some((v) => v.mine));
   assert.equal((await r.svc.removeMyVoice(out.data!.id)).ok, false, 'already gone');
 });
-
-// ── MCP tools ───────────────────────────────────────────────────────────
 
 test('MCP: list_voices / generate_voice / sing_notes run as the agent (one undo group each), human results', async () => {
   const r = rig();

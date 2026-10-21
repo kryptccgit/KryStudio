@@ -1,8 +1,3 @@
-// Persistent settings: userData/settings.json, written atomically, ALWAYS
-// merged field-by-field over DEFAULT_SETTINGS on load and on update
-// (kryptguidelines §5.9: old files lack new fields; never trust the JSON).
-// Listeners (ipc.ts → `settings:changed`) fire after every successful update.
-
 import { app } from 'electron';
 import path from 'node:path';
 import { FILE_ACCESS_MODES, type ExportSettings, type FileAccessMode, type LibrarySettings, type Settings } from '@shared/types';
@@ -22,7 +17,6 @@ export const DEFAULT_SETTINGS: Settings = {
   browserRoots: [],
   recent: [],
   autosaveSec: 60,
-  // fileAccess 'anywhere': it's the user's own computer; agents on the local pipe may open any local audio file.
   mcp: { enabled: true, httpEnabled: false, httpPort: 47800, requireConsentForDestructive: true, fileAccess: 'anywhere' },
   agent: { model: 'claude-opus-5-5', hasApiKey: false, provider: 'anthropic', models: {}, keys: {} },
   discordRpc: true,
@@ -50,7 +44,6 @@ const num = (v: unknown, d: number, lo = -Infinity, hi = Infinity): number =>
 const bool = (v: unknown, d: boolean): boolean => (typeof v === 'boolean' ? v : d);
 const str = (v: unknown, d: string): string => (typeof v === 'string' ? v : d);
 
-/** The built-in chat's settings: provider, a model per provider (free text, capped), which providers have a key. */
 function mergeAgent(base: Settings['agent'], input: unknown): Settings['agent'] {
   const a = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   const pick = <T,>(raw: unknown, prev: Partial<Record<AgentProvider, T>> | undefined, ok: (v: unknown) => v is T): Partial<Record<AgentProvider, T>> => {
@@ -68,7 +61,6 @@ function mergeAgent(base: Settings['agent'], input: unknown): Settings['agent'] 
   const keys = pick('keys' in a ? a.keys : undefined, base.keys, isBool);
   return {
     model: str(a.model, base.model) || base.model,
-    // Follows the selected provider once main has recorded which providers have a key.
     hasApiKey: keys[provider] ?? bool(a.hasApiKey, base.hasApiKey),
     provider,
     models: pick('models' in a ? a.models : undefined, base.models, isModel),
@@ -77,7 +69,6 @@ function mergeAgent(base: Settings['agent'], input: unknown): Settings['agent'] 
 }
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 
-/** Reference-library settings: fast scan + the AI's style focus (validated field by field). */
 export function mergeLibrarySettings(base: LibrarySettings | undefined, input: unknown): LibrarySettings {
   const b: LibrarySettings = base ?? { fastScan: false, focus: null };
   if (input === undefined) return { fastScan: b.fastScan, focus: b.focus ? { ...b.focus } : null };
@@ -101,7 +92,6 @@ function mergeExportSettings(base: ExportSettings | undefined, input: unknown): 
   return { folder: o.folder === 'music' || o.folder === 'project' ? o.folder : b.folder };
 }
 
-/** Merge an untrusted partial over a base, validating every field. */
 export function mergeSettings(base: Settings, input: unknown): Settings {
   const o = obj(input);
   const audio = obj(o.audio);
@@ -142,7 +132,6 @@ export function mergeSettings(base: Settings, input: unknown): Settings {
     agent: mergeAgent(base.agent, agent),
     discordRpc: bool(o.discordRpc, base.discordRpc),
     keymap: 'keymap' in o ? sanitizeKeymapOverrides(o.keymap) ?? {} : base.keymap ?? {},
-    // Live input / recording (validated in shared/live/recording.ts).
     ...mergeLiveSettings({ midi: midiSettings(base), recording: recordingSettings(base), audioInput: audioInputSettings(base) }, o),
     library: mergeLibrarySettings(base.library, o.library),
     export: mergeExportSettings(base.export, o.export),
@@ -180,7 +169,6 @@ export function updateSettings(patch: Partial<Settings>): Settings {
     try {
       fn(next, prev);
     } catch {
-      /* ignore */
     }
   }
   return next;
@@ -191,7 +179,6 @@ export function onSettingsChanged(fn: (s: Settings, prev: Settings) => void): ()
   return () => listeners.delete(fn);
 }
 
-/** Push a path to the front of the recent-files list. */
 export function addRecent(p: string): void {
   const s = getSettings();
   const key = p.toLowerCase();

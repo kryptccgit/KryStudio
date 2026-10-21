@@ -1,23 +1,3 @@
-// Closeness to the studied reference (research/15 §3.5, owned by review-mix):
-// how near the song is to the reference the user gave, as 0-100 overall and
-// per dimension, each with what was measured, what the reference has and
-// the tool call that closes the gap. review_song adds the biggest gaps to
-// its issue list; match_mix (matchMix.ts) shares the part-level maths.
-//
-// Dimensions (weights renormalised over the ones that could be measured):
-//   tempo 0.20       exact = 100; ×2 / ×0.5 readings of the reference count
-//   key 0.10         same 100, relative major/minor 80, a fifth away 40, else 20
-//   groove 0.20      per-role cosine of 16th-step hit histograms (+ swing)
-//   harmony 0.15     chord per bar vs the reference chords, per section
-//   arrangement 0.15 per-bar energy correlation, section boundaries (±1 bar), length
-//   sounds 0.10      fingerprint similarity per part (when available)
-//   mix 0.10         bands vs mid, width, LUFS, per-part balance (stems)
-//
-// Pure: no I/O. Times: project bars are 1-based from the start of the
-// reviewed range; the reference is read on its beat grid at the tempo
-// reading (×1, ×2, ×0.5) nearest the project tempo, so a 71.5 bpm detection
-// lines up with a 143 bpm project bar for bar.
-
 import type { Channel, Project } from '@shared/schema/project';
 import type { Analysis } from '@shared/engine/protocol';
 import type { AudioAnalysis, ChordQuality, DrumRole } from '@shared/analyzer/protocol';
@@ -38,50 +18,33 @@ const DIM_ORDER: ClosenessDimId[] = ['tempo', 'key', 'groove', 'harmony', 'arran
 
 export interface ClosenessDim {
   id: ClosenessDimId;
-  /** 0..100, null = not measured (see note). */
   score: number | null;
-  /** What the song has, in words ("175 bpm"). */
   measured: string;
-  /** What the reference has. */
   reference: string;
-  /** The tool call(s) that close the gap; null when nothing to do. */
   fix: string | null;
-  /** Why it wasn't measured, or a caveat. */
   note?: string;
-  /** Numbers behind the score (per role, per section, per part …). */
   detail?: Record<string, unknown>;
 }
 
 export interface Closeness {
-  /** 0..100 over the measured dimensions (weighted), null when none could be measured. */
   overall: number | null;
   dims: ClosenessDim[];
-  /** The fixes worth most closeness points first (weight × gap). */
   topFixes: Array<{ dim: ClosenessDimId; gain: number; fix: string }>;
 }
 
-/** The four stem groups of a separated song (HT-Demucs) and what our parts map to. */
 export type PartGroup = 'drums' | 'bass' | 'other' | 'vocals';
 export const PART_GROUPS: readonly PartGroup[] = ['drums', 'bass', 'other', 'vocals'];
-/** Level per group (dB: RMS or LUFS, the same measure on both sides). */
 export type GroupLevels = Partial<Record<PartGroup, number>>;
 
 export interface ClosenessInput {
   project: Project;
-  /** Song ticks [start, end) under review. */
   range: { start: number; end: number };
-  /** The project's sections (review_song's markers or inferred), song ticks. */
   sections: ReadonlyArray<{ name: string; start: number; end: number }>;
-  /** The project key ("Am"), given or estimated from the notes; null without pitched notes. */
   projectKey: string | null;
-  /** The render's analysis (null: the render failed or has none). */
   render: Analysis | null;
   reference: { brief: ReferenceBrief; analysis: AudioAnalysis };
-  /** Per-part loudness of our render (stems) and of the reference stems; null when either is missing. */
   balance?: { project: GroupLevels; reference: GroupLevels } | null;
-  /** Why the balance is missing (shown as a note). */
   balanceNote?: string;
-  /** Per-part sound similarity (fingerprints, 0..1), when available. */
   sounds?: Array<{ part: string; similarity: number; fix?: string }> | null;
   soundsNote?: string;
 }
@@ -94,35 +57,27 @@ const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
 const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const mod12 = (n: number): number => ((Math.round(n) % 12) + 12) % 12;
 
-// ── The reading of the reference at the project tempo ───────────────────
-
-/** ×0.5, ×1 or ×2: the reading of the reference tempo nearest the project tempo (1 without a tempo). */
 export function readingFactor(projectBpm: number, detectedBpm: number | null): 1 | 0.5 | 2 {
   if (!isNum(detectedBpm) || detectedBpm <= 0 || !(projectBpm > 0)) return 1;
   const fs = [1, 0.5, 2] as const;
   return fs.reduce((best, f) => (Math.abs(Math.log2(projectBpm / (detectedBpm * f))) < Math.abs(Math.log2(projectBpm / (detectedBpm * best))) ? f : best), 1 as 1 | 0.5 | 2);
 }
 
-/** Seconds of the reference at a 0-based bar position of the reading (`factor`). */
 function refSecAtBar(a: AudioAnalysis, bar: number, bpb: number, factor: number, detected: number): number {
   const beat = (bar * bpb) / factor;
   return beatToSec(a, beat) ?? (beat * 60) / detected;
 }
 
-/** The reference's section plan at the reading (brief.plan when it is the brief's own reading). */
 function planAt(brief: ReferenceBrief, factor: number): PlannedSection[] {
   if (!brief.detectedBpm) return [];
   if (factor === brief.factor) return brief.plan;
   return sectionPlan(brief, Math.round(brief.detectedBpm * factor * 100) / 100);
 }
 
-// ── Tempo ───────────────────────────────────────────────────────────────
-
 export function tempoScore(bpm: number, detected: number): { score: number; reading: number; offPct: number } {
   const readings = [detected, detected * 2, detected / 2];
   const reading = readings.reduce((b, r) => (Math.abs(bpm / r - 1) < Math.abs(bpm / b - 1) ? r : b));
   const offPct = Math.abs(bpm / reading - 1) * 100;
-  // Exact (within 0.5 %) = 100; 3 % off (the reference lock's limit) ≈ 67; 8 % or more = 0.
   const score = Math.round(100 * clamp01(1 - Math.max(0, offPct - 0.5) / 7.5));
   return { score, reading: Math.round(reading * 10) / 10, offPct: r1(offPct) };
 }
@@ -132,7 +87,6 @@ function tempoDim(bpm: number, brief: ReferenceBrief): ClosenessDim {
   if (!det) return { id: 'tempo', score: null, measured: `${bpm} bpm`, reference: 'no steady tempo', fix: null, note: 'the reference has no steady pulse to compare with' };
   const t = tempoScore(bpm, det);
   const readings = [...new Set([det, r1(det * 2), r1(det / 2)].filter((x) => x >= 40 && x <= 300))].join(' / ');
-  // Near a reading: snap to it exactly. Far off: the reading the plan uses (it fits the genre).
   const target = t.offPct <= 3 ? Math.round(t.reading * 10) / 10 : (brief.bpm ?? Math.round(t.reading));
   const snapped = Math.abs(target - Math.round(target)) < 0.15 ? Math.round(target) : target;
   return {
@@ -145,9 +99,6 @@ function tempoDim(bpm: number, brief: ReferenceBrief): ClosenessDim {
   };
 }
 
-// ── Key ─────────────────────────────────────────────────────────────────
-
-/** The chord the project's bars rest on most (ties: the one heard first): the tonic its harmony centres on, or null. */
 function homeChord(chords: Array<BarChord | null>): BarChord | null {
   const n = new Map<string, { c: BarChord; k: number; first: number }>();
   chords.forEach((c, i) => {
@@ -167,7 +118,6 @@ function keyDim(projectKey: string | null, brief: ReferenceBrief, pitched: strin
   if (!rk) return { id: 'key', score: null, measured: projectKey ?? '?', reference: 'unclear', fix: null, note: "the reference's key is unclear" };
   if (!pk) return { id: 'key', score: null, measured: 'no pitched notes', reference: keyShortName(rk), fix: null, note: 'no pitched notes to read a key from yet' };
   const shift = keyShift(pk, rk);
-  // Key estimates mix up relative keys (Am / C): when the chords centre on the reference's tonic, it is the same key.
   const centred = shift.relation === 'relative' && !!home && home.root === rk.pc && home.minor === rk.minor;
   const fifth = Math.abs(shift.semitones) === 5;
   const score = shift.relation === 'same' || centred ? 100 : shift.relation === 'relative' ? 80 : fifth ? 40 : 20;
@@ -182,19 +132,15 @@ function keyDim(projectKey: string | null, brief: ReferenceBrief, pitched: strin
   return { id: 'key', score, measured: keyShortName(pk), reference: keyShortName(rk), fix, detail: { relation: shift.relation, semitones: shift.semitones } };
 }
 
-// ── Groove ──────────────────────────────────────────────────────────────
-
 const ROLE_TO_FEEL: Record<string, DrumRole | null> = { kick: 'kick', snare: 'snare', clap: 'snare', hat: 'hat', ride: 'hat', openhat: 'openhat', perc: 'perc', tom: 'perc', crash: null };
 const DRUM_ROLES = new Set(Object.keys(ROLE_TO_FEEL));
 
-/** The drum role a channel plays for the groove comparison (null: not a drum, or a crash). */
 export function feelRoleOf(ch: Pick<Channel, 'name' | 'generator'> | { name: string }, drum: boolean): DrumRole | null {
   const role = roleFromName(ch.name);
   if (role && DRUM_ROLES.has(role)) return ROLE_TO_FEEL[role];
   return drum && !role ? 'perc' : null;
 }
 
-/** Per role, the fraction of drum bars with a hit on each 16th (the project's notes in [start, end)). */
 export function projectDrumSteps(p: Project, start: number, end: number): { steps: Partial<Record<DrumRole, number[]>>; bars: number; names: Partial<Record<DrumRole, string>> } {
   const barTicks = ticksPerBar(p.transport.timeSig);
   const step = barTicks / 16;
@@ -227,7 +173,6 @@ export function projectDrumSteps(p: Project, start: number, end: number): { step
   return { steps, bars, names };
 }
 
-/** The reference's drum steps at the reading `factor` (the brief's own when it is the same reading). */
 export function referenceDrumSteps(brief: ReferenceBrief, a: AudioAnalysis, factor: number): { steps: Partial<Record<DrumRole, number[]>>; source: 'stem' | 'mix'; note?: string } | null {
   if (brief.drums && factor === brief.factor) return { steps: brief.drums.steps, source: brief.drums.source };
   if (a.drumHits?.length) {
@@ -237,7 +182,6 @@ export function referenceDrumSteps(brief: ReferenceBrief, a: AudioAnalysis, fact
   return brief.drums ? { steps: brief.drums.steps, source: brief.drums.source, note: `compared at the reference's ${brief.bpm ?? '?'} bpm reading` } : null;
 }
 
-/** A KPN drum line from 16th probabilities: x = most bars, o = some bars (a ghost), . = rarely. */
 export function kpnStepLine(steps: number[]): string {
   const ch = steps.map((p) => (p >= 0.5 ? 'x' : p >= 0.25 ? 'o' : '.'));
   return [0, 4, 8, 12].map((i) => ch.slice(i, i + 4).join('')).join(' ');
@@ -266,7 +210,6 @@ function grooveDim(input: ClosenessInput, factor: number): ClosenessDim {
     return { id: 'groove', score: 0, measured: 'no drums', reference: lines.join(' | '), fix: `write the drums in each section pattern (write_pattern KPN): ${lines.join(' / ')}` };
   }
   const g = grooveScore(proj.steps, ref.steps);
-  // Swing: the transport's swing vs the reference's (when measured at this reading).
   const refSwing = factor === reference.brief.factor ? reference.brief.swingPercent : null;
   const ourSwing = Math.round(p.transport.swing * 100);
   let score = g.score;
@@ -301,11 +244,8 @@ function grooveDim(input: ClosenessInput, factor: number): ClosenessDim {
   };
 }
 
-// ── Harmony ─────────────────────────────────────────────────────────────
-
 interface BarChord {
   root: number;
-  /** true minor, false major, null neutral (sus, power chord). */
   minor: boolean | null;
   name: string;
 }
@@ -317,7 +257,6 @@ function triad(c: BarChord): number[] {
   return [c.root, mod12(c.root + (c.minor ? 3 : 4)), mod12(c.root + 7)];
 }
 
-/** How well a project chord stands in for the reference chord (1 same, 0.6 same root, 0.5 two shared tones). */
 export function chordMatch(p: BarChord | null, r: BarChord): number {
   if (!p) return 0;
   if (p.root === r.root) return r.minor === null || p.minor === r.minor ? 1 : 0.6;
@@ -325,7 +264,6 @@ export function chordMatch(p: BarChord | null, r: BarChord): number {
   return triad(r).filter((x) => a.has(x)).length >= 2 ? 0.5 : 0;
 }
 
-/** The chord of a bar from pitch-class weights (major / minor triad templates); null with fewer than 2 clear pitch classes. */
 export function chordFromWeights(w: number[]): BarChord | null {
   const total = w.reduce((s, x) => s + x, 0);
   if (!(total > 0)) return null;
@@ -343,7 +281,6 @@ export function chordFromWeights(w: number[]): BarChord | null {
   return best ? { root: best.root, minor: best.minor, name: chordName(best.root, best.minor ? 'min' : 'maj') } : null;
 }
 
-/** The project's chord per bar (0-based from range start) from its pitched parts (the bass weighs a little more). */
 export function projectBarChords(p: Project, start: number, end: number, shift = 0): Array<BarChord | null> {
   const barTicks = ticksPerBar(p.transport.timeSig);
   const n = Math.max(0, Math.ceil((end - start) / barTicks));
@@ -367,7 +304,6 @@ export function projectBarChords(p: Project, start: number, end: number, shift =
   return w.map(chordFromWeights);
 }
 
-/** The reference's chord per bar of the reading (0-based bars from the first downbeat), null where unclear. */
 export function referenceBarChords(a: AudioAnalysis, factor: number, bars: number): Array<BarChord | null> {
   const bpb = a.beats?.beatsPerBar && a.beats.beatsPerBar >= 1 ? Math.round(a.beats.beatsPerBar) : 4;
   const spans = a.chords?.length ? chordsToBeats(a, a.chords) : [];
@@ -396,7 +332,6 @@ function chordSeq(xs: Array<BarChord | null>): string {
   return names.slice(0, 8).join(' ') + (names.length > 8 ? ' …' : '');
 }
 
-/** Per-section chord similarity (bars 0-based); a bar also counts at 0.75 when it matches a neighbouring reference bar (chord changes a beat early / late). */
 export function harmonySimilarity(proj: Array<BarChord | null>, ref: Array<BarChord | null>, sections: Array<{ label: string; start: number; end: number }>): Array<{ label: string; start: number; end: number; bars: number; similarity: number }> {
   const out: Array<{ label: string; start: number; end: number; bars: number; similarity: number }> = [];
   for (const s of sections) {
@@ -459,9 +394,6 @@ function harmonyDim(input: ClosenessInput, factor: number, plan: PlannedSection[
   };
 }
 
-// ── Arrangement ─────────────────────────────────────────────────────────
-
-/** Matched boundaries within ±tol bars: F1 of the two sets (1 when neither has an internal boundary). */
 export function boundaryF1(ours: number[], ref: number[], tol = 1): { f1: number; missing: number[]; extra: number[] } {
   if (!ours.length && !ref.length) return { f1: 1, missing: [], extra: [] };
   const used = new Set<number>();
@@ -480,7 +412,6 @@ export function boundaryF1(ours: number[], ref: number[], tol = 1): { f1: number
   return { f1: prec + rec > 0 ? r2((2 * prec * rec) / (prec + rec)) : 0, missing, extra };
 }
 
-/** Mean of a loudness curve over [t0, t1) seconds (index = t / hop), silence floored at -60. */
 function curveMean(curve: readonly number[], hop: number, t0: number, t1: number): number | null {
   const vals: number[] = [];
   for (let i = Math.max(0, Math.floor(t0 / hop)); i < Math.min(curve.length, Math.ceil(t1 / hop)); i++) vals.push(isNum(curve[i]) ? Math.max(-60, curve[i]) : -60);
@@ -494,11 +425,9 @@ function arrangementDim(input: ClosenessInput, factor: number, plan: PlannedSect
   const a = reference.analysis;
   const det = reference.brief.detectedBpm;
   const bpb = reference.brief.beatsPerBar || 4;
-  // Section boundaries (bars, 1-based from the range start), the first section's start excluded.
   const ours = input.sections.map((s) => Math.round((s.start - range.start) / barTicks) + 1).filter((b) => b > 1);
   const theirs = plan.map((s) => s.startBar).filter((b) => b > 1 && b <= projBars + 1);
   const bounds = plan.length ? boundaryF1(ours, theirs) : null;
-  // Energy per bar, bar for bar.
   let corr: number | null = null;
   let worstBars: { from: number; to: number; dir: 'louder' | 'quieter' } | null = null;
   const curve = render?.energyCurve ?? [];
@@ -516,7 +445,6 @@ function arrangementDim(input: ClosenessInput, factor: number, plan: PlannedSect
     }
     if (ps.length >= 4) {
       corr = correlation(ps, rs);
-      // Where the shapes part most (each curve against its own mean), over 4-bar windows.
       const mp = ps.reduce((s, x) => s + x, 0) / ps.length;
       const mr = rs.reduce((s, x) => s + x, 0) / rs.length;
       let best = 0;
@@ -559,11 +487,8 @@ function arrangementDim(input: ClosenessInput, factor: number, plan: PlannedSect
   };
 }
 
-// ── Mix ─────────────────────────────────────────────────────────────────
-
 const BANDS = ['sub', 'low', 'lowMid', 'highMid', 'high'] as const;
 
-/** Each group's level relative to the power sum of the groups both sides share (dB). */
 export function relativeGroups(levels: GroupLevels, only?: readonly PartGroup[]): GroupLevels {
   const keys = (only ?? PART_GROUPS).filter((g) => isNum(levels[g]) && levels[g]! > -70);
   if (!keys.length) return {};
@@ -571,7 +496,6 @@ export function relativeGroups(levels: GroupLevels, only?: readonly PartGroup[])
   return Object.fromEntries(keys.map((g) => [g, r1(levels[g]! - total)]));
 }
 
-/** Per-group difference (ours − reference) of the relative balance over the groups both have. */
 export function balanceDiff(project: GroupLevels, reference: GroupLevels): GroupLevels {
   const common = PART_GROUPS.filter((g) => isNum(project[g]) && project[g]! > -70 && isNum(reference[g]) && reference[g]! > -70);
   if (common.length < 2) return {};
@@ -633,8 +557,6 @@ function mixDim(input: ClosenessInput): ClosenessDim {
   };
 }
 
-// ── Sounds ──────────────────────────────────────────────────────────────
-
 function soundsDim(input: ClosenessInput): ClosenessDim {
   const s = input.sounds;
   if (!s?.length) return { id: 'sounds', score: null, measured: '', reference: '', fix: null, note: input.soundsNote ?? 'sound fingerprints are not available in this build (match_sounds compares the sounds part by part)' };
@@ -649,15 +571,12 @@ function soundsDim(input: ClosenessInput): ClosenessDim {
   };
 }
 
-// ── All together ────────────────────────────────────────────────────────
-
 export function computeCloseness(input: ClosenessInput): Closeness {
   const p = input.project;
   const { brief, analysis } = input.reference;
   const barTicks = ticksPerBar(p.transport.timeSig);
   const projBars = Math.max(1, Math.round((input.range.end - input.range.start) / barTicks));
   const factor = readingFactor(p.transport.bpm, brief.detectedBpm);
-  // A bar-range review (bars 33-64) lines up with the same bars of the reference: the plan in range-relative bars.
   const off = Math.max(0, Math.round(input.range.start / barTicks));
   const plan = planAt(brief, factor)
     .map((s) => (s.startBar - off < 1 ? { ...s, startBar: 1, bars: s.bars - (1 - (s.startBar - off)) } : { ...s, startBar: s.startBar - off }))
@@ -686,7 +605,6 @@ export function computeCloseness(input: ClosenessInput): Closeness {
   return { overall, dims, topFixes };
 }
 
-/** One line per dimension for review_song's text. */
 export function closenessLines(c: Closeness): string[] {
   const out = [`CLOSENESS to the reference: ${c.overall ?? '?'}/100 (tempo, key, groove, harmony, arrangement, sounds, mix)`];
   for (const d of c.dims) {
@@ -695,7 +613,6 @@ export function closenessLines(c: Closeness): string[] {
   return out;
 }
 
-/** The parts' stem group: vocals by name, drums by role / drum channel, bass / 808 / sub, else other. */
 export function partGroupOf(ch: Channel): PartGroup {
   const n = ch.name;
   if (/\b(vox|vocals?|voice|acapella|choir|rap|singer|lyrics?)\b/i.test(n)) return 'vocals';
@@ -708,11 +625,6 @@ export function partGroupOf(ch: Channel): PartGroup {
   return 'other';
 }
 
-/**
- * Which group each insert of a stem render stands for: the group of the channels routed straight into it (the
- * majority; ties → other). Inserts no channel plays into (buses, send returns) and the reference's insert are left
- * out, so nothing is counted twice.
- */
 export function insertGroups(p: Project, exclude: ReadonlySet<string> = new Set()): Map<string, PartGroup> {
   const votes = new Map<string, Map<PartGroup, number>>();
   for (const id of p.channelOrder) {
@@ -733,7 +645,6 @@ export function insertGroups(p: Project, exclude: ReadonlySet<string> = new Set(
   return out;
 }
 
-/** Group levels (power sum per group, dB) from per-insert levels. */
 export function groupLevelsOf(levels: ReadonlyArray<{ insertId: string; db: number | null }>, groups: ReadonlyMap<string, PartGroup>): GroupLevels {
   const acc: Partial<Record<PartGroup, number>> = {};
   for (const l of levels) {

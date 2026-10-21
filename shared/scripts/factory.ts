@@ -1,8 +1,3 @@
-// The factory Krypt Scripts: ready-made note devices and worked examples of
-// the script API (each one is plain JavaScript the user can open in the code
-// view, change and "Save as"). Ids are factory:<slug>. test/scripts.test.ts
-// runs every one of them in the sandbox and validates the notes.
-
 export interface FactoryScript {
   id: string;
   code: string;
@@ -290,7 +285,6 @@ export const FACTORY_SCRIPTS: FactoryScript[] = [
   { id: 'factory:velocity-shaper', code: VELOCITY },
 ];
 
-/** The starting point of "New script" in the code view. */
 export const NEW_SCRIPT_TEMPLATE = `// @name My device
 // @kind transform
 // @description Shifts every note by an interval and keeps it in the key.

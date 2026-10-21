@@ -1,4 +1,3 @@
-// Every sound pack the manifest tool builds (scripts/packs/build.ts). One spec per pack id.
 import type { AnySpec } from '../lib';
 import { FOLEY_FIELD } from './foley-field';
 import { GRAND_PIANO } from './grand-piano';

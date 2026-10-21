@@ -1,14 +1,8 @@
-//! Percussion recipes: rims, shakers, snaps, tambourine, congas, bongos,
-//! cowbells, clave, woodblock, log drum and an FM blip. Mostly modal
-//! synthesis (a few decaying partials + a filtered-noise strike).
-
 use super::drums::{membrane, Drum, DRUM, MEMBRANE};
 use super::library::{spec, Spec};
 use super::synth::*;
 use crate::instruments::drums::{render as drum_render, DrumKind, DrumParams};
 
-/// Struck modal object: partials (Hz, amp, T60 ms) + a band-passed noise
-/// click; `len_ms` total.
 fn modal_hit(m: &[(f32, f32, f32)], click: f32, click_hz: f32, len_ms: f32, seed: u32) -> Vec<f32> {
     let n = ns(len_ms / 1000.0);
     let mm: Vec<(f32, f32, f32, f32)> = m.iter().map(|&(f, a, t)| (f, a, t / 1000.0, 0.0)).collect();
@@ -34,15 +28,13 @@ struct Shaker {
     seed: u32,
 }
 
-/// Noise through a band pass with a swelling envelope, modulated by sparse
-/// bead "grains".
 fn shaker(p: &Shaker) -> Vec<f32> {
     let n = ns((p.att + p.decay * 1.1) / 1000.0 + 0.005);
     let mut nz = Noise::new(p.seed);
     let mut h = svf(HP, p.hp, 0.7);
     let mut b = svf(BP, p.bp, p.q);
     let mut l = svf(LP, p.lp, 0.7);
-    let rate = 1.0 / (0.0007 * SR); // ~1 bead per 0.7 ms
+    let rate = 1.0 / (0.0007 * SR);
     let gdec = (-1.0 / (0.0006 * SR)).exp();
     let mut g = 0.0f32;
     let mut out = vec![0.0f32; n];
@@ -59,7 +51,6 @@ fn shaker(p: &Shaker) -> Vec<f32> {
     out
 }
 
-/// Finger snap: a band-passed noise crack, a skin thump and a tiny click.
 fn snap(bp_hz: f32, tail_ms: f32, seed: u32) -> Vec<f32> {
     let n = ns(tail_ms / 1000.0 + 0.01);
     let mut nz = Noise::new(seed);
@@ -79,7 +70,6 @@ fn snap(bp_hz: f32, tail_ms: f32, seed: u32) -> Vec<f32> {
     out
 }
 
-/// Jingles: inharmonic high partials struck several times in quick succession.
 fn tambourine(decay_ms: f32, seed: u32) -> Vec<f32> {
     let n = ns(decay_ms / 1000.0 + 0.05);
     let mut nz = Noise::new(seed);
@@ -90,7 +80,6 @@ fn tambourine(decay_ms: f32, seed: u32) -> Vec<f32> {
         let m: Vec<(f32, f32, f32, f32)> = base.iter().map(|&(f, a, t)| (f * (1.0 + 0.004 * nz.white()), a, t, nz.unit())).collect();
         let r = modes(&m, n.saturating_sub(at));
         let mut r = r;
-        // each strike starts with a 0.3 ms ramp (no clicks from random phases)
         let ramp = ns(0.0003);
         for (i, v) in r.iter_mut().take(ramp).enumerate() {
             *v *= i as f32 / ramp as f32;
@@ -108,7 +97,6 @@ fn tambourine(decay_ms: f32, seed: u32) -> Vec<f32> {
     out
 }
 
-/// Scraped gourd: a run of tiny band-passed clicks.
 fn guiro(seed: u32) -> Vec<f32> {
     let mut nz = Noise::new(seed);
     let n = ns(0.2);
@@ -131,7 +119,6 @@ fn guiro(seed: u32) -> Vec<f32> {
     out
 }
 
-/// A water-drop "bloop": a sine chirping up with a fast decay.
 fn water_drop() -> Vec<f32> {
     let n = ns(0.12);
     let mut ph = 0.0f64;
@@ -145,8 +132,6 @@ fn water_drop() -> Vec<f32> {
     out
 }
 
-/// Classic two-square cowbell tuned so its tones are a fifth apart on C
-/// (C5 + G5): playable as a melody instrument (root C5 = MIDI 72).
 fn cowbell_tuned() -> Vec<f32> {
     let (f1, f2) = (hz(72.0), hz(79.0));
     let n = ns(0.95);
@@ -168,8 +153,6 @@ fn cowbell_tuned() -> Vec<f32> {
     out
 }
 
-/// Amapiano-style log drum: a bent sine with a resonant low pass that
-/// closes fast (the "wonk"), tuned to C3 (MIDI 48).
 fn log_drum(seed: u32) -> Vec<f32> {
     let f0 = hz(48.0);
     let len_ms = 700.0;
@@ -197,7 +180,6 @@ fn log_drum(seed: u32) -> Vec<f32> {
 pub(crate) fn specs() -> Vec<Spec> {
     let small = rev(0.0, 0.3, 0.45).low(300.0);
     vec![
-        // rims
         spec("drums/rim/tight.wav", "Tight Rim", "rim", &["short", "bright", "clean"], &["house", "tech-house", "afrobeats", "reggaeton"], || {
             let mut x = modal_hit(&[(1720.0, 1.0, 35.0), (470.0, 0.5, 60.0), (2650.0, 0.35, 20.0)], 0.6, 4000.0, 120.0, 801);
             normalize(&mut x, 1.0);
@@ -215,7 +197,6 @@ pub(crate) fn specs() -> Vec<Spec> {
             hp(&mut x, 400.0);
             reverb(&vec![x], &small, 0.1, 0.3)
         }),
-        // shakers
         spec("drums/shaker/short.wav", "Short Shaker", "shaker", &["short", "bright", "organic"], &["afrobeats", "reggaeton", "house", "pop"], || {
             vec![shaker(&Shaker { att: 6.0, decay: 60.0, bp: 7000.0, q: 0.9, hp: 4000.0, lp: 14_000.0, grain: 0.5, seed: 811 })]
         }),
@@ -225,14 +206,12 @@ pub(crate) fn specs() -> Vec<Spec> {
         spec("drums/shaker/soft.wav", "Soft Shaker", "shaker", &["soft", "warm", "organic"], &["lofi", "rnb", "afrobeats"], || {
             vec![shaker(&Shaker { att: 15.0, decay: 90.0, bp: 5500.0, q: 0.7, hp: 3000.0, lp: 9000.0, grain: 0.4, seed: 813 })]
         }),
-        // snaps
         spec("drums/snap/finger.wav", "Finger Snap", "snap", &["short", "organic", "bright"], &["trap", "rnb", "pop", "drill"], move || {
             reverb(&vec![snap(2300.0, 60.0, 821)], &small, 0.12, 0.3)
         }),
         spec("drums/snap/tight-room.wav", "Tight Room Snap", "snap", &["short", "bright", "wide"], &["pop", "trap", "future-bass"], || {
             reverb(&vec![snap(2800.0, 45.0, 822)], &rev(2.0, 0.4, 0.8).pre(6.0).low(400.0), 0.22, 0.6)
         }),
-        // perc
         spec("drums/perc/tambourine.wav", "Tambourine", "perc", &["bright", "organic", "metallic"], &["pop", "rnb", "house", "afrobeats"], || vec![tambourine(260.0, 831)]),
         spec("drums/perc/conga-high.wav", "High Conga", "perc", &["organic", "warm"], &["afrobeats", "reggaeton", "house"], || {
             vec![reverb_mono(&membrane(&Drum { f: 330.0, bend: 0.08, bend_ms: 20.0, decay: 300.0, slap: 0.5, slap_hz: 2500.0, drive: 0.1, lp: 9000.0, seed: 832, ..DRUM }), &rev(0.0, 0.3, 0.5).low(250.0), 0.08, 0.3)]

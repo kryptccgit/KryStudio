@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Audio → Project dialogs: the options (parts, tempo reading, keep stems,
-// the HT-Demucs state, the once-per-session ownership note), the progress
-// (five stages with checkmarks, the current message, a bar, Cancel) and the
-// summary (tempo, key, bars, sections, channels, patterns, matched sounds,
-// honest limits, the stems note). Plus the Home drop choice: open as a
-// project, use as a reference for the AI, or add as a sample.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   AudioLines,
@@ -89,8 +80,6 @@ function AudioProjectView({ close }: { close: () => void }) {
   if (phase === 'done') return <SummaryView close={close} />;
   return <ProgressView close={close} />;
 }
-
-// ── Options ───────────────────────────────────────────────────────────
 
 function Note({ icon: Icon, tone, children }: { icon: LucideIcon; tone: 'muted' | 'warn' | 'ok' | 'error'; children: ReactNode }) {
   return (
@@ -210,8 +199,6 @@ function OptionsForm({ close }: { close: () => void }) {
   );
 }
 
-// ── Progress ──────────────────────────────────────────────────────────
-
 const STAGE_ICON: Record<StageState, { icon: LucideIcon; className: string }> = {
   done: { icon: Check, className: 'text-emerald-300' },
   active: { icon: Loader2, className: 'animate-spin text-krypt-purple' },
@@ -316,8 +303,6 @@ function ProgressView({ close }: { close: () => void }) {
   );
 }
 
-// ── Summary ───────────────────────────────────────────────────────────
-
 function SummaryView({ close }: { close: () => void }) {
   const o = useAudioProject((s) => s.outcome);
   if (!o) return null;
@@ -402,8 +387,6 @@ function SummaryView({ close }: { close: () => void }) {
     </div>
   );
 }
-
-// ── Home drop: what should this song become? ──────────────────────────
 
 export function openDropChoiceDialog(path: string, doc?: Document | null): void {
   openDialog({

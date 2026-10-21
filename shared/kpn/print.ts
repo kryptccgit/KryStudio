@@ -1,16 +1,3 @@
-// KPN canonical printer: notes → the KPN a model would write. Round-trips
-// through parse() for on-grid material (velocity resolution is MIDI 1/127).
-//
-// Canonical choices (deterministic):
-//  - header `pattern "<name>" bars=<n> grid=<16th steps>` (+ ts= when not 4/4, key= when known)
-//  - drum channels → step grids when representable (one key, no overlaps,
-//    no slides, ≤ 64 steps per bar, ≤ 1 non-standard velocity), else tokens
-//  - per-track `/grid` override only when the header grid can't hold the notes
-//  - note names are scientific (C4 = MIDI 60); flats in flat keys
-//  - sticky lengths minimised; rests split at bar lines; `|` at every bar
-//    boundary the cursor lands on; `@bar.step` for overlaps and gaps ≥ 2 bars
-//  - identical consecutive grid bars fold into `( ... |)*n`
-
 import { noteName, parseKey } from '../music/theory';
 import { ticksPerBar, ticksPerBeat, type TimeSig } from '../schema/time';
 import { DEFAULT_DRUM_KEY, DEFAULT_VELOCITY, GRID_ACCENT, GRID_DIGIT_STEP, GRID_GHOST, TOKEN_ACCENT, TOKEN_GHOST, defaultGrid, defaultLenSteps } from './parse';
@@ -44,7 +31,6 @@ function chooseGrid(notes: PrintNote[], headerGrid: number, barTicks: number, ma
   return { grid: usable[usable.length - 1] ?? headerGrid, exact: false };
 }
 
-/** Flats for flat keys (F, Bb, Eb … / Dm, Gm, Cm …), sharps otherwise. */
 export function prefersFlats(key: string | null | undefined): boolean {
   if (!key) return false;
   const k = parseKey(key);
@@ -168,7 +154,6 @@ function melodicLine(track: PrintTrack, notes: PrintNote[], grid: number, barTic
   const st = barTicks / grid;
   const vels = notes.map((n) => midiVelocity(n.vel));
   const lineVel = modeVelocity(vels);
-  // Group simultaneous notes with equal length + slide flag into chords.
   const byKey = new Map<string, Event>();
   const events: Event[] = [];
   notes.forEach((n, i) => {
@@ -252,7 +237,6 @@ function melodicLine(track: PrintTrack, notes: PrintNote[], grid: number, barTic
   return { prefix, body: tokens.join(' ') };
 }
 
-/** Print tracks as canonical KPN, with warnings (off-grid notes, content past the end). */
 export function printKpn(tracks: PrintTrack[], opts: PrintOptions = {}): PrintResult {
   const ts = opts.ts ?? DEFAULT_TS;
   const barTicks = ticksPerBar(ts);
@@ -316,7 +300,6 @@ export function printKpn(tracks: PrintTrack[], opts: PrintOptions = {}): PrintRe
   return { text: out.join('\n'), warnings };
 }
 
-/** Canonical KPN text (see printKpn for warnings). */
 export function print(tracks: PrintTrack[], opts: PrintOptions = {}): string {
   return printKpn(tracks, opts).text;
 }

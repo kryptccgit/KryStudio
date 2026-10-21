@@ -1,20 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Sound matching (research/15 §3.2): rank factory presets / samples / pack
-// samples by how close they sound to a part of a reference song, with plain
-// reasons and parameter tweaks. Pure + deterministic (same inputs, same
-// order); the I/O (index file, pack-sample cache, analyzer) lives in
-// electron/sounds/fingerprints.ts.
-//
-//   rankMatches(targetFps, candidates, target, opts) → SoundMatch[]
-//
-// targetFps: one or many fingerprints of the reference part (40 kick hits
-// from the drum stem, 30 bass notes …), aggregated robustly (median per
-// feature). candidates: FingerprintIndex entries (factory + pack cache).
-// Which candidates are eligible depends on the target (eligibility()):
-// drum roles → samples of that kind (+ drum presets), bass → presets with
-// roles bass / 808 / sub, chords / pads / keys / leads → their role family.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { PluginDescriptor } from '../plugins/types';
 import { pluginById } from '../plugins/catalog';
 import { factoryPreset } from '../sounds/factory';
@@ -26,12 +9,8 @@ import type { FingerprintEntry, FingerprintSource, MatchTarget, SoundFingerprint
 export { aggregateFingerprints, compareFingerprints, PROFILES, profileFor, isDrumTarget } from './features';
 export { tweaksFor, levelDiffDb, CHANNEL_TWEAKS, isChannelTweak } from './tweaks';
 
-/** Floors for darkening a drum sample with the sampler's low-pass (a hat stays a hat). */
 const MIN_CUTOFF_HZ: Partial<Record<MatchTarget['role'], number>> = { hat: 4000, openhat: 4000, snare: 2500, clap: 2500, perc: 1200, kick: 300 };
 
-// ── Eligibility ───────────────────────────────────────────────────────
-
-/** Sample kinds per drum role: the first is the exact kind, the rest are close relatives (ranked a little lower). */
 export const DRUM_SAMPLE_KINDS: Partial<Record<InstrumentRole, SampleKind[]>> = {
   kick: ['kick'],
   snare: ['snare', 'clap', 'rim'],
@@ -44,7 +23,6 @@ export const DRUM_SAMPLE_KINDS: Partial<Record<InstrumentRole, SampleKind[]>> = 
   tom: ['tom', 'perc'],
 };
 
-/** Preset roles per part: the first is the exact role, the rest its family (ranked a little lower). */
 export const ROLE_FAMILY: Record<InstrumentRole, InstrumentRole[]> = {
   kick: ['kick'],
   snare: ['snare', 'clap'],
@@ -74,7 +52,6 @@ export const ROLE_FAMILY: Record<InstrumentRole, InstrumentRole[]> = {
   texture: ['texture', 'pad', 'fx'],
 };
 
-/** Sample kinds a melodic part may also use (an 808 one-shot played on the sampler). */
 const TONAL_SAMPLE_KINDS: Partial<Record<InstrumentRole, SampleKind[]>> = {
   '808': ['808'],
   sub: ['808'],
@@ -83,39 +60,26 @@ const TONAL_SAMPLE_KINDS: Partial<Record<InstrumentRole, SampleKind[]>> = {
   chord: ['stab-oneshot'],
 };
 
-/** The sample kinds that can play a part, the exact kind first ([] = presets only). */
 export function sampleKindsFor(target: MatchTarget): SampleKind[] {
   return [...((isDrumTarget(target) ? DRUM_SAMPLE_KINDS[target.role] : TONAL_SAMPLE_KINDS[target.role]) ?? [])];
 }
 
-/** Similarity factor for a family member that isn't the exact role / kind. */
 export const FAMILY_FACTOR = 0.93;
 
-/** A full drum kit on one channel (GM layout): never a candidate for one drum part. */
 function isKit(p: InstrumentPreset | undefined): boolean {
   return !!p && p.role === 'kick' && ['snare', 'hat'].every((r) => (p.alsoRoles ?? []).includes(r as InstrumentRole));
 }
 
 export interface MatchOptions {
-  /** Best N (default 3). */
   limit?: number;
-  /** Preset lookup (factory + user presets); default: the factory presets. Unknown preset ids are skipped. */
   preset?: (id: string) => InstrumentPreset | undefined;
-  /** Plugin lookup; default: the stock catalog. */
   plugin?: (id: string) => PluginDescriptor | undefined;
-  /** Extra filter (installed packs, files on disk …). */
   allow?: (source: FingerprintSource) => boolean;
-  /** Subtracted from each tweak's raw level difference (see tweaksFor). */
   levelOffsetDb?: number;
-  /** Override the profile's feature weights (tests / experiments). */
   weights?: FeatureWeights;
-  /** Words for the parts in `why` ("the reference kick"); default from the target role. */
   partLabel?: string;
 }
 
-/**
- * How a candidate relates to the target: 1 = exact role / kind, FAMILY_FACTOR = a family member, 0 = not eligible.
- */
 export function eligibility(entry: FingerprintEntry, target: MatchTarget, preset?: (id: string) => InstrumentPreset | undefined): number {
   const role = target.role;
   const src = entry.source;
@@ -136,8 +100,6 @@ function defaultPreset(id: string): InstrumentPreset | undefined {
   return p && p.kind === 'instrument' ? p : undefined;
 }
 
-// ── Reasons ───────────────────────────────────────────────────────────
-
 const hz = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(x >= 10000 ? 0 : 1)} kHz` : `${Math.round(x)} Hz`);
 const ms = (x: number) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${Math.round(x)} ms`);
 const db = (x: number) => `${Math.round(x)} dB`;
@@ -145,7 +107,6 @@ const n2 = (x: number) => (Math.round(x * 100) / 100).toFixed(2);
 
 const BAND_WORD: Record<string, string> = { sub: 'sub', low: 'low end', lowMid: 'low-mids', mid: 'mids', highMid: 'presence (2-6 kHz)', high: 'air (6 kHz+)' };
 
-/** Short noun for a feature in "close on …". */
 function featureNoun(key: FeatureKey, profile: string): string {
   switch (key) {
     case 'centroid':
@@ -175,7 +136,6 @@ function featureNoun(key: FeatureKey, profile: string): string {
   }
 }
 
-/** One plain sentence about a difference (cand vs target; z > 0 = the candidate has more). */
 function differenceText(key: FeatureKey, z: number, t: SoundFingerprint, c: SoundFingerprint, part: string, profile: string): string {
   const more = z > 0;
   switch (key) {
@@ -212,7 +172,6 @@ function joinWords(xs: string[]): string {
   return `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 }
 
-/** Plain reasons: the overall match, what is close, and the biggest differences (largest weighted delta first). */
 export function whyText(target: SoundFingerprint, cand: SoundFingerprint, deltas: Partial<Record<FeatureKey, number>>, weights: FeatureWeights, similarity: number, part: string, profile: string, family: boolean): string[] {
   const keys = (Object.keys(deltas) as FeatureKey[]).filter((k) => (weights[k] ?? 0) > 0);
   const close = keys
@@ -232,22 +191,12 @@ export function whyText(target: SoundFingerprint, cand: SoundFingerprint, deltas
   return out;
 }
 
-// ── Ranking ───────────────────────────────────────────────────────────
-
-/** Stable key of a source (ties, dedupe). */
 export function sourceKey(s: FingerprintSource): string {
   return s.kind === 'preset' ? `preset:${s.id}` : `sample:${s.path}`;
 }
 
 const PART_WORD: Partial<Record<InstrumentRole, string>> = { chord: 'chords', hat: 'hi-hat', openhat: 'open hat', keys: 'keys', strings: 'strings', brass: 'brass', fx: 'FX' };
 
-/**
- * The best candidates for a reference part, best first. `targetFps` are aggregated with aggregateFingerprints
- * (median per feature); an empty / unusable list → []. Candidates that aren't eligible for the target, fail
- * `opts.allow`, or have an unusable fingerprint are skipped; a preset id the lookup doesn't know is skipped too.
- * similarity = exp(-d²/2) over the profile's weighted feature deltas, × FAMILY_FACTOR for a related role / kind.
- * Ties break on the source key, so the order is deterministic.
- */
 export function rankMatches(targetFps: ReadonlyArray<SoundFingerprint | null | undefined>, candidates: readonly FingerprintEntry[], target: MatchTarget, opts: MatchOptions = {}): SoundMatch[] {
   const agg = aggregateFingerprints(targetFps);
   if (!agg) return [];

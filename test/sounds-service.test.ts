@@ -1,5 +1,3 @@
-// SoundsService (electron/sounds/service.ts) against a temp userData + factory folder: user presets on disk,
-// the factory index, broadcasts and the sample-folder suggestions.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -78,7 +76,6 @@ test('saveChannel / saveChain write one atomic JSON file per preset, unique ids,
   assert.equal(broadcasts[0].userCount, 1);
   assert.equal(svc.presets().length, FIXTURE_PRESETS.length + 1);
   assert.equal(svc.preset('user:my-lead')?.name, 'My Lead');
-  // The channel is labelled with the saved preset (actor user), without an undo step of its own.
   assert.deepEqual(doc.project.channels[keys.id].generator.preset, { id: 'user:my-lead', name: 'My Lead' });
   assert.equal(doc.getHistory().length, 1, 'only the preset load is in the history');
   let lastActor = '';
@@ -138,7 +135,6 @@ test('user folder: invalid / foreign / duplicate files are skipped with a warnin
   assert.match(warns, /factory\.json: its id "factory:lead\/fake" isn't a user id/);
   assert.match(warns, /b-dupe\.json: another file already has the id/);
   assert.ok(broadcasts.length >= 1, 'an outside change is broadcast');
-  // Throttled: a second look within a second doesn't re-read the folder.
   fs.writeFileSync(path.join(dir, 'c-new.json'), JSON.stringify({ ...good, id: 'user:new-one', name: 'New One' }));
   assert.equal(svc.preset('user:new-one'), undefined);
   tick();
@@ -154,7 +150,6 @@ test('factory index: read and validated, bad entries skipped, missing = null, re
   assert.ok(idx);
   assert.equal(idx!.samples.length, INDEX_SAMPLES.length);
   assert.deepEqual(svc.factorySamples().map((s) => s.path), INDEX_SAMPLES.map((s) => s.path));
-  // Regenerated with a bad entry and an unknown genre.
   const extra = [{ path: 'nope.wav', name: 'x' }, { ...INDEX_SAMPLES[0], path: 'factory:../../evil.wav' }, { ...INDEX_SAMPLES[2], path: 'factory:kicks/k3.wav', genres: ['trap', 'polka'] }];
   fs.writeFileSync(path.join(factory, 'index.json'), JSON.stringify({ version: 1, generator: 'test 2', samples: [...INDEX_SAMPLES, ...extra], padding: 'x'.repeat(10) }));
   const idx2 = svc.factoryIndex()!;
@@ -189,8 +184,8 @@ test('suggestSampleFolders: sample-library names under the profile, ≥ 20 audio
   wavs('Documents/Samples/Kicks', 15);
   wavs('Documents/Samples/Snares', 12);
   wavs('Downloads/Trap Drum Kit Vol 2', 30);
-  wavs('Downloads/Holiday Photos', 50); // not a sample-library name
-  wavs('Music/Loops Pack', 5); // too few
+  wavs('Downloads/Holiday Photos', 50);
+  wavs('Music/Loops Pack', 5);
   wavs('Desktop/Producing/My One Shots', 22, 'flac');
   wavs('Music/Splice/Samples/packs', 25);
   fs.writeFileSync(path.join(home, 'Downloads', 'Trap Drum Kit Vol 2', 'readme.txt'), 'x');
@@ -199,7 +194,7 @@ test('suggestSampleFolders: sample-library names under the profile, ≥ 20 audio
   const rel = out.map((o) => ({ ...o, path: path.relative(home, o.path).split(path.sep).join('/') }));
   assert.deepEqual(rel, [
     { path: 'Documents/Samples', audioFiles: 27, inBrowser: false },
-    { path: 'Music/Splice', audioFiles: 25, inBrowser: false }, // the outer library folder, not each sub-folder
+    { path: 'Music/Splice', audioFiles: 25, inBrowser: false },
     { path: 'Desktop/Producing/My One Shots', audioFiles: 22, inBrowser: false },
     { path: 'Downloads/Trap Drum Kit Vol 2', audioFiles: 30, inBrowser: true },
   ]);

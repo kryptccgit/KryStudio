@@ -1,23 +1,11 @@
-//! Filters.
-//!
-//! `Svf` is the linear trapezoidal (TPT / "zero-delay feedback") state
-//! variable filter described by Andrew Simper (Cytomic, "Linear Trapezoidal
-//! Integrated SVF", 2013) and Vadim Zavalishin ("The Art of VA Filter
-//! Design"). It is stable under fast modulation and, being a bilinear
-//! transform with pre-warping, hits the exact analog gain at the centre
-//! frequency, which is what the EQ relies on. State is f64 for low-frequency
-//! precision; scalar f64 costs the same as f32 here.
-
 use std::f64::consts::PI;
 
-/// Pre-warped integrator gain for cutoff `fc` at rate `fs`.
 #[inline]
 pub fn svf_g(fc: f64, fs: f64) -> f64 {
     let f = (fc / fs).clamp(1e-6, 0.499);
     (PI * f).tan()
 }
 
-/// Butterworth section Qs for cascaded 2nd-order cut filters.
 pub const BUTTER_Q_2: [f64; 1] = [std::f64::consts::FRAC_1_SQRT_2];
 pub const BUTTER_Q_4: [f64; 2] = [0.541_196_100_146_197, 1.306_562_964_876_376_8];
 pub const BUTTER_Q_8: [f64; 4] = [0.509_795_579_104_159_2, 0.601_344_886_935_045_3, 0.899_976_223_136_415_6, 2.562_915_447_741_505_5];
@@ -26,7 +14,6 @@ pub const BUTTER_Q_8: [f64; 4] = [0.509_795_579_104_159_2, 0.601_344_886_935_045
 pub enum SvfMode {
     Lowpass,
     Highpass,
-    /// Band pass normalized to 0 dB at the centre.
     Bandpass,
     Notch,
     Bell,
@@ -64,7 +51,6 @@ impl Svf {
         self.a3 = g * self.a2;
     }
 
-    /// Full design: mode, cutoff/centre (Hz), Q, gain (dB, for bell/shelves).
     pub fn design(&mut self, mode: SvfMode, fc: f64, q: f64, gain_db: f64, fs: f64) {
         let q = q.max(0.025);
         let g = svf_g(fc, fs);
@@ -105,7 +91,6 @@ impl Svf {
         }
     }
 
-    /// One sample through the core; returns (lowpass, bandpass, highpass).
     #[inline]
     pub fn tick3(&mut self, v0: f64) -> (f64, f64, f64) {
         let v3 = v0 - self.ic2;
@@ -122,7 +107,6 @@ impl Svf {
         (v2, v1, v0 - self.k * v1 - v2)
     }
 
-    /// One sample through the designed response.
     #[inline]
     pub fn tick(&mut self, v0: f64) -> f64 {
         let v3 = v0 - self.ic2;
@@ -149,16 +133,10 @@ impl Svf {
         self.ic2 = 0.0;
     }
 
-    /// Analytic magnitude (linear) of the designed response at `f` Hz.
-    /// Evaluates the digital transfer function on the unit circle.
     pub fn magnitude(&self, f: f64, fs: f64) -> f64 {
-        // H(z) for the trapezoidal SVF equals the bilinear-transformed analog
-        // prototype; recover g from a1/a2 (g = a2/a1).
         let g = self.a2 / self.a1;
         let w = 2.0 * PI * f / fs;
-        // s = (1/g) * tan(w/2) * j in the prototype's normalized domain
         let s_im = (w * 0.5).tan() / g;
-        // prototype: lp = 1/(s²+ks+1), bp = s/(...), so out = (m0(s²+ks+1) + m1 s + m2)/(s²+ks+1)
         let (re_d, im_d) = (1.0 - s_im * s_im, self.k * s_im);
         let re_n = self.m0 * (1.0 - s_im * s_im) + self.m2;
         let im_n = self.m0 * self.k * s_im + self.m1 * s_im;
@@ -166,7 +144,6 @@ impl Svf {
     }
 }
 
-/// One-pole lowpass (TPT form, exact cutoff).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OnePole {
     g: f32,
@@ -194,7 +171,6 @@ impl OnePole {
     }
 }
 
-/// DC blocker (1st-order high pass at a few Hz).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DcBlock {
     r: f32,

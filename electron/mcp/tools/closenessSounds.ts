@@ -1,10 +1,3 @@
-// review_song's "sounds" closeness dimension (research/15 §3.5, owned by
-// review-mix): each part's current sound (its preset or sample, looked up in
-// the fingerprint index) against the same part of the studied reference,
-// measured from its cached stems by match-core's referencePartFingerprints.
-// Never separates, never changes the project; anything it can't measure is
-// left out with a note (a bare synth without a preset has no fingerprint).
-
 import type { MainDeps } from '../types';
 import type { Channel } from '@shared/schema/project';
 import type { FingerprintEntry, FingerprintSource } from '@shared/sound-match/types';
@@ -19,7 +12,6 @@ import { safeName } from './util';
 const SAMPLE_KIND: Partial<Record<MatchableRole, SampleKind>> = { kick: 'kick', snare: 'snare', clap: 'clap', hat: 'hat', openhat: 'openhat', ride: 'ride', perc: 'perc', tom: 'tom', '808': '808', bass: 'bass-oneshot', stab: 'stab-oneshot' };
 const keyOf = (s: PartSource) => (s.kind === 'drums' ? `drums:${s.drumRole}` : s.kind);
 
-/** The index entry of a channel's current sound (preset, else sample), or null when it has none. */
 function currentSound(deps: MainDeps, ch: Channel, role: MatchableRole, entries: readonly FingerprintEntry[], svc: ReturnType<typeof fingerprintServiceFor>): FingerprintEntry | null {
   const pid = ch.generator.preset?.id;
   if (pid) {
@@ -37,10 +29,6 @@ function currentSound(deps: MainDeps, ch: Channel, role: MatchableRole, entries:
   return null;
 }
 
-/**
- * Per part (one line per channel with a matchable role that plays), how close its sound is to the reference's part
- * (0..1, the match_sounds similarity). sounds null with a note when nothing could be compared.
- */
 export async function soundCloseness(
   deps: MainDeps,
   ref: StudiedReference,
@@ -84,7 +72,6 @@ export async function soundCloseness(
     const ranked = rankMatches(meas.fps, [mine], target, { preset: lookup, limit: 1 })[0];
     let similarity = ranked?.similarity;
     if (similarity === undefined) {
-      // Not eligible for the part (another kind of sound): the raw timbre distance, without the role bonus.
       const agg = aggregateFingerprints(meas.fps);
       const drum = isDrumTarget(target);
       similarity = agg ? compareFingerprints(agg, mine.fp, PROFILES[profileFor(target)], { drum, relCentroid: !drum }).similarity * 0.8 : 0;

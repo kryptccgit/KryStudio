@@ -1,8 +1,3 @@
-// Connection snippets and installers for MCP clients (research/04 §2.4).
-// Every client launches the stdio shim (krypt-studio-mcp.exe), which relays
-// to the running app's named pipe. Installers merge ONLY our entry into the
-// client's JSON config, write atomically, and keep a .bak of the original.
-
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,16 +15,12 @@ const PLACEHOLDER =
 interface JsonTarget {
   client: string;
   label: string;
-  /** Config files to write (first = primary). */
   files: () => string[];
-  /** Folder that must exist for the client to count as installed. */
   detect: () => string;
-  /** Top-level key holding servers. */
   key: 'mcpServers' | 'servers';
   entry: (shim: string) => Record<string, unknown>;
 }
 
-/** Where desktop apps keep per-user config: Electron's app.getPath('appData') on each OS. */
 const appData = (): string =>
   process.platform === 'win32'
     ? (process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'))
@@ -47,7 +38,6 @@ const CLAUDE_DESKTOP_CONFIG =
 function claudeDesktopFiles(): string[] {
   const out = [path.join(appData(), 'Claude', 'claude_desktop_config.json')];
   if (process.platform !== 'win32') return out;
-  // The MSIX build reads a virtualised copy (anthropics/claude-code#26073).
   const pkgs = path.join(localAppData(), 'Packages');
   try {
     for (const d of fs.readdirSync(pkgs)) {
@@ -57,7 +47,6 @@ function claudeDesktopFiles(): string[] {
       }
     }
   } catch {
-    /* no MSIX install */
   }
   return out;
 }
@@ -135,7 +124,6 @@ function writeAtomic(file: string, text: string): void {
   fs.renameSync(tmp, file);
 }
 
-/** Merge our server entry into one JSON config file. Never clobbers other servers. */
 export function mergeJsonConfig(file: string, key: 'mcpServers' | 'servers', entry: Record<string, unknown>): { changed: boolean; backup: string | null } {
   let data: Record<string, unknown> = {};
   let original: string | null = null;
@@ -163,22 +151,12 @@ export function mergeJsonConfig(file: string, key: 'mcpServers' | 'servers', ent
   return { changed: true, backup };
 }
 
-/** Claude Code's permission rule that matches every tool of our server. */
 export const CLAUDE_CODE_ALLOW_RULE = `mcp__${SERVER_KEY}`;
 
-/** Claude Code's user settings file (CLAUDE_CONFIG_DIR moves it). */
 export function claudeCodeSettingsFile(): string {
   return path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'settings.json');
 }
 
-/**
- * Lets Claude Code use every Krypt Studio tool without a permission prompt per
- * call: adds `mcp__krypt-studio` to `permissions.allow` in the user settings.
- * Safe to auto-approve because every edit is undoable per agent
- * (revert_all_agent_edits), exports never overwrite, and file access follows
- * the app's own File access setting. Merges only that one rule, keeps a .bak,
- * writes atomically; refuses a file that isn't plain JSON.
- */
 export function allowClaudeCodeTools(file = claudeCodeSettingsFile()): { changed: boolean; backup: string | null } {
   let data: Record<string, unknown> = {};
   let original: string | null = null;

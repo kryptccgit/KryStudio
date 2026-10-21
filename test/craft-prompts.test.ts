@@ -1,8 +1,3 @@
-// The one-prompt workflow in the MCP prompts and SERVER_INSTRUCTIONS
-// (research/10-sound-and-craft.md): no questions mid-build, get_playbook →
-// presets → patterns per section with variations → groove → arrange →
-// add_transition at every boundary → mix → review_song with at most 2 fix
-// rounds → a short answer; file paths go straight to Krypt Studio tools.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { arrangePrompt, beatPrompt, focusPrompt, likePrompt, mashupPrompt, mixcheckPrompt, SERVER_INSTRUCTIONS, styleFor } from '../electron/mcp/prompts';
@@ -43,7 +38,6 @@ test('beat prompt: a genre gives the style card + the full one-prompt build with
   assert.match(t, /apply_chain with insert "new" for the drum bus and the reverb \/ delay sends, then route the parts into them/);
   assert.match(t, /Answer briefly: what you made .*the review_song score, and 2-3 one-line edits I could ask for next/);
   assert.match(t, /Use my numbers over the playbook's: set_tempo 128, key Fm in every write_pattern header/);
-  // A genre in plain words; an alias resolves to its id; an unknown style still gets the generic flow.
   assert.match(beatPrompt({ idea: 'a festival big room banger' }), /Style card — edm/);
   const polka = beatPrompt({ genre: 'polka' });
   assert.match(polka, /Style card — polka: no built-in playbook/);

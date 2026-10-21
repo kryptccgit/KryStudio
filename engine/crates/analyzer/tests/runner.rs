@@ -1,6 +1,3 @@
-//! The job runner as a library, with a fake handler: concurrency limits,
-//! cancel, errors, panics, shutdown, line framing.
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -11,8 +8,6 @@ use krypt_studio_analyzer::runner::{serve, End, Handler, Job, Sink};
 use krypt_studio_analyzer::{JobCtx, JobError};
 use serde_json::{json, Value};
 
-/// Fake jobs, chosen by the request's `path`:
-/// `sleep:<ms>` (cancellable, emits progress), `fail`, `panic`.
 #[derive(Default)]
 struct Fake {
     light_now: AtomicUsize,
@@ -23,7 +18,7 @@ struct Fake {
 
 impl Handler for Fake {
     fn devices(&self) -> Vec<String> {
-        thread::sleep(Duration::from_millis(100)); // a slow device probe
+        thread::sleep(Duration::from_millis(100));
         vec!["cpu".into()]
     }
 
@@ -99,7 +94,6 @@ impl Harness {
         self.tx.as_ref().unwrap().send(s.to_string()).unwrap();
     }
 
-    /// Next response (not event) for `id`, within `timeout`.
     fn response(&self, id: u64, timeout: Duration) -> Value {
         if let Some(v) = self.pending.lock().unwrap().remove(&id) {
             return v;
@@ -116,7 +110,6 @@ impl Harness {
             if got == id {
                 return v;
             }
-            // Out of order: keep it (a duplicate id keeps the first).
             self.pending.lock().unwrap().entry(got).or_insert(v);
         }
     }
@@ -131,7 +124,7 @@ fn hello_is_immediate_while_jobs_run() {
     let h = Harness::new();
     h.send(analyze(1, "sleep:800"));
     h.send(analyze(2, "sleep:800"));
-    h.send(analyze(3, "sleep:800")); // queued behind the two slots
+    h.send(analyze(3, "sleep:800"));
     let t = Instant::now();
     h.send(json!({"id": 4, "cmd": "hello"}));
     let r = h.response(4, Duration::from_millis(500));
@@ -164,7 +157,6 @@ fn two_light_jobs_in_parallel_and_separate_serialised() {
     let el = t.elapsed();
     assert_eq!(h.fake.light_max.load(Ordering::SeqCst), 2, "light jobs must run 2 at a time");
     assert_eq!(h.fake.heavy_max.load(Ordering::SeqCst), 1, "separate must be serialised");
-    // 3 light jobs of 300 ms on 2 slots ≈ 600 ms; serial would be 900 ms.
     assert!(el < Duration::from_millis(850), "took {el:?}");
     drop(h.tx);
     assert_eq!(h.done.join().unwrap(), End::Eof);
@@ -175,7 +167,7 @@ fn cancel_running_queued_unknown_and_finished() {
     let mut h = Harness::new();
     h.send(analyze(1, "sleep:5000"));
     h.send(analyze(2, "sleep:5000"));
-    h.send(analyze(3, "sleep:5000")); // waits for a slot
+    h.send(analyze(3, "sleep:5000"));
     thread::sleep(Duration::from_millis(100));
     let t = Instant::now();
     h.send(json!({"id": 10, "cmd": "cancel", "args": {"target": 1}}));
@@ -185,19 +177,16 @@ fn cancel_running_queued_unknown_and_finished() {
     assert_eq!(r["cancelled"], json!(true));
     assert_eq!(r["message"], json!("Cancelled"));
     assert!(t.elapsed() < Duration::from_millis(500));
-    // Queued job: job 3 has now taken job 1's slot; cancel job 2 and 3.
     h.send(json!({"id": 11, "cmd": "cancel", "args": {"target": 3}}));
     h.send(json!({"id": 12, "cmd": "cancel", "args": {"target": 2}}));
     assert_eq!(h.response(3, Duration::from_secs(1))["cancelled"], json!(true));
     assert_eq!(h.response(2, Duration::from_secs(1))["cancelled"], json!(true));
-    // Unknown and finished ids.
     h.send(json!({"id": 13, "cmd": "cancel", "args": {"target": 999}}));
     let r = h.response(13, Duration::from_millis(500));
     assert_eq!(r["ok"], json!(false));
     assert_eq!(r["message"], json!("No such job"));
     h.send(json!({"id": 14, "cmd": "cancel", "args": {"target": 1}}));
     assert_eq!(h.response(14, Duration::from_millis(500))["message"], json!("No such job"));
-    // A job queued behind full slots is cancelled while waiting.
     h.send(analyze(20, "sleep:3000"));
     h.send(analyze(21, "sleep:3000"));
     h.send(analyze(22, "sleep:3000"));
@@ -222,10 +211,8 @@ fn errors_bad_requests_and_panics() {
     let r = h.response(2, Duration::from_secs(1));
     assert_eq!(r["ok"], json!(false));
     assert_eq!(r["message"], json!("Internal error in analyze: boom"));
-    // The runner survives the panic.
     h.send(analyze(3, "sleep:10"));
     assert_eq!(h.response(3, Duration::from_secs(1))["ok"], json!(true));
-    // Malformed requests: error with the request's id when it has one.
     h.send(json!({"id": 4, "cmd": "frobnicate"}));
     let r = h.response(4, Duration::from_secs(1));
     assert_eq!(r["ok"], json!(false));
@@ -237,7 +224,6 @@ fn errors_bad_requests_and_panics() {
     h.send_raw("{not json");
     assert!(h.response(0, Duration::from_secs(1))["message"].as_str().unwrap().starts_with("Bad request"));
     h.send_raw("   ");
-    // Duplicate id while running.
     h.send(analyze(7, "sleep:300"));
     h.send(analyze(7, "sleep:300"));
     let r = h.response(7, Duration::from_secs(1));
@@ -278,7 +264,6 @@ fn lines_are_whole_json_objects_and_events_carry_ids() {
         }
     }
     assert!(progress > 10);
-    // Exactly one response per request.
     for id in [1, 2, 3, 4, 5, 6, 9] {
         assert_eq!(responses.get(&id), Some(&1), "id {id}");
     }

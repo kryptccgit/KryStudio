@@ -1,12 +1,3 @@
-//! Host-side VST3 COM objects, implemented in Rust on the MIT/Apache `vst3`
-//! crate bindings (the VST 3 SDK itself is MIT since 3.8). Logic follows the
-//! SDK's MIT hosting helpers (public.sdk/source/vst/hosting): HostApplication,
-//! HostMessage/HostAttributeList, ParameterChanges, EventList, MemoryStream.
-//!
-//! Threading: every object here is used from ONE thread (the UI thread, or
-//! the instance's audio thread for the process-time objects), so interior
-//! mutability uses Cell/RefCell/UnsafeCell without locks.
-
 #![allow(non_snake_case)]
 
 use std::cell::{Cell, RefCell, UnsafeCell};
@@ -52,8 +43,6 @@ fn tuid_of<I: Interface>() -> TUID {
     }
     t
 }
-
-// ── IHostApplication + IPlugInterfaceSupport ─────────────────────────────
 
 pub struct HostApp;
 
@@ -113,12 +102,9 @@ thread_local! {
     static HOST_APP: ComWrapper<HostApp> = ComWrapper::new(HostApp);
 }
 
-/// The process-wide host context (UI thread).
 pub fn host_context() -> *mut FUnknown {
     HOST_APP.with(|h| h.as_com_ref::<IHostApplication>().map(|r| r.as_ptr() as *mut FUnknown).unwrap_or(std::ptr::null_mut()))
 }
-
-// ── IMessage / IAttributeList ────────────────────────────────────────────
 
 enum Attr {
     Int(i64),
@@ -215,7 +201,6 @@ impl IAttributeListTrait for AttrList {
         let Some(k) = key(id) else { return kInvalidArgument };
         match self.map.borrow().get(&k) {
             Some(Attr::Bin(v)) if !data.is_null() && !size_in_bytes.is_null() => {
-                // Valid until the attribute is replaced (SDK semantics).
                 *data = v.as_ptr() as *const c_void;
                 *size_in_bytes = v.len() as uint32;
                 kResultOk
@@ -248,12 +233,9 @@ impl IMessageTrait for HostMessage {
         *self.id.borrow_mut() = if id.is_null() { None } else { Some(CStr::from_ptr(id).to_owned()) };
     }
     unsafe fn getAttributes(&self) -> *mut IAttributeList {
-        // Not AddRef'd (SDK HostMessage semantics).
         self.attrs.as_com_ref::<IAttributeList>().map(|r| r.as_ptr()).unwrap_or(std::ptr::null_mut())
     }
 }
-
-// ── IBStream ─────────────────────────────────────────────────────────────
 
 #[derive(Default)]
 pub struct MemoryStream {
@@ -327,8 +309,6 @@ impl IBStreamTrait for MemoryStream {
     }
 }
 
-// ── IParameterChanges / IParamValueQueue (process time, preallocated) ────
-
 const QUEUE_POINTS: usize = 64;
 const MAX_QUEUES: usize = 512;
 
@@ -365,7 +345,6 @@ impl IParamValueQueueTrait for ValueQueue {
     }
     unsafe fn addPoint(&self, sample_offset: int32, value: ParamValue, index: *mut int32) -> tresult {
         let pts = &mut *self.points.get();
-        // Keep points sorted; a point at the same offset replaces the previous one.
         if let Some(last) = pts.last_mut() {
             if last.0 == sample_offset {
                 last.1 = value;
@@ -399,10 +378,8 @@ impl ParamChanges {
         }
     }
 
-    /// [RT] Forget all queued changes.
     pub fn clear(&self) {
         for q in &self.queues[..self.used.get()] {
-            // SAFETY: single-threaded use (see module docs).
             unsafe { (*q.points.get()).clear() };
         }
         self.used.set(0);
@@ -421,20 +398,16 @@ impl ParamChanges {
         Some(used)
     }
 
-    /// [RT] Add a point (host side).
     pub fn add(&self, id: ParamID, offset: i32, value: f64) {
         if let Some(i) = self.queue_for(id) {
-            // SAFETY: single-threaded use.
             unsafe {
                 self.queues[i].addPoint(offset, value, std::ptr::null_mut());
             }
         }
     }
 
-    /// [RT] Last value of each queue (for reading the plugin's output changes).
     pub fn for_each_last(&self, mut f: impl FnMut(ParamID, f64)) {
         for q in &self.queues[..self.used.get()] {
-            // SAFETY: single-threaded use.
             let pts = unsafe { &*q.points.get() };
             if let Some(&(_, v)) = pts.last() {
                 f(q.id.get(), v);
@@ -474,8 +447,6 @@ impl IParameterChangesTrait for ParamChanges {
     }
 }
 
-// ── IEventList ───────────────────────────────────────────────────────────
-
 pub struct EventList {
     events: UnsafeCell<Vec<Event>>,
 }
@@ -485,11 +456,9 @@ impl EventList {
         EventList { events: UnsafeCell::new(Vec::with_capacity(2048)) }
     }
     pub fn clear(&self) {
-        // SAFETY: single-threaded use.
         unsafe { (*self.events.get()).clear() }
     }
     pub fn push(&self, e: Event) {
-        // SAFETY: single-threaded use.
         let v = unsafe { &mut *self.events.get() };
         if v.len() < v.capacity() {
             v.push(e);
@@ -528,12 +497,8 @@ impl IEventListTrait for EventList {
     }
 }
 
-// ── IComponentHandler (GUI edits → host) ─────────────────────────────────
-
 pub struct ComponentHandler {
-    /// Normalized edits from the plugin GUI, drained by the UI-thread tick.
     pub edits: RefCell<Vec<(ParamID, f64)>>,
-    /// Pending restartComponent flags.
     pub restart: Cell<i32>,
 }
 
@@ -563,8 +528,6 @@ impl IComponentHandlerTrait for ComponentHandler {
         kResultOk
     }
 }
-
-// ── IPlugFrame (editor resize requests) ──────────────────────────────────
 
 pub struct PlugFrame {
     pub container: Cell<isize>,

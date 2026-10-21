@@ -1,8 +1,3 @@
-// Preset gating on sound packs, through callTool against a real DocHost + SoundsService: a preset whose pack isn't
-// installed is skipped by chooseInstrument (write_pattern / add_channel defaults) and get_playbook's picks, flagged
-// in find_presets ("needs the … pack (download it in Home ▸ Sounds)"), refused by load_preset when named, replaced
-// by a playable match for a word search; once installed it is picked and loads. Plus list_packs, user presets saved
-// from a pack channel, and the pure fallback picker.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -153,8 +148,6 @@ function rig(opts: { packs?: 'wired' | 'none'; installed?: boolean; genre?: stri
 
 const NEEDS = 'needs the Test Piano pack (download it in Home ▸ Sounds)';
 
-// ── Helpers ───────────────────────────────────────────────────────────
-
 test('gating helpers: the pack a preset needs, whether it is missing, the sentence', () => {
   assert.equal(presetPackId(GRAND), 'test-piano');
   assert.equal(presetPackId({ ...GRAND, requires: undefined }), 'test-piano', 'from the pack: sample');
@@ -168,8 +161,6 @@ test('gating helpers: the pack a preset needs, whether it is missing, the senten
   assert.equal(packPhrase('Orchestra Pack'), 'the Orchestra Pack');
 });
 
-// ── Automatic picks ──────────────────────────────────────────────────
-
 test('chooseInstrument: a missing pack is skipped for the role; once installed it is the pick', () => {
   const r = rig();
   assert.equal(presetPlayable(r.deps, GRAND), false);
@@ -180,11 +171,9 @@ test('chooseInstrument: a missing pack is skipped for the role; once installed i
   const after = chooseInstrument(r.deps, 'Piano', undefined, false);
   assert.equal(after.preset?.id, GRAND.id);
   assert.equal(after.sample, GRAND.sample);
-  // Installed per the service but the mapping file is gone: still skipped.
   const gone = rig();
   (gone.deps.packs as PacksAccess).isInstalled = () => true;
   assert.equal(chooseInstrument(gone.deps, 'Piano', undefined, false).preset?.id, SYNTH_PIANO.id);
-  // No packs service wired: pack presets never become defaults.
   const none = rig({ packs: 'none' });
   assert.equal(chooseInstrument(none.deps, 'Piano', undefined, false).preset?.id, SYNTH_PIANO.id);
 });
@@ -216,8 +205,6 @@ test('plainPicker (no app sound library) skips pack presets', () => {
   assert.equal(pick.preset({ name: 'Piano', role: 'piano', tags: [] } as never, 'pop')?.id, SYNTH_PIANO.id);
 });
 
-// ── find_presets / load_preset ──────────────────────────────────────
-
 test('find_presets lists pack presets with "needs the … pack (download it in Home ▸ Sounds)" until installed', async () => {
   const r = rig();
   const res = await r.call('find_presets', { role: 'piano' });
@@ -247,7 +234,6 @@ test('load_preset: a named pack preset is refused with the pack to download; wor
   assert.equal(words.ok, true, words.message);
   assert.match(words.message, /preset Synth Piano/);
   assert.ok(words.warnings?.some((w) => w.includes(`The best match, Test Concert Grand (${GRAND.id}) ${NEEDS}; loaded Synth Piano instead`)), JSON.stringify(words.warnings));
-  // Installed: it loads, with its pack sample.
   r.install();
   const ok = await r.call('load_preset', { preset: GRAND.id, name: 'Grand' });
   assert.equal(ok.ok, true, ok.message);
@@ -266,8 +252,6 @@ test('a user preset saved from a pack channel remembers the pack it needs', () =
   const plain = svc.saveUser({ ...SYNTH_PIANO, id: 'user:y', name: 'My Synth Piano' });
   assert.equal((svc.preset(plain.data!.id) as InstrumentPreset).requires, undefined);
 });
-
-// ── list_packs ──────────────────────────────────────────────────────
 
 test('list_packs: read tool with status, size, RAM, licence, presets and how the USER installs them', async () => {
   assert.equal(getTool('list_packs')?.kind, 'read');
@@ -288,7 +272,6 @@ test('list_packs: read tool with status, size, RAM, licence, presets and how the
     ],
   );
   assert.equal(data.packs[0].licence.attribution, 'Test Piano by Test Recordist');
-  // Nothing changed in the project (read tool).
   assert.deepEqual(res.changed, []);
   r.install();
   const after = await r.call('list_packs');
@@ -300,7 +283,6 @@ test('list_packs without the packs service: the catalog as not downloaded, with 
   const r = rig({ packs: 'none' });
   const res = await r.call('list_packs');
   assert.equal(res.ok, true, res.message);
-  // The shared catalog may be empty while it is being filled; either way the call says what it knows.
   if ((res.data as { packs: unknown[] }).packs.length) assert.ok(res.warnings?.some((w) => /sound-pack service isn't running/.test(w)));
   else assert.match(res.message, /offers no sound packs/);
 });

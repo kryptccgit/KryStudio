@@ -1,6 +1,3 @@
-// Mixing and mastering (guides-content-1). See research/14-sounds-and-guides.md §3 for the markup and the rules.
-// Numbers here match the code: review_song's bands (electron/mcp/tools/craftReview.ts), the playbook targets
-// (shared/playbooks/*), the factory chains (shared/sounds/factory/chains.ts) and the stock effect params (catalog.gen.json).
 import type { GuideArticle } from '../articles';
 
 export const MIXING: GuideArticle[] = [

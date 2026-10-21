@@ -1,19 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Krypt Slicer UI (research/13-roadmap.md §8.5), in the channel's plugin
-// window. Slice markers live on the generator (shared/schema/slicer.ts);
-// every edit is a slicer.* doc command via dispatch(); failures toast.
-//  - SlicerOverlay, drawn over the sample waveform: the slices as regions
-//    numbered 1..N with their marker handles.
-//      click a slice      → select it and hear it (its key on this channel)
-//      drag a handle      → move the marker, clamped between its neighbours,
-//                           committed once on release (one undo step)
-//      double-click       → a new marker there
-//      right-click handle → remove it
-//  - SlicerSection: Auto-slice (the analyzer's hits, or a 1/4 / 1/8 / 1/16
-//    grid at the loop's tempo), Pattern (replay the loop as sliced), Clear,
-//    and the selected slice's pitch / reverse / gain.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { Eraser, ListMusic, Loader2, Play, Trash2, WandSparkles } from 'lucide-react';
@@ -29,18 +13,14 @@ import { cls } from '../../utils/format';
 import type { WaveGeometry } from './Waveform';
 
 interface SlicerView {
-  /** Selected slice id (null = none). */
   sel: string | null;
-  /** The sample's length as the waveform measured it (the pool may not know it). */
   dur: number | null;
-  /** The loop's tempo from the last auto-slice (null = use the project tempo). */
   bpm: number | null;
   busy: boolean;
 }
 
 const EMPTY: SlicerView = { sel: null, dur: null, bpm: null, busy: false };
 
-/** Per-channel view state shared by the overlay and the section (survives closing the window). */
 const useSlicerView = create<Record<string, SlicerView>>(() => ({}));
 const viewOf = (channelId: string): SlicerView => useSlicerView.getState()[channelId] ?? EMPTY;
 const setView = (channelId: string, patch: Partial<SlicerView>) => useSlicerView.setState((s) => ({ [channelId]: { ...(s[channelId] ?? EMPTY), ...patch } }));
@@ -52,13 +32,10 @@ function useSlicer(channelId: string) {
   return { slices: slices ?? [], baseKey, view };
 }
 
-/** Hear slice `index` (0-based) on its key: a short audition, like tapping the key. */
 function audition(channelId: string, key: number): void {
   window.krypt.engine.audition(channelId, key, 0.8, true);
   window.setTimeout(() => window.krypt.engine.audition(channelId, key, 0, false), 250);
 }
-
-// ── Overlay ───────────────────────────────────────────────────────────
 
 export function SlicerOverlay({ channelId, geom }: { channelId: string; geom: WaveGeometry }) {
   const { slices, baseKey, view } = useSlicer(channelId);
@@ -169,8 +146,6 @@ export function SlicerOverlay({ channelId, geom }: { channelId: string; geom: Wa
   );
 }
 
-// ── Section ───────────────────────────────────────────────────────────
-
 type SliceMode = 'onsets' | 'grid1' | 'grid8' | 'grid16';
 const SLICE_MODES: Array<{ value: SliceMode; label: string; detail: string }> = [
   { value: 'onsets', label: 'At hits', detail: 'The analyzer finds the drum hits' },
@@ -208,7 +183,6 @@ function Labelled({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
-/** A number edited locally while dragging, committed once on release. */
 function LiveNumber({ label, value, min, max, step, format, hint, onCommit }: { label: string; value: number; min: number; max: number; step: number; format: (v: number) => string; hint: string; onCommit: (v: number) => void }) {
   const [live, setLive] = useState<number | null>(null);
   return (

@@ -1,4 +1,3 @@
-// Phonk (drift phonk): distorted 808s, a pitched cowbell riff, half-time drums at ~145 bpm.
 import type { Playbook } from './types';
 
 export const PHONK: Playbook = {

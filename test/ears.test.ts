@@ -1,6 +1,3 @@
-// "Ears" renderer logic (src/ears/logic.ts): analysis labels, the section
-// timeline, the energy sparkline, Model Manager grouping, the status-bar
-// job list and which audio a menu acts on.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { createDefaultProject } from '@shared/schema/factory';
@@ -60,8 +57,6 @@ const state = (models: ModelState[], jobs: AnalyzerState['jobs'] = []): Analyzer
   modelsDir: 'C:\\m',
 });
 
-// ── labels ────────────────────────────────────────────────────────────
-
 test('bpm formatting and snapping', () => {
   assert.equal(fmtBpm(140), '140');
   assert.equal(fmtBpm(140.02), '140');
@@ -94,8 +89,6 @@ test('key, swing, confidence and estimate labels', () => {
   assert.equal(fmtDuration(4.256), '4.26 s');
 });
 
-// ── sections + sparkline ──────────────────────────────────────────────
-
 test('section blocks are laid out in percent, clamped, empty ones dropped', () => {
   const b = sectionBlocks(
     [
@@ -111,8 +104,8 @@ test('section blocks are laid out in percent, clamped, empty ones dropped', () =
   assert.equal(b[0].width, 25);
   assert.equal(b[1].left, 25);
   assert.equal(b[1].width, 50);
-  assert.equal(b[2].width, 25); // clamped to the duration
-  assert.equal(b[0].color, b[2].color); // same label, same color
+  assert.equal(b[2].width, 25);
+  assert.equal(b[0].color, b[2].color);
   assert.notEqual(sectionColor('A'), sectionColor('B'));
   assert.deepEqual(sectionBlocks([], 0), []);
 });
@@ -132,8 +125,6 @@ test('sparkline spans the box; silence sits on the floor', () => {
   assert.equal(sparklinePath([-10], 100, 40), '');
   assert.ok(sparklineArea([-30, -10], 50, 20).endsWith('Z'));
 });
-
-// ── models ────────────────────────────────────────────────────────────
 
 test('models group by task (stems, transcription, beats) with the default first', () => {
   const g = groupModels([
@@ -170,7 +161,6 @@ test('model size, source host, installed stem models, transcription needs', () =
   assert.deepEqual(installedStemModels(null), []);
   assert.equal(transcribeModelFor(st, 'poly')?.def.id, 'bp');
   assert.equal(transcribeModelFor(st, 'drums'), null);
-  // the real catalog has a default stems model and a bundled transcriber
   assert.ok(MODEL_CATALOG.some((m) => m.task === 'stems' && m.default));
   assert.ok(MODEL_CATALOG.some((m) => m.task === 'transcribe' && m.bundled));
 });
@@ -201,8 +191,6 @@ test('status-bar activity: jobs oldest first, then downloads with progress', () 
   assert.deepEqual(analyzerActivity(null), []);
 });
 
-// ── targets ───────────────────────────────────────────────────────────
-
 test('targets resolve to names, audio-clip channels and clips', () => {
   const host = new DocHost(createDefaultProject('T'), CATALOG);
   const track = host.project.playlist.trackOrder[0];
@@ -221,7 +209,6 @@ test('targets resolve to names, audio-clip channels and clips', () => {
   assert.ok(channelHasAudio(p, channelId));
   const synth = p.channelOrder.find((id) => p.channels[id].generator.type !== 'krypt.audioclip' && !p.channels[id].generator.sampleId);
   if (synth) assert.ok(!channelHasAudio(p, synth));
-  // clip and channel of the same sample share one cache key
   assert.equal(targetKey(p, { clipId }), targetKey(p, { channelId }));
   assert.equal(targetKey(p, { clipId }), 'path:C:\\a\\Loop 1.wav');
 });

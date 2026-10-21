@@ -1,5 +1,3 @@
-// Fixture presets + a fake factory library for the sounds-* tests (deterministic, independent of the real factory
-// data the sound designer ships).
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ChainPreset, FactorySample, InstrumentPreset, Preset } from '@shared/sounds/types';
@@ -112,7 +110,6 @@ export const SAMPLER_808: InstrumentPreset = {
   description: 'Clean sampled sub for drops.',
 };
 
-/** Its sample is not installed: never a default choice. */
 export const MISSING_STAB: InstrumentPreset = {
   kind: 'instrument',
   id: 'factory:stab/ghost-stab',
@@ -221,7 +218,6 @@ export const INDEX_SAMPLES: FactorySample[] = [
   sample('factory:fx/impact-boom.wav', 'Boom Impact', 'impact', { lengthSec: 3 }),
 ];
 
-/** A temp factory folder: the files of INDEX_SAMPLES (+ the legacy kit) and, unless `index` is false, index.json. */
 export function writeFactory(dir: string, opts: { index?: boolean; extraEntries?: unknown[] } = {}): void {
   const files = new Set([...INDEX_SAMPLES.map((s) => s.path), 'factory:drums/snare.wav', 'factory:drums/clap.wav', 'factory:drums/hat-closed.wav']);
   for (const p of files) {

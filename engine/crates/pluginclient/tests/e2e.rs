@@ -1,10 +1,3 @@
-//! End-to-end: engine-side proxies ⇄ krypt-studio-pluginhost ⇄ the test
-//! plugins (engine/crates/pluginhost/testplugins). Skipped unless
-//!   KRYPT_PLUGINHOST = path to krypt-studio-pluginhost.exe
-//!   KRYPT_TEST_CLAP  = path to the staged krypt-test.clap
-//! are set (`node engine/crates/pluginhost/testplugins/stage.mjs --test` does it).
-//! KRYPT_TEST_VST3 (the staged bundle with moduleinfo.json) adds the VST3 checks.
-
 use krypt_studio_dsp::{NoteExtras, ProcessContext};
 use krypt_studio_pluginclient as pc;
 use serde_json::{json, Value};
@@ -54,16 +47,13 @@ fn clap_end_to_end() {
         return;
     }
 
-    // ── Gain effect, offline (blocking load): correct gain ──
     let mut params = BTreeMap::new();
     params.insert("1".to_string(), 0.5);
     let mut fx = pc::create_effect("clap:cc.krypt.test.gain", "ins1/slot1", None, &params, 48000.0, false).expect("gain");
     let mut l = vec![0.8f32; 32];
     let mut r = vec![-0.4f32; 32];
-    // The first call applies the initial params.
     fx.process(&ctx(32), [&mut l, &mut r], None);
     assert!((l[31] - 0.4).abs() < 1e-6 && (r[31] + 0.2).abs() < 1e-6, "gain 0.5 → got {} {}", l[31], r[31]);
-    // A param change through the RT path.
     fx.set_param(0, 2.0);
     let mut l = vec![0.25f32; 32];
     let mut r = vec![0.25f32; 32];
@@ -71,7 +61,6 @@ fn clap_end_to_end() {
     assert!((l[0] - 0.5).abs() < 1e-6, "gain 2 → {}", l[0]);
     drop(fx);
 
-    // ── Sine instrument (live): notes make sound, choke stops it ──
     let mut inst = pc::create_instrument("clap:cc.krypt.test.sine", "ch-sine", None, &BTreeMap::new(), 48000.0, true).expect("sine");
     let mut ready = false;
     let mut silent = true;
@@ -86,18 +75,16 @@ fn clap_end_to_end() {
         if a.iter().any(|x| x.abs() > 0.01) {
             silent = false;
         } else {
-            // Not READY yet → the note was dropped; retry.
             ready = false;
             std::thread::sleep(Duration::from_millis(10));
         }
     }
     assert!(!silent, "the sine never produced audio");
 
-    // ── State round trip (via the protocol command) ──
     let mut fx = pc::create_effect("clap:cc.krypt.test.gain", "ins2/slot1", None, &BTreeMap::new(), 48000.0, true).expect("gain live");
     wait_ready(&mut || pc::manager::live_instance("ins2/slot1").map(|i| i.chan.map.block().state.load(std::sync::atomic::Ordering::Acquire) == pc::shm::state::READY).unwrap_or(false));
     let (mut a, mut b) = (vec![1f32; 32], vec![1f32; 32]);
-    fx.process(&ctx(32), [&mut a, &mut b], None); // arms set_param
+    fx.process(&ctx(32), [&mut a, &mut b], None);
     fx.set_param(0, 0.25);
     fx.process(&ctx(32), [&mut a, &mut b], None);
     let st = cmd("plugins.state", json!({ "key": "ins2/slot1" })).expect("state");
@@ -107,7 +94,6 @@ fn clap_end_to_end() {
     eprintln!("saved gain = {}", f32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]));
     let all = cmd("plugins.states", json!({})).expect("states");
     assert!(all["states"]["ins2/slot1"].is_string(), "{all}");
-    // Restore into a fresh instance with NO params: the state alone sets 0.25.
     let mut fx2 = pc::create_effect("clap:cc.krypt.test.gain", "ins3/slot1", Some(&blob), &BTreeMap::new(), 48000.0, false).expect("restored");
     let (mut a, mut b) = (vec![1f32; 32], vec![1f32; 32]);
     fx2.process(&ctx(32), [&mut a, &mut b], None);
@@ -115,11 +101,9 @@ fn clap_end_to_end() {
 
     vst3_checks();
 
-    // ── Status ──
     let s = cmd("plugins.status", json!({})).unwrap();
     assert!(s["hostPid"].is_u64(), "{s}");
 
-    // ── Crash isolation: the Crash param aborts the host ──
     let _ = pc::drain_events();
     fx.set_param(2, 1.0);
     let (mut a, mut b) = (vec![1f32; 32], vec![1f32; 32]);
@@ -133,7 +117,6 @@ fn clap_end_to_end() {
     let crashed = crashed.expect("a crash event");
     eprintln!("crash event: {crashed}");
     assert!(crashed["message"].as_str().unwrap().contains("Krypt Test Gain"));
-    // Every instance of the dead host is silent now; nothing panics or blocks.
     let (mut a, mut b) = (vec![1f32; 32], vec![1f32; 32]);
     let t = Instant::now();
     fx.process(&ctx(32), [&mut a, &mut b], None);
@@ -143,7 +126,6 @@ fn clap_end_to_end() {
     inst.process(&ctx(32), [&mut a, &mut b]);
     assert!(a.iter().all(|x| *x == 0.0));
 
-    // ── Reload: a new host comes up and new instances work ──
     cmd("plugins.reload", json!({})).unwrap();
     assert!(pc::take_reload_request());
     let mut fx3 = pc::create_effect("clap:cc.krypt.test.gain", "ins4/slot1", Some(&blob), &BTreeMap::new(), 48000.0, false).expect("after reload");
@@ -152,14 +134,13 @@ fn clap_end_to_end() {
     assert!((a[0] - 0.25).abs() < 1e-6, "after reload → {}", a[0]);
     drop(fx3);
 
-    // ── Hang watchdog: a plugin stuck in process() gets the host killed and reloaded ──
     let _ = pc::drain_events();
     let _ = pc::take_reload_request();
     let mut fx4 = pc::create_effect("clap:cc.krypt.test.gain", "ins5/slot1", None, &BTreeMap::new(), 48000.0, true).expect("gain for hang");
     wait_ready(&mut || pc::manager::live_instance("ins5/slot1").map(|i| i.chan.map.block().state.load(std::sync::atomic::Ordering::Acquire) == pc::shm::state::READY).unwrap_or(false));
     let (mut a, mut b) = (vec![1f32; 32], vec![1f32; 32]);
     fx4.process(&ctx(32), [&mut a, &mut b], None);
-    fx4.set_param(1, 1.0); // Hang (test)
+    fx4.set_param(1, 1.0);
     let t0 = Instant::now();
     let mut hung = None;
     let mut worst = Duration::ZERO;
@@ -169,7 +150,7 @@ fn clap_end_to_end() {
         fx4.process(&ctx(32), [&mut a, &mut b], None);
         worst = worst.max(t.elapsed());
         hung = pc::drain_events().into_iter().find(|e| e["kind"] == json!("crashed"));
-        std::thread::sleep(Duration::from_micros(660)); // ~ real time at 32 frames / 48 kHz
+        std::thread::sleep(Duration::from_micros(660));
     }
     let hung = hung.expect("the watchdog should report the hang");
     eprintln!("hang event: {hung} (worst process() call {worst:?})");
@@ -178,7 +159,6 @@ fn clap_end_to_end() {
     assert!(pc::take_reload_request(), "a hang triggers an automatic reload");
 }
 
-/// VST3: moduleinfo fast path, then a real load; gain, params and state.
 fn vst3_checks() {
     let Ok(bundle) = std::env::var("KRYPT_TEST_VST3") else {
         eprintln!("VST3 checks skipped: set KRYPT_TEST_VST3");
@@ -206,7 +186,6 @@ fn vst3_checks() {
     assert!((a[31] - 0.4).abs() < 1e-6, "vst3 gain 0.5 → {}", a[31]);
     drop(fx);
 
-    // Live instance → param → state → restore elsewhere.
     let _fx = {
         let mut fx = pc::create_effect(&id, "vins/live", None, &BTreeMap::new(), 48000.0, true).expect("vst3 live");
         wait_ready(&mut || pc::manager::live_instance("vins/live").map(|i| i.chan.map.block().state.load(std::sync::atomic::Ordering::Acquire) == pc::shm::state::READY).unwrap_or(false));

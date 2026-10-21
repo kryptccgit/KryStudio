@@ -1,19 +1,11 @@
-//! Per-file mastering and WAV encoding for the library: DC / subsonic high
-//! pass, trailing-silence trim (one-shots only), exact length (tempo-synced
-//! files), click-free fades, true-peak normalisation, mono folding, and
-//! 24-bit (≤ 2 s) or dithered 16-bit (longer) PCM with an optional `smpl`
-//! chunk carrying the root key.
-
 use super::library::Spec;
 use super::synth::{db, fades, hp, Chans, BAR, SR};
 use crate::blocks::truepeak::true_peak;
 use crate::blocks::Rng;
 use crate::wav::{encode_wav, WavFormat};
 
-/// Files up to this length are written as 24-bit, longer ones as 16-bit.
 pub(crate) const PCM24_MAX_SEC: f32 = 2.0;
 
-/// Master one rendered sample according to its spec.
 pub(crate) fn finish(mut ch: Chans, spec: &Spec) -> Chans {
     let f = spec.fin;
     if ch.is_empty() {
@@ -29,7 +21,6 @@ pub(crate) fn finish(mut ch: Chans, spec: &Spec) -> Chans {
             }
         }
     }
-    // identical channels → mono
     if ch.len() == 2 && ch[0].iter().zip(&ch[1]).all(|(a, b)| (a - b).abs() <= 1e-7) {
         ch.truncate(1);
     }
@@ -71,8 +62,6 @@ pub(crate) fn finish(mut ch: Chans, spec: &Spec) -> Chans {
     ch
 }
 
-/// Bit depth: 24-bit for one-shots up to 2 s, 16-bit for longer files and
-/// for tempo-synced FX / loops.
 pub(crate) fn format_for(frames: usize, synced: bool) -> WavFormat {
     if !synced && frames as f32 / SR <= PCM24_MAX_SEC + 1e-6 {
         WavFormat::Pcm24
@@ -81,7 +70,6 @@ pub(crate) fn format_for(frames: usize, synced: bool) -> WavFormat {
     }
 }
 
-/// FNV-1a: a stable per-file dither seed.
 fn seed_of(s: &str) -> u32 {
     let mut h: u32 = 0x811c_9dc5;
     for b in s.bytes() {
@@ -91,8 +79,6 @@ fn seed_of(s: &str) -> u32 {
     h
 }
 
-/// WAV bytes: PCM 24 or (TPDF-dithered) 16-bit, plus a `smpl` chunk with
-/// the MIDI unity note for tonal samples.
 pub(crate) fn encode(ch: &Chans, root: Option<u8>, synced: bool, rel: &str) -> Vec<u8> {
     let frames = ch[0].len();
     let fmt = format_for(frames, synced);
@@ -106,16 +92,12 @@ pub(crate) fn encode(ch: &Chans, root: Option<u8>, synced: bool, rel: &str) -> V
         let refs: Vec<&[f32]> = ch.iter().map(|c| c.as_slice()).collect();
         encode_wav(&refs, SR as u32, fmt)
     };
-    // RIFF chunks are word aligned: an odd-sized data chunk gets a pad byte
-    // (not counted in the chunk size, counted in the RIFF size).
     if bytes.len() % 2 == 1 {
         bytes.push(0);
         let riff = (bytes.len() - 8) as u32;
         bytes[4..8].copy_from_slice(&riff.to_le_bytes());
     }
     if let Some(note) = root {
-        // smpl: manufacturer, product, sample period (ns), MIDI unity note,
-        // pitch fraction, SMPTE format, SMPTE offset, loop count, sampler data
         let period = (1e9 / SR as f64).round() as u32;
         let fields = [0u32, 0, period, note as u32, 0, 0, 0, 0, 0];
         bytes.extend_from_slice(b"smpl");

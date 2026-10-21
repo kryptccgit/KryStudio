@@ -1,11 +1,3 @@
-// Pure part of "knobs follow automation" (no store / telemetry imports, so
-// node tests can use it). Mirrors the engine's rules (docs/ENGINE_PROTOCOL.md
-// §4 "Automation clips"):
-//   - muted clips, muted tracks and (when any track is soloed) non-soloed
-//     tracks don't drive anything
-//   - inside a clip: evaluate the curve at songTick - clip.start + clip.offset
-//   - after a clip ends its last value holds (the most recently ended clip)
-
 import type { AutomationPoint, Project } from '@shared/schema/project';
 import { evalAutomation, sortPoints } from '@shared/schema/automation';
 
@@ -42,12 +34,10 @@ function index(p: Project): Map<string, AutoClip[]> {
   return m;
 }
 
-/** True if any playing automation clip targets this ParamRef. */
 export function isAutomated(p: Project, ref: string): boolean {
   return index(p).has(ref);
 }
 
-/** Normalized 0..1 automation value at a song tick, or null before any clip has played. */
 export function automationValueAt(p: Project, ref: string, tick: number): number | null {
   const clips = index(p).get(ref);
   if (!clips) return null;

@@ -1,7 +1,3 @@
-// Unit-aware parsing for "Type in value…" (the inverse of formatParam).
-// Accepts what the display shows: "-6 dB", "1.2k", "440 Hz", "25%", "Saw",
-// "250 ms", "1.5 s", "+3 st", "L30" / "R50" / "C" for pans.
-
 import type { ParamSpec } from '@shared/plugins/types';
 import { clampToSpec } from '@shared/plugins/types';
 
@@ -18,7 +14,6 @@ export function parseParamInput(spec: ParamSpec, raw: string): number | null {
     return Number.isFinite(n) ? clampToSpec(spec, n) : null;
   }
 
-  // Pan-style input: L30 / R50 / C
   if (spec.min === -1 && spec.max === 1 && /^[lrc]/.test(text)) {
     if (text === 'c' || text === 'center' || text === 'centre') return 0;
     const m = /^([lr])\s*(\d+(?:\.\d+)?)/.exec(text);
@@ -34,7 +29,6 @@ export function parseParamInput(spec: ParamSpec, raw: string): number | null {
     if (!m) return null;
     const n = Number(m[1]);
     if (/x$/.test(text) || /lin/.test(text)) return clampToSpec(spec, n);
-    // Display is in dB, so typed numbers are dB.
     return clampToSpec(spec, Math.pow(10, n / 20));
   }
 
@@ -55,7 +49,6 @@ export function parseParamInput(spec: ParamSpec, raw: string): number | null {
       if (suffix === 'ms') n /= 1000;
       break;
     case '%':
-      // Display shows 0..100 %, storage is 0..1 (or the spec's own range).
       if (spec.max <= 1 && spec.min >= -1) n /= 100;
       break;
     default:

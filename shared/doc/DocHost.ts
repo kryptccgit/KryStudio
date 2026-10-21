@@ -1,18 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// DocHost — the single authoritative project store (lives in Electron main).
-//
-//   exec(cmd, args, {actor}) ─▶ zod-validate ─▶ Immer produceWithPatches
-//        ─▶ history entry (patches + inverse, tagged with the actor)
-//        ─▶ emit DocChange { version, patches } to subscribers
-//           (renderer replicas, engine projection, autosave journal, MCP)
-//
-// Undo is PER ACTOR: the user's Ctrl+Z undoes the user's last edit, an
-// agent's undo undoes that agent's last edit. Any entry can be selectively
-// reverted (AI History panel) when no later live edit touched the same data.
-// Groups (beginGroup/endGroup) fold multi-step gestures and agent turns into
-// ONE history entry. Pure TS: no Node, no DOM — unit-tested in test/.
-// ──────────────────────────────────────────────────────────────────────
-
 import { applyPatches, enablePatches, produceWithPatches, type Patch } from 'immer';
 import type { Project } from '../schema/project';
 import { checkIntegrity } from '../schema/project';
@@ -51,7 +36,6 @@ export interface HistoryEntry {
   inverse: Patch[];
   time: number;
   undone: boolean;
-  /** Monotonic counter of when it was undone (for redo ordering). */
   undoneSeq: number;
 }
 
@@ -68,11 +52,8 @@ export interface HistorySummary {
 
 export interface ExecOptions {
   actor: Actor;
-  /** Fold into an open group (see beginGroup). */
   groupId?: string;
-  /** Merge with the previous entry if it has the same key + actor (knob drags). */
   coalesceKey?: string;
-  /** Override the history label. */
   label?: string;
 }
 
@@ -91,15 +72,9 @@ export interface DocChange {
   actor: Actor;
   label: string;
   patches: Patch[];
-  /** Present when kind === 'reset' (new/open project): replicas replace their copy. */
   project?: Project;
 }
 
-/**
- * Everything one project tab keeps of the document while another tab is in the DocHost
- * (research/19-project-tabs.md): the project and its undo / redo history. Open groups are not part of it:
- * swap() ends them (the caller refuses a switch while an agent's group is open).
- */
 export interface DocState {
   project: Project;
   history: HistoryEntry[];
@@ -108,13 +83,10 @@ export interface DocState {
 
 export interface DocHostOptions {
   maxHistory?: number;
-  /** Run integrity checks after every exec (tests / dev). */
   strict?: boolean;
   coalesceWindowMs?: number;
 }
 
-/** Truncate a patch path at its first array index: edits to any element of
- *  an array conflict with each other (index paths aren't stable ids). */
 function conflictPath(path: (string | number)[]): string[] {
   const out: string[] = [];
   for (const seg of path) {
@@ -141,7 +113,6 @@ export class DocHost {
   private openGroups = new Map<string, { actor: Actor; label: string; entryId: string | null }>();
   private listeners = new Set<(c: DocChange) => void>();
   private undoSeq = 0;
-  /** Set by reset / swap: the next edit never coalesces into an entry made before it. */
   private coalesceBarrier = false;
   private readonly ctx: CommandContext;
   private readonly opts: Required<DocHostOptions>;
@@ -176,12 +147,10 @@ export class DocHost {
       try {
         fn(c);
       } catch {
-        /* a broken subscriber must never break the document */
       }
     }
   }
 
-  /** Replace the whole document (new / open project). Clears history. */
   reset(project: Project, actor: Actor = SYSTEM): void {
     this.doc = project;
     this.history = [];
@@ -191,19 +160,10 @@ export class DocHost {
     this.emit({ version: this._version, kind: 'reset', actor, label: 'Load project', patches: [], project });
   }
 
-  // ── Project tabs: export / swap ──────────────────────────────────────
-
-  /** This document's project + history, to keep while another tab is active (entries are copied). */
   exportState(): DocState {
     return { project: this.doc, history: this.history.map((e) => ({ ...e })), undoSeq: this.undoSeq };
   }
 
-  /**
-   * Put another tab's state in (tab switch): emits a 'reset' change with that project, so replicas replace their
-   * copy and the engine reloads, but KEEPS that state's undo / redo history. The version keeps counting up (never
-   * restored), so every subscriber sees a newer version. Open groups are ended: their later endGroup is a no-op
-   * and edits naming them become ordinary entries.
-   */
   swap(state: DocState, actor: Actor = SYSTEM): void {
     this.doc = state.project;
     this.history = state.history.map((e) => ({ ...e }));
@@ -214,22 +174,14 @@ export class DocHost {
     this.emit({ version: this._version, kind: 'reset', actor, label: 'Switch project', patches: [], project: state.project });
   }
 
-  /** Groups open right now (an agent's call or begin_edit, a user gesture, a recording take). */
   listOpenGroups(): Array<{ id: string; actor: Actor; label: string }> {
     return [...this.openGroups].map(([id, g]) => ({ id, actor: g.actor, label: g.label }));
   }
-
-  // ── Execution ────────────────────────────────────────────────────────
 
   exec<T = unknown>(cmdId: string, args: unknown, opts: ExecOptions): ExecResult<T> {
     return this.execBatch<T>([{ cmd: cmdId, args }], opts, true) as ExecResult<T>;
   }
 
-  /**
-   * Run several commands atomically on one draft (all-or-nothing). Returns
-   * the array of per-command results in `data` (or the single result when
-   * `single` is set). One history entry.
-   */
   execBatch<T = unknown>(steps: Array<{ cmd: string; args: unknown }>, opts: ExecOptions, single = false): ExecResult<T | unknown[]> {
     if (steps.length === 0) return { ok: true, data: [], version: this._version };
     const parsed: Array<{ def: NonNullable<ReturnType<typeof getCommand>>; args: unknown }> = [];
@@ -278,7 +230,6 @@ export class DocHost {
 
   private record(opts: ExecOptions, label: string, patches: Patch[], inverse: Patch[]): void {
     const key = actorKey(opts.actor);
-    // A new edit invalidates this actor's redo entries.
     this.history = this.history.filter((e) => !(e.undone && actorKey(e.actor) === key));
 
     const now = Date.now();
@@ -325,9 +276,6 @@ export class DocHost {
     return entry;
   }
 
-  // ── Groups ───────────────────────────────────────────────────────────
-
-  /** Open a group: every exec with this groupId folds into ONE history entry. */
   beginGroup(actor: Actor, label: string): string {
     const id = newId('g');
     this.openGroups.set(id, { actor, label, entryId: null });
@@ -338,9 +286,6 @@ export class DocHost {
     this.openGroups.delete(groupId);
   }
 
-  // ── Undo / redo / selective revert ───────────────────────────────────
-
-  /** A later, still-live entry that touched the same data (blocks undo/redo of `entry`). */
   private conflictFor(entry: HistoryEntry): HistoryEntry | null {
     const mine = touches(entry);
     const idx = this.history.indexOf(entry);
@@ -398,14 +343,12 @@ export class DocHost {
     return this.applyEntry(best, false, 'redo', actor);
   }
 
-  /** Selectively undo (or re-apply, if already undone) a specific history entry. */
   toggleEntry(entryId: string, actor: Actor = { kind: 'user' }): ExecResult {
     const e = this.history.find((h) => h.id === entryId);
     if (!e) return { ok: false, message: 'That history entry no longer exists', version: this._version };
     return this.applyEntry(e, !e.undone, 'revert', actor);
   }
 
-  /** Undo every live entry made by an actor (newest first) — the "revert all AI edits" kill switch. */
   revertActor(target: Actor, by: Actor = { kind: 'user' }): ExecResult {
     const key = actorKey(target);
     let reverted = 0;

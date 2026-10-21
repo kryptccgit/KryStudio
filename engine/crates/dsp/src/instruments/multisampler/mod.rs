@@ -1,20 +1,3 @@
-//! krypt.multisampler — plays SFZ-mapped multisampled instruments (recorded
-//! pianos, drum kits, orchestral sections from sound packs).
-//!
-//! Loading (sfz.rs parser, load.rs decoder) happens off the audio thread and
-//! yields an immutable `Arc<MultiSampleSet>` (set.rs) handed over with
-//! `Instrument::set_multisample`. A plain audio file given through
-//! `set_sample` becomes a one-region set (played like krypt.sampler).
-//!
-//! Playback (all [RT]: preallocated voices, no allocation / locks / I/O):
-//! region match on key + velocity with equal-power `xfin`/`xfout` crossfades,
-//! round robin (`seq_length`/`seq_position` counted per region, plus
-//! `lorand`/`hirand`), pitch from `pitch_keycenter`/`pitch_keytrack`/`tune`/
-//! `transpose` with the sampler's windowed-sinc interpolation at the sample's
-//! own rate, `volume`/`pan`/`amp_veltrack`, DAHDSR from `ampeg_*`, the four
-//! loop modes, `group`/`off_by` chokes with `off_mode`, and `trigger=release`
-//! regions fired on note-off and attenuated by `rt_decay` × held time.
-
 #![allow(clippy::needless_range_loop)]
 
 pub mod build;
@@ -42,21 +25,13 @@ use set::I16_SCALE;
 
 pub const PLUGIN_ID: &str = "krypt.multisampler";
 
-/// Voice slots (preallocated).
 pub const MAX_VOICES: usize = 128;
-/// Sounding voices before the oldest is stolen (the spare slots let stolen voices fade).
 pub const MAX_POLY: usize = 112;
-/// Regions one note-on can start.
 const MAX_LAYERS: usize = 64;
-/// Sub-block for param smoothing and event timing.
 const SUB: usize = 32;
-/// `off_mode=fast` and voice-steal fade.
 pub const FAST_OFF_MS: f32 = 5.0;
-/// Shortest release (no click when a region has `ampeg_release=0`).
 pub const MIN_RELEASE_MS: f32 = 5.0;
-/// Tone filter damping (Q 0.5: a gentle, non-resonant 12 dB/oct low-pass).
 const TONE_K: f64 = 2.0;
-/// Tone at or above this is bypassed.
 const TONE_OPEN_HZ: f32 = 19_900.0;
 
 param_table! {
@@ -90,8 +65,6 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
-// ── Voices ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Copy)]
 struct MsVoice {
     active: bool,
@@ -99,19 +72,14 @@ struct MsVoice {
     key: u8,
     note_id: u64,
     order: u64,
-    /// An attack voice whose note is still down.
     held: bool,
-    /// Ignores note-off (`one_shot`, release-trigger voices).
     one_shot: bool,
-    /// `loop_sustain`: stop looping at note-off.
     loop_sustain: bool,
-    /// Wrapping at `loop_end` right now.
     looping: bool,
     loop_start: f64,
     loop_end: f64,
     frames: f64,
     pos: f64,
-    /// Source frames per output frame before the instrument's tune.
     base_step: f64,
     gain: f32,
     pl: f32,
@@ -119,7 +87,6 @@ struct MsVoice {
     env: Ahdsr,
     envp: EnvParams,
     region_release_ms: f32,
-    /// Frames left in `ampeg_delay` (the sample already plays, silently).
     delay: u32,
     fading: bool,
     fade: f32,
@@ -176,7 +143,6 @@ impl MsVoice {
         self.env.kill();
     }
 
-    /// Fast fade to silence over `ms`.
     fn fade_out(&mut self, ms: f32, sr: f32) {
         let step = 1.0 / (ms * 0.001 * sr).max(1.0);
         if !self.fading || step > self.fade_step {
@@ -186,14 +152,12 @@ impl MsVoice {
         self.held = false;
     }
 
-    /// Envelope release (note-off, `off_mode=normal`).
     fn release(&mut self, release_scale: f32) {
         self.held = false;
         if self.loop_sustain {
             self.looping = false;
         }
         if self.delay > 0 {
-            // never became audible
             self.kill();
             return;
         }
@@ -201,7 +165,6 @@ impl MsVoice {
         self.env.release(&self.envp);
     }
 
-    /// Render ADDING into l/r. `tune_ratio` is the instrument-wide pitch factor.
     #[inline]
     fn render(&mut self, set: &MultiSampleSet, sinc: &SincTable, bank: &KernelBank, tune_ratio: f64, l: &mut [f32], r: &mut [f32]) {
         let Some(s) = set.samples.get(self.sample as usize) else {
@@ -212,7 +175,6 @@ impl MsVoice {
         let ch = s.channels;
         let frames = s.frames as i64;
         let step = self.base_step * tune_ratio;
-        // pitching up: the precomputed band (the step is constant over the span)
         let band = (step > 1.0).then(|| bank.band(step));
         let mut w = [0.0f32; MAX_TAPS];
         let mut pos = self.pos;
@@ -276,9 +238,6 @@ impl MsVoice {
     }
 }
 
-/// Windowed-sinc read from interleaved i16. Taps outside the sample read
-/// silence; with `wrap` (looping), taps at or past the loop end wrap to the
-/// loop start.
 #[inline]
 fn read_i16(data: &[i16], ch: usize, frames: i64, first: i64, w: &[f32], wrap: Option<(i64, i64)>) -> (f32, f32) {
     let n = w.len() as i64;
@@ -330,8 +289,6 @@ fn map_tap(k: i64, wrap: Option<(i64, i64)>) -> i64 {
     }
 }
 
-// ── Events ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Copy, Debug)]
 enum Ev {
     On { key: u8, pitch: f32, vel: f32, pan: f32 },
@@ -346,33 +303,26 @@ struct Event {
     ev: Ev,
 }
 
-// ── Instrument ───────────────────────────────────────────────────────────
-
 pub struct Multisampler {
     pb: ParamBank<N_PARAMS>,
     set: Option<Arc<MultiSampleSet>>,
     sinc: SincTable,
-    /// Pitch-up kernels (process-wide; built here, never on the audio thread).
     bank: &'static KernelBank,
     voices: Vec<MsVoice>,
-    /// Round-robin counter per region.
     seq_counters: Vec<u32>,
     events: Vec<Event>,
     ev_seq: u32,
     rng: Rng,
-    /// Notes down per key, and the newest one's velocity / pitch / start (release triggers).
     key_held: [u16; 128],
     key_vel: [f32; 128],
     key_pitch: [f32; 128],
     key_on: [u64; 128],
-    /// Frames rendered so far.
     clock: u64,
     order: u64,
     note_counter: u64,
     mono: bool,
     sr: f32,
     matched: [(u32, f32); MAX_LAYERS],
-    // params
     attack_ms: f32,
     release_scale: f32,
     vel_sens: f32,
@@ -429,17 +379,14 @@ impl Multisampler {
         s
     }
 
-    /// The loaded set (tests, diagnostics).
     pub fn set(&self) -> Option<&Arc<MultiSampleSet>> {
         self.set.as_ref()
     }
 
-    /// Voices currently sounding (tests).
     pub fn active_voices(&self) -> usize {
         self.voices.iter().filter(|v| v.active).count()
     }
 
-    /// Sample indices of the sounding voices, oldest first (tests).
     pub fn active_samples(&self) -> Vec<u32> {
         let mut v: Vec<(u64, u32)> = self.voices.iter().filter(|v| v.active && !v.fading).map(|v| (v.order, v.sample)).collect();
         v.sort();
@@ -470,8 +417,6 @@ impl Multisampler {
         self.key_held = [0; 128];
     }
 
-    /// Velocity → gain for a region's `amp_veltrack` (scaled by Velocity
-    /// sensitivity): SFZ's square-law curve, 100 % = (vel)².
     #[inline]
     fn vel_gain(&self, veltrack: f32, vel: f32) -> f32 {
         let t = (veltrack * self.vel_sens).clamp(-1.0, 1.0);
@@ -483,11 +428,9 @@ impl Multisampler {
         }
     }
 
-    /// Make room for one more voice; returns a free slot.
     fn alloc_voice(&mut self) -> usize {
         let sounding = self.voices.iter().filter(|v| v.active && !v.fading).count();
         if sounding >= MAX_POLY {
-            // steal: released voices first, then the oldest
             let mut victim: Option<usize> = None;
             for (i, v) in self.voices.iter().enumerate() {
                 if !v.active || v.fading {
@@ -512,7 +455,6 @@ impl Multisampler {
         if let Some(i) = self.voices.iter().position(|v| !v.active) {
             return i;
         }
-        // every slot busy (mostly fading): reuse the oldest
         let mut oldest = 0;
         for i in 1..self.voices.len() {
             if self.voices[i].order < self.voices[oldest].order {
@@ -523,7 +465,6 @@ impl Multisampler {
         oldest
     }
 
-    /// Collect the regions a note starts into `self.matched` (advancing round-robin counters).
     fn match_regions(&mut self, set: &MultiSampleSet, key: u8, vel: f32, trigger: Trigger) -> usize {
         let v127 = (vel * 127.0).clamp(0.0, 127.0);
         let vint = (v127.round() as u8).max(1);
@@ -556,8 +497,6 @@ impl Multisampler {
         n
     }
 
-    /// `group` / `off_by`: every sounding voice whose `off_by` is the group of a
-    /// starting region turns off (fast fade or its own release).
     fn apply_chokes(&mut self, set: &MultiSampleSet, n: usize) {
         for m in 0..n {
             let g = set.regions[self.matched[m].0 as usize].group;
@@ -657,7 +596,6 @@ impl Multisampler {
                 replaced = true;
             }
         }
-        // An Arc clone is an atomic increment: no allocation; never the last reference here.
         let Some(set) = self.set.clone() else { return };
         let n = self.match_regions(&set, key, vel, Trigger::Attack);
         self.apply_chokes(&set, n);
@@ -668,7 +606,6 @@ impl Multisampler {
     }
 
     fn handle_off(&mut self, key: u8) {
-        // release the oldest held note on this key (all of its layers)
         let mut target: Option<u64> = None;
         for v in self.voices.iter() {
             if v.active && v.held && v.key == key && target.is_none_or(|t| v.note_id < t) {
@@ -721,7 +658,6 @@ impl Multisampler {
         self.reset_keys();
     }
 
-    /// Render frames [a, b) (b - a <= SUB), ADDING into out. Returns the block peak.
     fn render_span(&mut self, out: &mut [&mut [f32]; 2], a: usize, b: usize) -> f32 {
         let n = b - a;
         let mut ml = [0.0f32; SUB];
@@ -737,7 +673,6 @@ impl Multisampler {
                 }
             }
         }
-        // Tone: gentle 12 dB/oct low-pass, bypassed when fully open.
         let cut = self.tone.advance(n);
         if cut < TONE_OPEN_HZ {
             if !self.tone_on {

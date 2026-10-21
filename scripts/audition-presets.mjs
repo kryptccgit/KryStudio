@@ -1,30 +1,3 @@
-// Audition every factory instrument preset through the real engine, since the
-// sound designer can't listen: one tiny project per preset (one channel with
-// the preset's instrument, params and channel settings, its own insert with the
-// preset's FX chain routed to a master with NO limiter, one pattern with a
-// role-appropriate test phrase), rendered with the release engine's offline
-// renderer (--render … --analyze). The analysis is checked against per-role
-// rules and written to test/.out/presets-audition.{md,json}.
-//
-//   node scripts/audition-presets.mjs [filter] [--jobs 8] [--keep-wav] [--refs] [--packs-dir <dir> [--packs-only]]
-//
-// filter: substring of the preset id ("lead/", "808", "factory:bass/reese");
-// a filtered run writes presets-audition.partial.{md,json}. --keep-wav keeps
-// the renders in test/.out/audition/; --refs also renders the legacy factory
-// kit for comparison (always on for a full run). Each row's suggestedGainDb is
-// the preset gain that would land it on its role target.
-// Presets that `require` a sound pack (shared/sounds/factory/instruments/packs.ts) are rendered only with
-// --packs-dir <dir>, a folder holding the installed packs (userData/packs: <id>/<file>.sfz + samples), which is
-// passed to the engine so 'pack:<id>/…' samples resolve; packs missing there are skipped and listed. Full-kit
-// presets (GM layout on one channel) play a GM beat instead of a single-key phrase, and pack presets must also
-// keep their true peak at or below -1 dBTP.
-// Exit code 1 when a preset is flagged (silent, true peak, loudness window,
-// sub energy, mud, harshness, mono compatibility).
-//
-// The engine is NOT built here: it uses resources/bin/krypt-studio-engine.exe
-// as it is (npm run engine:build makes it). Never run this against a debug
-// engine for loudness work — the DSP is the same but it's slow.
-
 import { build } from 'esbuild';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -59,8 +32,6 @@ if (!existsSync(exe)) {
 }
 mkdirSync(workDir, { recursive: true });
 
-// ── Bundle the TS sources we need ─────────────────────────────────────
-
 const bundle = path.join(outDir, 'audition-presets.bundle.mjs');
 await build({
   stdin: {
@@ -82,20 +53,15 @@ await build({
 });
 const M = await import(`file://${bundle.replace(/\\/g, '/')}?t=${Date.now()}`);
 
-// ── Test phrases (PPQ 960, 120 BPM: one bar = 3840 ticks = 2 s) ───────
-
 const Q = 960;
 const E = 480;
 const S = 240;
 const BAR = 3840;
-/** [tick, dur, key] */
 const chord = (tick, dur, keys) => keys.map((k) => [tick, dur, k]);
 const AM7 = [57, 60, 64, 67];
 const FMAJ7 = [53, 57, 60, 64];
 const PH = {
-  // two held chords, two bars each (pads, strings, choirs)
   sustain: { bars: 4, notes: [...chord(0, 2 * BAR - 60, AM7), ...chord(2 * BAR, 2 * BAR - 60, FMAJ7)] },
-  // four half-note chords (keys, piano, chords, brass)
   chords: {
     bars: 2,
     notes: [
@@ -105,7 +71,6 @@ const PH = {
       ...chord(BAR + 2 * Q, 2 * Q - 60, [55, 59, 62, 67]),
     ],
   },
-  // off-beat 8th stabs
   stabs: {
     bars: 2,
     notes: [0, 1, 2, 3, 4, 5, 6, 7].flatMap((i) => chord(i * Q + E, S, i < 4 ? [57, 60, 64] : [53, 57, 60])),
@@ -142,7 +107,6 @@ const PH = {
   crash: { bars: 2, notes: [[0, S, 60]] },
   perc: { bars: 2, notes: [0, 3, 6, 10, 12, 16, 19, 22, 26, 28].map((s) => [s * S, S, 60]) },
   tom: { bars: 2, notes: [[0, S, 60], [3 * S, S, 60], [6 * S, S, 55], [Q * 2, S, 53], [BAR, S, 60], [BAR + 3 * S, S, 57], [BAR + 6 * S, S, 55], [BAR + 2 * Q, S, 52]] },
-  // a full kit on one channel, GM keys: kick 36, snare 38, closed hat 42 in 8ths, open hat 46 on the last off-beat
   kit: {
     bars: 2,
     notes: [
@@ -163,7 +127,6 @@ const PHRASE_BY_ROLE = {
   fx: 'fx', texture: 'texture',
 };
 
-/** A full drum kit on one channel (GM layout): a kick preset that also covers the other drum roles. */
 const isKit = (p) => p.role === 'kick' && ['snare', 'hat'].every((r) => (p.alsoRoles ?? []).includes(r));
 
 function phraseFor(p) {
@@ -178,7 +141,6 @@ function phraseFor(p) {
 
 const DRUM_ROLES = new Set(['kick', 'snare', 'clap', 'hat', 'openhat', 'ride', 'crash', 'perc', 'tom']);
 
-/** Octave shift that puts the most phrase notes inside the preset's range (smallest shift on ties); drums play as written. */
 function transposeFor(preset, notes) {
   if (!preset.range || DRUM_ROLES.has(preset.role)) return 0;
   const [lo, hi] = preset.range;
@@ -190,21 +152,12 @@ function transposeFor(preset, notes) {
   return best.shift;
 }
 
-// ── Per-role loudness targets ─────────────────────────────────────────
-// Integrated LUFS of the solo test phrase at the default channel volume, no master limiter. Each role's target is
-// anchored to the true peak its sounds should reach in a beat (kick ≈ -6 dBTP like the factory kick sample, 808/bass a
-// little hotter than leads, pads and textures well below), so short, sparse phrases (stabs, arps, hats) get lower LUFS
-// targets than sustained ones: matching integrated LUFS across phrase densities would push stabs to 0 dBFS. Within a
-// role every preset must land in target ± WINDOW (≈ equal loudness when an agent swaps presets).
-
 const TARGET = {
   808: -14, bass: -17, sub: -14,
   kick: -16, snare: -19, clap: -19, hat: -26, openhat: -23, ride: -25, crash: -24, perc: -25, tom: -19,
   lead: -17, pluck: -24, arp: -27, bell: -21, keys: -22, piano: -22, chord: -20, stab: -28, strings: -23, brass: -19, vox: -20,
   pad: -23, fx: -20, texture: -28,
 };
-/** Presets auditioned with another role's phrase (staccato strings play stabs, choirs play held chords …). */
-// kick:kit is the GM beat above: kick (-16 for 8 hits, so ≈ -18 for its 4), snare -19 and hats -26 summed ≈ -15.
 const TARGET_BY_PHRASE = { 'strings:stabs': -28, 'strings:pluck': -24, 'vox:sustain': -23, 'fx:perc': -22, 'brass:stabs': -28, 'kick:kit': -15 };
 const targetFor = (role, phrase) => TARGET_BY_PHRASE[`${role}:${phrase}`] ?? TARGET[role];
 const WINDOW = 2;
@@ -212,8 +165,6 @@ const WINDOW = 2;
 const MELODIC = new Set(['lead', 'pluck', 'pad', 'keys', 'piano', 'bell', 'arp', 'stab', 'chord', 'strings', 'brass', 'vox', 'texture']);
 const NO_SUB = new Set([...MELODIC, 'snare', 'clap', 'hat', 'openhat', 'ride', 'crash', 'perc']);
 const CYMBALS = new Set(['hat', 'openhat', 'ride', 'crash']);
-
-// ── Project per preset ────────────────────────────────────────────────
 
 const defaultMix = (type) => M.CATALOG.plugins.find((p) => p.id === type)?.defaultMix ?? 1;
 
@@ -271,8 +222,6 @@ function projectFor(preset) {
   return { proj, phrase: phraseFor(preset), transpose: tr };
 }
 
-// ── Render ────────────────────────────────────────────────────────────
-
 function render(projectPath, wavPath) {
   return new Promise((resolve) => {
     const args = ['--render', projectPath, '--out', wavPath, '--scope', 'pattern', '--analyze', '--tail', '2', '--format', 'wav16', '--factory-dir', factoryDir];
@@ -310,11 +259,8 @@ async function pool(items, n, fn) {
   return results;
 }
 
-// ── Checks ────────────────────────────────────────────────────────────
-
 const r1 = (x) => Math.round(x * 10) / 10;
 
-/** Phrases whose fundamentals sit in the 250-500 Hz band: warm chords there are expected, so the mud threshold is higher. */
 const CHORD_PHRASES = new Set(['sustain', 'chords', 'stabs', 'texture']);
 
 function check(preset, a, phrase) {
@@ -322,7 +268,7 @@ function check(preset, a, phrase) {
   const notes = [];
   const role = preset.role;
   if (a.lufsIntegrated <= -60 || a.peakDb <= -60) flags.push('silent');
-  const tpMax = preset.requires ? -1 : -0.5; // recordings: keep a full dB of headroom
+  const tpMax = preset.requires ? -1 : -0.5;
   if (a.truePeakDb > tpMax) flags.push(`true peak ${r1(a.truePeakDb)} dBTP > ${tpMax}`);
   const t = targetFor(role, phrase);
   if (t != null && Math.abs(a.lufsIntegrated - t) > WINDOW) flags.push(`loudness ${r1(a.lufsIntegrated)} LUFS outside ${t - WINDOW}..${t + WINDOW}`);
@@ -340,10 +286,6 @@ function check(preset, a, phrase) {
   return { flags, notes };
 }
 
-// ── Run ───────────────────────────────────────────────────────────────
-
-// The legacy factory kit at default sampler settings, rendered for context: presets are balanced against the
-// drum samples they will play next to (reported, never flagged).
 const ref = (role, file, extra = {}) => ({
   id: `ref:${role}`, name: `Factory ${file}`, role, plugin: 'krypt.sampler', params: {}, sample: `factory:drums/${file}`, tags: [], genres: [], description: '', ...extra,
 });
@@ -357,7 +299,6 @@ const REFS = [
   ref('crash', 'crash.wav'),
 ];
 
-// Pack presets need their pack installed under --packs-dir; the rest are skipped (and listed).
 const skipped = [];
 const all = M.INSTRUMENT_PRESETS.filter((p) => {
   if (!p.requires) return true;
@@ -409,7 +350,6 @@ const rows = await pool(withRefs ? [...presets, ...REFS] : presets, jobs, async 
     width: Math.round(a.stereoWidth * 100) / 100,
     centroidHz: Math.round(a.spectralCentroidHz),
     bands: Object.fromEntries(Object.entries(a.bands).map(([k, v]) => [k, r1(v)])),
-    /** Short-term LUFS once per second (risers rise, downlifters fall, pads swell). */
     energy: (a.energyCurve ?? []).map(r1),
     target,
     gain,
@@ -418,8 +358,6 @@ const rows = await pool(withRefs ? [...presets, ...REFS] : presets, jobs, async 
     notes,
   };
 });
-
-// ── Report ────────────────────────────────────────────────────────────
 
 const refRows = rows.filter((r) => r.id.startsWith('ref:'));
 rows.splice(0, rows.length, ...rows.filter((r) => !r.id.startsWith('ref:')));
@@ -432,7 +370,6 @@ const flagged = rows.filter((r) => r.flags.length);
 const roleSummary = [...byRole.entries()].map(([role, rs]) => {
   const ok = rs.filter((r) => r.lufs != null);
   const l = ok.map((r) => r.lufs).sort((a, b) => a - b);
-  // offsets from each preset's own target (a role can mix phrases: staccato strings vs held strings)
   const d = ok.map((r) => r.lufs - r.target).sort((a, b) => a - b);
   return {
     role,

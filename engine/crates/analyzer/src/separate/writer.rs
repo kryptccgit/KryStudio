@@ -1,16 +1,9 @@
-//! Stem WAV output: 32-bit float stereo at the source rate, written to
-//! `<outDir>/<stem>.wav.partial` and renamed into place only when every stem
-//! is complete. Dropping an unfinished `StemFiles` (error, cancel, panic)
-//! deletes everything this job wrote, so a half-written stem can never be
-//! mistaken for a cached result.
-
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 
-/// Floor for reported levels of silent stems (JSON has no -inf).
 const FLOOR_DB: f32 = -120.0;
 
 pub struct StemInfo {
@@ -38,7 +31,6 @@ pub struct StemFiles {
 }
 
 impl StemFiles {
-    /// Opens one writer per stem; each will hold exactly `frames` frames.
     pub fn create(out_dir: &Path, names: &[&str], sample_rate: u32, frames: u64) -> Result<Self, String> {
         std::fs::create_dir_all(out_dir).map_err(|e| format!("Cannot create the stem folder {}: {e}", out_dir.display()))?;
         let spec = WavSpec { channels: 2, sample_rate, bits_per_sample: 32, sample_format: SampleFormat::Float };
@@ -52,7 +44,6 @@ impl StemFiles {
         Ok(me)
     }
 
-    /// Appends stereo frames to stem `i`; anything past `frames` is dropped.
     pub fn write(&mut self, i: usize, left: &[f32], right: &[f32]) -> Result<(), String> {
         let total = self.frames;
         let f = &mut self.files[i];
@@ -70,8 +61,6 @@ impl StemFiles {
         Ok(())
     }
 
-    /// Pads short stems with silence, closes every file and renames them
-    /// into place. On error the drop handler removes all of them.
     pub fn finish(mut self) -> Result<Vec<StemInfo>, String> {
         let total = self.frames;
         for f in &mut self.files {
@@ -139,8 +128,8 @@ mod tests {
         let dir = tmp_dir("ok");
         let mut files = StemFiles::create(&dir, &["drums", "bass"], 48_000, 10).unwrap();
         files.write(0, &[0.5; 6], &[-0.5; 6]).unwrap();
-        files.write(0, &[0.5; 6], &[-0.5; 6]).unwrap(); // 12 > 10: truncated
-        files.write(1, &[0.0; 3], &[0.0; 3]).unwrap(); // short: padded
+        files.write(0, &[0.5; 6], &[-0.5; 6]).unwrap();
+        files.write(1, &[0.0; 3], &[0.0; 3]).unwrap();
         let out = files.finish().unwrap();
         assert_eq!(out.len(), 2);
         let r = hound::WavReader::open(&out[0].path).unwrap();

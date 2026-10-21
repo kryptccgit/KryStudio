@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// preload: the ONLY seam between the renderer and main. Implements the
-// KryptApi contract (shared/types.ts) over ipcRenderer; every channel has a
-// matching handler in electron/ipc.ts (names in channels.ts). Sandboxed:
-// this bundle may only require 'electron'. Every subscription returns its
-// unsubscribe function (no listener leaks across HMR).
-// ──────────────────────────────────────────────────────────────────────
-
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { KryptApi } from '@shared/types';
 import { EVENT, INVOKE, SEND } from './channels';
@@ -44,7 +36,6 @@ const krypt: KryptApi = {
     onMaximizedChanged: (cb) => sub<boolean>(EVENT.appMaximizedChanged, cb),
     onOpenFile: (cb) => {
       const off = sub<string>(EVENT.appOpenFile, cb);
-      // Paths that arrived before anyone listened (launch args) are queued in main.
       ipcRenderer.send(SEND.appOpenFileReady);
       return off;
     },

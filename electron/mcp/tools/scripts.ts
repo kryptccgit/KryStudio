@@ -1,11 +1,3 @@
-// write_script / run_script: Krypt Script for agents (Wave 12.2b). An agent
-// writes a JavaScript note device (header + run(ctx)); the app checks it
-// (header, compile and one trial run in the QuickJS sandbox) and answers
-// with line-numbered errors to fix. run_script runs a script on a channel
-// of a pattern as ONE undo step (notes.applyScript), or as a dry run that
-// returns the notes as KPN and changes nothing. Scripts never run outside
-// the sandbox (electron/scripts/sandbox.ts).
-
 import { z } from 'zod';
 import { parseKey } from '@shared/music/theory';
 import { ticksPerBar } from '@shared/schema/time';

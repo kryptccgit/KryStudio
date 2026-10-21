@@ -1,8 +1,3 @@
-// Optional Streamable HTTP endpoint on 127.0.0.1 (settings.mcp.httpEnabled,
-// OFF by default). research/04 §7.1 T1: bind loopback only, Host allow-list,
-// reject ANY Origin header (real MCP clients don't send one), bearer token
-// (constant-time), POST + application/json only, no CORS headers ever.
-
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { createMcpHandler, localhostAllowedHostnames, validateHostHeader } from '@modelcontextprotocol/server';
@@ -24,9 +19,7 @@ function tokenOk(given: string, expected: string): boolean {
 }
 
 export function startHttp(deps: MainDeps, version: string, token: string, port: number, gate: () => string | null): HttpHandle {
-  // HTTP is stateless per request: one actor per client name header (default "http").
   const callers = new Map<string, ToolCaller>();
-  // File-access questions handed to a client as input_required, per client name (HTTP builds a server per request).
   const pending = new Map<string, Map<string, number>>();
   const pendingFor = (name: string | null): Map<string, number> => {
     const k = name ?? '';

@@ -1,8 +1,3 @@
-// Browser-preview Auto Mix (window.krypt.automix without the desktop app): canned presets, a small keyword reader
-// for the live "Understood as" line, and a run that walks through the stages with progress and returns a believable
-// before / after. The run makes ONE real history entry (a master-fader nudge in the in-page DocHost), so the A/B
-// switch, Keep and Undo can be tried and screenshotted. Master a song returns "no file" (the preview has no dialog).
-
 import type { KryptApi } from '@shared/types';
 import { USER, type DocHost } from '@shared/doc/DocHost';
 import type { AlbumOutcome, AlbumRequest, AutoMixIntent, AutoMixMeasure, AutoMixOutcome, AutoMixPreset, AutoMixProgress, AutoMixRequest, ReferenceSound } from '@shared/automix/types';
@@ -40,7 +35,6 @@ const PRESETS: AutoMixPreset[] = [
   P('phonk-slam', 'Phonk Slam', 'Distorted cowbells and 808 slammed right up to the ceiling', -7, -0.3, { sub: 5, low: 3, lowMid: -1, mid: 0.5, highMid: 2, high: 1.5 }, { punch: 0.9, warmth: 0.7 }, ['phonk']),
 ];
 
-/** A rough English reader, enough for the preview's "Understood as" line. */
 function readPrompt(text: string): AutoMixIntent {
   const t = text.toLowerCase();
   const i: AutoMixIntent = { summary: '', source: 'keywords' };
@@ -151,7 +145,6 @@ export function createMockAutomix(host: DocHost): KryptApi['automix'] {
       }
       if (cancelled) return { ok: false, message: 'Cancelled' };
       const o = outcome(req);
-      // One real history entry, so A/B, Keep and Undo work in the preview.
       const master = host.project.mixer.masterId;
       const vol = host.project.mixer.inserts[master]?.volume ?? 1;
       const r = host.exec('mixer.setInsert', { id: master, volume: Math.max(0, Math.min(2, vol * 0.85)) }, { actor: USER, label: `Auto ${req.mode === 'full' ? 'Mix + Master' : req.mode}` });

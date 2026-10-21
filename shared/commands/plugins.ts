@@ -1,6 +1,3 @@
-// Third-party (VST3 / CLAP) plugin bookkeeping. Plugin state is an opaque
-// base64 blob the engine reads from the hosted plugin before a save; it is
-// stored on generator.state / slot.state and restored when the project loads.
 import { z } from 'zod';
 import { defineCommand, plural } from './types';
 

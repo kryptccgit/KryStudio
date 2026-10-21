@@ -1,6 +1,3 @@
-// zod schemas for presets: command args (shared/commands/presets.ts) and the
-// user preset files (userData/presets/*.json) are validated with these.
-
 import { z } from 'zod';
 import { GENRE_IDS } from './genres';
 import { CHAIN_ROLES, INSTRUMENT_ROLES } from './types';
@@ -18,7 +15,6 @@ const zPresetFxBase = z.object({
   enabled: z.boolean().optional(),
 });
 
-/** A rack inside a preset (shared/sounds/types.ts PresetRack): indices, sample paths, no nested racks. */
 export const zPresetRack = z.object({
   kind: z.enum(['instrument', 'drum', 'effect']),
   chains: z

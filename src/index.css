@@ -17,7 +17,6 @@
   * {
     box-sizing: border-box;
   }
-  /* Krypt scrollbar — thin, dark, gradient-on-hover. */
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -61,7 +60,6 @@
   }
 }
 
-/* Indeterminate progress (analyzer jobs with no fraction, model verification). */
 @keyframes krypt-indeterminate {
   0% { left: -35%; }
   100% { left: 100%; }

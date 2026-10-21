@@ -1,24 +1,7 @@
-//! Clip launcher hooks into the real-time core (docs/ENGINE_PROTOCOL.md §10).
-//! Declared as a child module of `core` (core.rs: `#[path =
-//! "launcher_hooks.rs"] mod launcher_hooks;`) so it can drive the
-//! sequencer's private state, like record_hooks.rs; core.rs only carries the
-//! call sites, each marked `// launcher:`.
-//!
-//! Clocks: arrangement events run on the transport position (song ticks, or
-//! pattern ticks in pattern mode). Launch clips run on `LaunchRt::clock`, a
-//! monotonic count of generated ticks, so song-loop jumps and locates never
-//! restart them. The quantize grid is the song bar grid from tick 0 (song
-//! mode) or the clock since the transport started (pattern mode).
-//!
-//! [RT] Everything here runs on the audio thread: no allocation, no locks.
-//! Offline renders never receive launcher commands (render_mode guards too).
-
 use super::*;
 use crate::launcher::*;
 
 const EPS: f64 = 1e-7;
-/// Releases of launcher-overridden notes sort with note-ons (2): by seq, after
-/// the note-ons generated before the transition and before the new clip's.
 const RELEASE_ORDER: u8 = 2;
 
 #[inline]
@@ -28,7 +11,6 @@ fn frame_at(t: f64, base: f64, f: usize, n: usize, tpf: f64) -> u32 {
 }
 
 impl Core {
-    /// Arrangement clips of an overridden track are silent (launcher notes never are).
     #[inline]
     pub(super) fn launch_silenced(&self, owner: u32) -> bool {
         owner & LAUNCH_OWNER == 0 && (owner as usize) < MAX_TRACKS && self.launch.tracks[owner as usize].overridden
@@ -38,8 +20,6 @@ impl Core {
     fn launch_active(&self) -> bool {
         !self.program.launcher.clips.is_empty() || self.launch.rec_on
     }
-
-    // ── Commands ─────────────────────────────────────────────────────────
 
     pub(super) fn launch_cmd(&mut self, c: LaunchCmd) {
         if self.render_mode {
@@ -65,7 +45,6 @@ impl Core {
                         Some(c) => {
                             self.launch_queue_clip(c, true);
                         }
-                        // Tracks with clips but none in this row stop; empty columns are untouched.
                         None if !empty => self.launch_queue_stop(track, gq),
                         None => {}
                     }
@@ -85,7 +64,6 @@ impl Core {
                     self.launch_queue_stop(t, gq);
                 }
                 if !self.playing {
-                    // Nothing plays: a stop just overrides (no quantize wait).
                     for st in self.launch.tracks.iter_mut() {
                         if st.queued == Q_STOP {
                             st.queued = NONE;
@@ -109,7 +87,6 @@ impl Core {
         }
     }
 
-    /// Queue a clip on its track. False if the clip is unknown.
     fn launch_queue_clip(&mut self, slot: u32, from_scene: bool) -> bool {
         let Some(c) = self.program.launcher.clip(slot).copied() else { return false };
         let tr = c.track as usize;
@@ -139,14 +116,13 @@ impl Core {
         st.held = false;
     }
 
-    /// Key / button up: gate clips stop (quantized), repeat clips stop repeating.
     fn launch_release(&mut self, slot: u32) {
         let Some(c) = self.program.launcher.clip(slot).copied() else { return };
         let Some(st) = self.launch.tracks.get_mut(c.track as usize) else { return };
         match c.mode {
             LaunchMode::Gate => {
                 if st.queued == slot {
-                    st.queued = NONE; // released before it started: it never plays
+                    st.queued = NONE;
                 } else if st.playing == slot && st.held && st.queued == NONE {
                     st.queued = Q_STOP;
                     st.q_ticks = c.quant;
@@ -157,7 +133,7 @@ impl Core {
             }
             LaunchMode::Repeat => {
                 if st.queued == slot && st.q_after > f64::NEG_INFINITY {
-                    st.queued = NONE; // the pending retrigger
+                    st.queued = NONE;
                 }
                 st.held = false;
             }
@@ -165,7 +141,6 @@ impl Core {
         }
     }
 
-    /// Launching while stopped starts the transport in song mode from its position.
     fn launch_ensure_playing(&mut self) {
         if self.playing {
             return;
@@ -174,10 +149,9 @@ impl Core {
             self.mode_override = Some(true);
             self.launch.forced_song = true;
         }
-        self.play(); // a record count-in may hold it: the queue waits (q_immediate)
+        self.play();
     }
 
-    /// Every track back to the arrangement, immediately.
     fn launch_back(&mut self) {
         let at = self.launch.last_to;
         let mut any_rechase = false;
@@ -194,7 +168,6 @@ impl Core {
             any_rechase |= rechase;
             self.launch.tracks[t] = TrackRt { rechase, follow_n: st.follow_n, ..TrackRt::default() };
         }
-        // Arrangement audio clips spanning the playhead resume mid-clip (like after a locate).
         if any_rechase && self.playing && self.song_mode() {
             let pos = self.gen_cursor;
             for i in 0..self.program.audio_clips.len() {
@@ -213,9 +186,6 @@ impl Core {
         }
     }
 
-    // ── Transport hooks ──────────────────────────────────────────────────
-
-    /// Hook (play, after the transport started).
     pub(super) fn launch_play_started(&mut self) {
         if self.render_mode {
             return;
@@ -228,7 +198,6 @@ impl Core {
         }
     }
 
-    /// Hook (top of stop): every launch clip stops; overrides stay until backToArrangement.
     pub(super) fn launch_transport_stopped(&mut self) {
         if self.render_mode {
             return;
@@ -244,14 +213,11 @@ impl Core {
         self.launch.last_valid = false;
     }
 
-    /// Hook (`loop_bounds`): launch recording writes into the arrangement, so the song must run past its
-    /// last clip instead of wrapping at the song end (an empty song would wrap every bar).
     #[inline]
     pub(super) fn launch_extends_song(&self) -> bool {
         self.launch.rec_on
     }
 
-    /// Hook (pause): clips keep their state; a launch recording ends here.
     pub(super) fn launch_paused(&mut self) {
         if self.render_mode || !self.playing {
             return;
@@ -260,7 +226,6 @@ impl Core {
         self.launch.last_valid = false;
     }
 
-    /// Hook (end of apply_batch): drop state that points at vanished clips / tracks.
     pub(super) fn launch_applied(&mut self, reset: bool) {
         if self.render_mode {
             return;
@@ -280,7 +245,6 @@ impl Core {
                 continue;
             }
             if self.program.launcher.lane(t as u32).is_none() {
-                // The track is gone.
                 if st.playing != NONE {
                     self.launch_release_now(t as u32 | LAUNCH_OWNER);
                 }
@@ -304,7 +268,6 @@ impl Core {
         }
     }
 
-    /// Hook (publish, once per block): telemetry atomics.
     pub(super) fn launch_publish(&self) {
         let s = &self.shared.launch;
         let lp = &self.program.launcher;
@@ -337,10 +300,6 @@ impl Core {
         }
     }
 
-    // ── Sequencer ────────────────────────────────────────────────────────
-
-    /// Replaces `gen_events(from, to, …)` in `advance`: splits the window at
-    /// launcher transitions so arrangement and launch notes switch sample-accurately.
     pub(super) fn launch_gen(&mut self, from: f64, to: f64, base: f64, f: usize, n: usize, tpf: f64) {
         if self.render_mode || !self.launch_active() {
             self.gen_events(from, to, base, f, n, tpf);
@@ -381,9 +340,6 @@ impl Core {
         self.launch.last_valid = true;
     }
 
-    /// Next quantize boundary at or after `a` (song: bar grid on the song
-    /// position; pattern: grid on the clock since play start), strictly after
-    /// the launcher clock `after`.
     fn launch_boundary(&self, a: f64, q: f64, after: f64, song: bool) -> f64 {
         let ca = self.launch.clock;
         let mut t = if song {
@@ -403,9 +359,6 @@ impl Core {
         t
     }
 
-    /// Compute every track's next transition in [a, b); returns the earliest (or b).
-    /// `base` is the tick of the sub-block's current frame: unquantized launches
-    /// start there (the window runs half a frame ahead), so loops stay on the frame grid.
     fn launch_scan(&mut self, a: f64, b: f64, base: f64, song: bool) -> f64 {
         let ca = self.launch.clock;
         let now = a.max(base).min(b);
@@ -430,7 +383,6 @@ impl Core {
                     }
                 }
                 if !c.looping {
-                    // A follow action due at the very end wins over the plain stop.
                     let te = a + (c.length - st.gen_e).max(0.0);
                     if te < t - EPS {
                         t = te;
@@ -448,7 +400,6 @@ impl Core {
         tmin.max(a)
     }
 
-    /// Apply the transitions due at `tn` (frame `off` of this sub-block).
     fn launch_apply(&mut self, tn: f64, song: bool, off: u32) {
         for li in 0..self.program.launcher.lanes.len() {
             let tr = self.program.launcher.lanes[li].track as usize;
@@ -532,7 +483,6 @@ impl Core {
         }
     }
 
-    /// Release this track's sounding notes (arrangement + launcher) at frame `off`.
     fn launch_release_at(&mut self, tr: usize, off: u32) {
         let (a, l) = (tr as u32, tr as u32 | LAUNCH_OWNER);
         let mut i = 0;
@@ -547,7 +497,6 @@ impl Core {
         }
     }
 
-    /// Release an owner's notes right now (block start: commands, batches).
     fn launch_release_now(&mut self, owner: u32) {
         let mut i = 0;
         while i < self.pending_offs.len() {
@@ -563,7 +512,6 @@ impl Core {
         }
     }
 
-    /// Notes of every playing launch clip in [a, b) (no transition inside).
     fn launch_notes(&mut self, a: f64, b: f64, base: f64, f: usize, n: usize, tpf: f64) {
         if b <= a {
             return;
@@ -578,7 +526,6 @@ impl Core {
             }
             let st = self.launch.tracks[tr];
             let Some(c) = self.program.launcher.clip(st.playing).copied() else { continue };
-            // [ea, eb) chains exactly from window to window: each pass start / note is generated once.
             let ea = st.gen_e;
             let mut eb = ea + (b - a);
             self.launch.tracks[tr].gen_e = eb;
@@ -614,7 +561,6 @@ impl Core {
         }
     }
 
-    /// One pass of an audio launch clip, through the playlist audio-clip path.
     fn launch_audio(&mut self, c: &LaunchClipProg, owner: u32, pass_start: f64, at: f64, offset: u32) {
         let clip = AudioClipProg {
             start: pass_start,
@@ -631,9 +577,6 @@ impl Core {
         self.trigger_audio_clip(&clip, at, offset);
     }
 
-    /// Pattern notes with source ticks in [sa, sb) (the pattern repeats past
-    /// its length), at song tick `source + shift`; note-offs capped at `cap`.
-    /// Same swing / note fields as playlist pattern clips.
     #[allow(clippy::too_many_arguments)]
     fn launch_pattern_notes(&mut self, pslot: u32, owner: u32, sa: f64, sb: f64, shift: f64, cap: f64, base: f64, f: usize, n: usize, tpf: f64) {
         let (len, count) = match self.program.pattern(pslot) {
@@ -680,8 +623,6 @@ impl Core {
         }
     }
 
-    /// Hook (chase): audio launch clips resume mid-pass after a play start,
-    /// loop jump or locate (their notes were flushed).
     pub(super) fn launch_chase(&mut self, at: f64, f: usize) {
         if self.render_mode || self.program.launcher.clips.is_empty() {
             return;
@@ -704,14 +645,11 @@ impl Core {
                 continue;
             }
             let inpass = if c.looping { e.rem_euclid(c.length) } else { e };
-            // A pass that starts exactly here is triggered by launch_notes.
             if inpass > EPS && c.length - inpass > EPS {
                 self.launch_audio(&c, tr as u32 | LAUNCH_OWNER, at - inpass, at, f as u32);
             }
         }
     }
-
-    // ── Launch recording ─────────────────────────────────────────────────
 
     fn launch_close_span(&mut self, tr: usize, t: f64) {
         let st = self.launch.tracks[tr];
@@ -732,7 +670,6 @@ impl Core {
         }
     }
 
-    /// Open a span for every playing track without one (recording switched on, after a jump).
     fn launch_open_spans(&mut self, a: f64) {
         for li in 0..self.program.launcher.lanes.len() {
             let tr = self.program.launcher.lanes[li].track as usize;
@@ -752,7 +689,6 @@ impl Core {
         }
     }
 
-    /// Close every span and, if the transport ran while recording, send the event.
     fn launch_flush_record(&mut self) {
         if !self.launch.rec_on {
             return;

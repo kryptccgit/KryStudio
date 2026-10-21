@@ -1,7 +1,3 @@
-// Playlist clip painters. Pattern previews are rendered ONCE per
-// (pattern object, zoom, height, dpr) into an offscreen canvas and blitted
-// per clip instance (a pattern used 300× costs one render), research/06 §1.4.
-
 import type { Automation, AutomationPoint, Clip, Note, Pattern, Project } from '@shared/schema/project';
 import { patternLength } from '@shared/schema/project';
 import { PPQ, ticksToSeconds, type TimeSig } from '@shared/schema/time';
@@ -15,8 +11,6 @@ import { paintFades } from './fades';
 
 export const CLIP_HEADER_H = 13;
 export const CLIP_FONT = `10px ${FONT_MONO}`;
-
-// ── Source lookup ────────────────────────────────────────────────────
 
 export function clipColor(p: Project, c: Clip): string {
   if (c.color) return c.color;
@@ -41,10 +35,7 @@ export function samplePathForClip(p: Project, c: Clip): string | null {
   return sid ? p.samples[sid]?.path ?? null : null;
 }
 
-// ── Pattern preview cache ────────────────────────────────────────────
-
 const lenCache = new WeakMap<Pattern, { ts: TimeSig; len: number }>();
-/** patternLength() scans every note; clips share patterns, so memoize per (immutable) pattern object. */
 export function cachedPatternLength(pat: Pattern, ts: TimeSig): number {
   const c = lenCache.get(pat);
   if (c && c.ts === ts) return c.len;
@@ -102,7 +93,6 @@ function drawPatternNotes(ctx: CanvasRenderingContext2D, pn: PatNotes, len: numb
   }
 }
 
-/** Offscreen preview of one full pattern length at this zoom (null if too wide → draw directly). */
 function patternPreview(pat: Pattern, ts: TimeSig, px: number, h: number, dpr: number, color: string): PreviewCanvas | null {
   const len = cachedPatternLength(pat, ts);
   const wDev = Math.ceil(len * px * dpr);
@@ -127,8 +117,6 @@ function patternPreview(pat: Pattern, ts: TimeSig, px: number, h: number, dpr: n
   return c;
 }
 
-// ── Automation ───────────────────────────────────────────────────────
-
 const sortedCache = new WeakMap<Automation, AutomationPoint[]>();
 export function sortedPoints(a: Automation): AutomationPoint[] {
   let v = sortedCache.get(a);
@@ -145,24 +133,19 @@ export interface AutoOverride {
   activePointId?: string | null;
 }
 
-// ── Clip painter ─────────────────────────────────────────────────────
-
 export interface ClipPaintOpts {
   selected: boolean;
   glow: number;
   dpr: number;
   ts: TimeSig;
   bpm: number;
-  /** Override for an automation being edited (drag preview). */
   auto?: AutoOverride | null;
   hoverPointId?: string | null;
   ghost?: boolean;
   trackMuted?: boolean;
-  /** Label instead of the source name (take lanes: "Take 2"). */
   label?: string;
 }
 
-/** Draw one clip at the given screen rect (x/w may extend beyond the viewport). */
 export function paintClip(ctx: CanvasRenderingContext2D, p: Project, c: Clip, tv: TimeView, y: number, h: number, viewW: number, o: ClipPaintOpts): void {
   const x = tickToX(tv, c.start);
   const w = c.length * tv.pxPerTick;
@@ -191,9 +174,8 @@ export function paintClip(ctx: CanvasRenderingContext2D, p: Project, c: Clip, tv
     else if (c.kind === 'audio') paintAudioBody(ctx, p, c, tv, cTop, cH, vx0, vx1, color, o);
     else paintAutomationBody(ctx, p, c, tv, cTop, cH, vx0, vx1, color, o);
   }
-  if (c.kind === 'audio' && !o.ghost) paintFades(ctx, c, tv, top, hh, cTop, Math.max(0, cH), color); // fades.ts (Wave 12.2b)
+  if (c.kind === 'audio' && !o.ghost) paintFades(ctx, c, tv, top, hh, cTop, Math.max(0, cH), color);
 
-  // label
   const name = (o.label ?? clipName(p, c)) + (muted && c.mute ? ' (muted)' : '');
   const labelX = Math.max(x, 0) + 4;
   const room = x + w - labelX - 3;
@@ -213,7 +195,6 @@ export function paintClip(ctx: CanvasRenderingContext2D, p: Project, c: Clip, tv
     }
   }
 
-  // border
   ctx.fillStyle = o.selected ? '#FFFFFF' : rgba(color, 0.85);
   strokeRectCrisp(ctx, x, top, w, hh, o.dpr);
   ctx.globalAlpha = 1;
@@ -270,7 +251,6 @@ function paintAudioBody(ctx: CanvasRenderingContext2D, p: Project, c: Clip, tv: 
   const amp = (h / 2 - 1) * Math.min(2, c.gain ?? 1);
   const x0 = Math.max(Math.floor(vx0), Math.floor(tickToX(tv, c.start)));
   const x1 = Math.min(Math.ceil(vx1), Math.ceil(tickToX(tv, c.start + c.length)));
-  // Warp (2+ markers): content tick → beat → source seconds through the markers (shared/schema/warp.ts).
   const warp = c.channelId ? p.channels[c.channelId]?.generator.warp : undefined;
   const wm = warp && warp.markers.length >= 2 ? warp.markers : null;
   const srcSec = (t: number): number => (wm ? (beatToSec(wm, t / PPQ) ?? 0) : ticksToSeconds(t, o.bpm));
@@ -289,7 +269,6 @@ function paintAudioBody(ctx: CanvasRenderingContext2D, p: Project, c: Clip, tv: 
   if (warp?.markers.length) paintWarpTicks(ctx, c, tv, top, h, x0, x1, warp.markers);
 }
 
-/** Small ticks at the top and bottom edge of an audio clip where its warp markers sit (beat → tick). */
 function paintWarpTicks(ctx: CanvasRenderingContext2D, c: Clip, tv: TimeView, top: number, h: number, x0: number, x1: number, markers: Array<{ beat: number }>): void {
   const tick = Math.min(4, Math.max(2, h / 6));
   ctx.fillStyle = rgba(C.glow, 0.85);
@@ -297,14 +276,13 @@ function paintWarpTicks(ctx: CanvasRenderingContext2D, c: Clip, tv: TimeView, to
   for (const m of markers) {
     const x = Math.round(tickToX(tv, c.start + m.beat * PPQ - c.offset));
     if (x < x0 || x >= x1) continue;
-    if (x - last < 3) continue; // dense maps: one tick per 3 px
+    if (x - last < 3) continue;
     last = x;
     ctx.fillRect(x, top, 1, tick);
     ctx.fillRect(x, top + h - tick, 1, tick);
   }
 }
 
-/** Screen positions of an automation clip's points (within the clip's visible source window). */
 export function automationPointsXY(
   points: AutomationPoint[],
   c: Clip,

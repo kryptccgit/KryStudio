@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Renderer side of live input (MIDI + recording). Installed once at boot:
-//   - follows the selected channel → window.krypt.midi.setTarget (the
-//     engine plays incoming MIDI on it, research/06 §6.3),
-//   - mirrors main's record state, MIDI input list and MIDI-learn state into
-//     a small zustand store (low-rate; live LEDs read telemetry instead),
-//   - toasts each finished take once.
-// ──────────────────────────────────────────────────────────────────────
-
 import { create } from 'zustand';
 import type { MidiInputInfo } from '@shared/engine/protocol';
 import type { MidiLearnState, RecordState } from '@shared/types';
@@ -37,7 +28,6 @@ function syncTarget(): void {
   try {
     window.krypt.midi.setTarget(id);
   } catch {
-    /* fire-and-forget */
   }
 }
 
@@ -57,7 +47,6 @@ export function installLiveInput(): void {
   k.record
     .status()
     .then((s) => {
-      // An old take (before a renderer reload) is not toasted again.
       if (lastTakeId === null) lastTakeId = s.lastTake?.id ?? null;
       useLiveInput.setState({ record: s });
     })
@@ -65,7 +54,6 @@ export function installLiveInput(): void {
   k.record.onStatus(applyRecord);
   k.midi.onInputs((midiInputs) => useLiveInput.setState({ midiInputs }));
   k.midi.onLearn((learn) => useLiveInput.setState({ learn }));
-  // MIDI input plays the selected channel (falls back to the first channel).
   syncTarget();
   useUi.subscribe((s, prev) => {
     if (s.selectedChannelId !== prev.selectedChannelId) syncTarget();
@@ -73,7 +61,6 @@ export function installLiveInput(): void {
   useDocStore.subscribe((s, prev) => {
     if (s.project !== prev.project) syncTarget();
   });
-  // The engine (re)started: main re-sends the target itself; refresh ours and the device list.
   const refreshInputs = (): void =>
     void k.midi
       .inputs()
@@ -92,7 +79,6 @@ export function installLiveInput(): void {
     .catch(() => undefined);
 }
 
-/** Toggle record arm (transport button). */
 export async function toggleRecordArm(): Promise<void> {
   const armed = !useLiveInput.getState().record.armed;
   try {
@@ -107,7 +93,6 @@ export async function toggleRecordArm(): Promise<void> {
   }
 }
 
-/** "Link to controller…": wait for the next CC and link it to `paramRef`. */
 export async function linkToController(paramRef: string, label: string): Promise<void> {
   toast.info(`Move a knob, fader or pedal on your MIDI controller to link it to ${label}`);
   try {

@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Model Manager: the on-device audio ML models (stems, transcription, beat
-// tracking). Each model shows what it does, its size and speed, its licence
-// (+ link) and any licence notice, and its state: installed / available /
-// downloading (progress + cancel) / verifying / failed / unavailable. The
-// header says whether the analyzer runs, on which devices, and where the
-// models live.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, type ReactNode } from 'react';
 import {
   AlertTriangle,
@@ -224,7 +215,6 @@ export function ModelManager() {
   const s = useAnalyzer((x) => x.state);
   const busy = useAnalyzer((x) => x.busy);
 
-  // Fresh state whenever the panel opens.
   useEffect(() => {
     void refreshAnalyzer();
   }, []);

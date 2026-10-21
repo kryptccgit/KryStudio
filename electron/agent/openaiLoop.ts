@@ -1,8 +1,3 @@
-// The built-in chat on an OpenAI-compatible API: OpenAI (ChatGPT) and OpenRouter (shared/agent/providers.ts).
-// The same tool registry, agent identity and undo groups as the Anthropic loop (./loop.ts), over the Chat
-// Completions API with streamed text and function calls. Free of Electron imports so it can be tested against a
-// mock fetch; ./index.ts supplies the key.
-
 import type { ActionResult, AgentChatEvent } from '@shared/types';
 import { AGENT_PROVIDERS, type AgentProvider } from '@shared/agent/providers';
 import { MCP_CHANNELS, type MainDeps } from '../mcp/types';
@@ -13,7 +8,6 @@ import type { AgentCore } from './loop';
 const MAX_TURNS = 30;
 const MAX_RESULT_CHARS = 40_000;
 
-/** One Chat Completions message (the subset this loop sends). */
 export type ChatMessage =
   | { role: 'system' | 'user'; content: string }
   | { role: 'assistant'; content: string | null; tool_calls?: ChatToolCall[] }
@@ -29,11 +23,9 @@ export interface CompatConfig {
   provider: AgentProvider;
   key: string;
   model: string;
-  /** Extra request headers (OpenRouter's app attribution). */
   headers?: Record<string, string>;
 }
 
-/** The registry as Chat Completions function tools (deterministic order). */
 export function openAiTools(): Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }> {
   return TOOLS.map((def) => ({ type: 'function' as const, function: { name: def.name, description: def.description, parameters: inputJsonSchema(def) } }));
 }
@@ -47,7 +39,6 @@ class HttpError extends Error {
   }
 }
 
-/** A sentence for a failed request, per provider. */
 export function compatErrorMessage(provider: AgentProvider, model: string, err: unknown): string {
   const name = AGENT_PROVIDERS[provider].label;
   if (err instanceof HttpError) {
@@ -69,7 +60,6 @@ interface TurnResult {
   usage: { input: number; output: number; cost: number | null };
 }
 
-/** One streamed Chat Completions request: emits text deltas, assembles the tool calls. */
 export async function streamTurn(
   fetchFn: typeof fetch,
   cfg: CompatConfig,
@@ -89,7 +79,6 @@ export async function streamTurn(
       const j = (await res.json()) as { error?: { message?: string } };
       if (j?.error?.message) msg = j.error.message;
     } catch {
-      /* not JSON */
     }
     throw new HttpError(res.status, msg.slice(0, 300));
   }
@@ -159,7 +148,6 @@ export function createCompatCore(deps: MainDeps, getConfig: () => CompatConfig |
     try {
       deps.broadcast(MCP_CHANNELS.agentEvent, e);
     } catch {
-      /* the panel may be closed */
     }
   };
 
@@ -240,7 +228,6 @@ export function createCompatCore(deps: MainDeps, getConfig: () => CompatConfig |
     return { ok: false, message: `Stopped after ${MAX_TURNS} model steps.` };
   }
 
-  /** Every tool call in the history has an answer (so a cancelled turn never breaks the next request). */
   const closeDangling = (note: string) => {
     const last = messages[messages.length - 1];
     if (last?.role !== 'assistant' || !last.tool_calls?.length) return;

@@ -1,9 +1,3 @@
-//! krypt.imager — three-band stereo width. The side signal is split by an
-//! LR4 crossover tree and each band's width scaled; the mid signal passes
-//! through the identical allpass the tree applies to the band sum, so mid
-//! and side stay phase-aligned and the default (all widths 100%) only adds
-//! the crossover's allpass phase, with a flat magnitude. Zero latency.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::crossover::{Split3, Split3Allpass};
 use crate::blocks::{db_to_gain, Smooth};

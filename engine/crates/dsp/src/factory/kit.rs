@@ -1,9 +1,3 @@
-//! Shared building blocks for the transition / FX recipes (Wave 7b):
-//! detuned saw stacks, a cascade formant voice (vowels on a glottal-style
-//! source), a variable-speed tape reader, equal-power panning, reverse
-//! reverb swells and a tiny step sequencer for drum material. Offline only;
-//! everything is seeded, so renders are deterministic.
-
 use super::synth::*;
 
 pub(crate) use super::fx::{cut, shape, stereo_noise};
@@ -13,13 +7,11 @@ pub(crate) fn lerp(a: f32, b: f32, u: f32) -> f32 {
     a + (b - a) * u
 }
 
-/// Exponential interpolation (a, b > 0): frequency-like sweeps.
 #[inline]
 pub(crate) fn expi(a: f32, b: f32, u: f32) -> f32 {
     a * (b / a).powf(u.clamp(0.0, 1.0))
 }
 
-/// Equal-power pan of a mono buffer; `pan(i)` is 0 (left) … 1 (right).
 pub(crate) fn pan_mono(x: &[f32], pan: impl Fn(usize) -> f32) -> Chans {
     let mut l = vec![0.0f32; x.len()];
     let mut r = vec![0.0f32; x.len()];
@@ -31,7 +23,6 @@ pub(crate) fn pan_mono(x: &[f32], pan: impl Fn(usize) -> f32) -> Chans {
     vec![l, r]
 }
 
-/// Mono or stereo → stereo (copies the single channel).
 pub(crate) fn to_stereo(ch: Chans) -> Chans {
     if ch.len() >= 2 {
         ch
@@ -40,7 +31,6 @@ pub(crate) fn to_stereo(ch: Chans) -> Chans {
     }
 }
 
-/// Run a static or swept filter over each channel.
 pub(crate) fn sweep_ch(ch: &mut Chans, mode: SvfMode, q: f32, f: impl Fn(f32) -> f32 + Copy) {
     for c in ch.iter_mut() {
         sweep(c, mode, q, f);
@@ -49,9 +39,6 @@ pub(crate) fn sweep_ch(ch: &mut Chans, mode: SvfMode, q: f32, f: impl Fn(f32) ->
 
 pub(crate) use crate::blocks::filters::SvfMode;
 
-/// Detuned saw stack ("supersaw") playing `notes` (MIDI) with `voices`
-/// voices per note spread over ±`detune(u)` semitones, voices panned across
-/// the stereo field by `width`. `bend(u)` adds semitones to every voice.
 pub(crate) fn supersaw(notes: &[f32], n: usize, voices: usize, width: f32, seed: u32, detune: impl Fn(f32) -> f32, bend: impl Fn(f32) -> f32) -> Chans {
     let mut nz = Noise::new(seed);
     let nv = notes.len() * voices;
@@ -90,14 +77,12 @@ pub(crate) fn supersaw(notes: &[f32], n: usize, voices: usize, width: f32, seed:
     vec![l, r]
 }
 
-/// Vowel: formant centres (Hz) and bandwidths (Hz), F1..F5.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Vowel {
     pub f: [f32; 5],
     pub bw: [f32; 5],
 }
 
-// Average adult formant frequencies from the open phonetics literature.
 pub(crate) const AH: Vowel = Vowel { f: [760.0, 1150.0, 2600.0, 3400.0, 4100.0], bw: [80.0, 90.0, 120.0, 160.0, 200.0] };
 pub(crate) const OH: Vowel = Vowel { f: [480.0, 820.0, 2600.0, 3300.0, 4000.0], bw: [70.0, 80.0, 120.0, 160.0, 200.0] };
 pub(crate) const OO: Vowel = Vowel { f: [320.0, 800.0, 2350.0, 3200.0, 4000.0], bw: [60.0, 80.0, 120.0, 160.0, 200.0] };
@@ -115,7 +100,6 @@ impl Vowel {
         }
         v
     }
-    /// Scale every formant (vocal-tract length: > 1 smaller / younger voice).
     pub fn scale(mut self, k: f32) -> Vowel {
         for f in self.f.iter_mut() {
             *f *= k;
@@ -124,27 +108,17 @@ impl Vowel {
     }
 }
 
-/// Settings for one sung / spoken voice.
 pub(crate) struct Voice<'a> {
-    /// Pitch in Hz at time t (s), before vibrato and jitter.
     pub pitch: &'a dyn Fn(f32) -> f32,
-    /// Vowel at time t.
     pub vowel: &'a dyn Fn(f32) -> Vowel,
-    /// Voiced level at time t (0..1).
     pub amp: &'a dyn Fn(f32) -> f32,
-    /// Aspiration (breath) level at time t, relative to the voiced level.
     pub breath: &'a dyn Fn(f32) -> f32,
-    /// Vibrato depth (semitones) and rate (Hz); it fades in over `vib_in` s.
     pub vib: f32,
     pub vib_hz: f32,
     pub vib_in: f32,
     pub seed: u32,
 }
 
-/// Cascade formant synthesis: a band-limited glottal-style pulse (saw with
-/// jitter and shimmer, softened above ~5 kHz) plus phase-gated aspiration
-/// noise, through five cascaded 2-pole resonators (unity gain at DC, Q =
-/// F / bandwidth) — the classic vocal-tract model. Returns `n` samples.
 pub(crate) fn voice(v: &Voice, n: usize) -> Vec<f32> {
     let mut nz = Noise::new(v.seed);
     let mut ph = nz.unit() as f64;
@@ -170,12 +144,10 @@ pub(crate) fn voice(v: &Voice, n: usize) -> Vec<f32> {
         let f0 = (v.pitch)(t) * (vib / 12.0).exp2() * (1.0 + jit);
         let (p, dt) = step(&mut ph, f0);
         if p + dt >= 1.0 {
-            // a new glottal cycle: small random period / amplitude changes
             jit = nz.range(-0.004, 0.004);
             shim = 1.0 + nz.range(-0.04, 0.04);
         }
         let pulse = -saw(p, dt) * shim;
-        // aspiration is louder while the glottis is open (first part of the cycle)
         let gate = if p < 0.55 { 1.0 } else { 0.35 };
         let asp = tick(&mut breath_hp, nz.white()) * gate;
         let src = tick(&mut soft, pulse) * (v.amp)(t) + asp * (v.breath)(t);
@@ -186,13 +158,10 @@ pub(crate) fn voice(v: &Voice, n: usize) -> Vec<f32> {
         out[i] = y;
     }
     hp(&mut out, 70.0);
-    // presence, as a vocal chain would add (the all-pole tract is dark above F3)
     eq(&mut out, HighShelf, 2800.0, 0.7, 5.0);
     out
 }
 
-/// Run any source through the five-formant cascade (`vowel(t)`), e.g. a saw
-/// chord for vocoder-style "talking synth" blips.
 pub(crate) fn formants(x: &[f32], vowel: impl Fn(f32) -> Vowel) -> Vec<f32> {
     let mut res: Vec<crate::blocks::filters::Svf> = (0..5).map(|_| svf(LP, 1000.0, 1.0)).collect();
     let mut out = vec![0.0f32; x.len()];
@@ -214,7 +183,6 @@ pub(crate) fn formants(x: &[f32], vowel: impl Fn(f32) -> Vowel) -> Vec<f32> {
     out
 }
 
-/// Constant-ish settings helper for `voice`.
 pub(crate) fn sung(n: usize, note: f32, vowel: Vowel, attack: f32, release_at: f32, release: f32, breath: f32, seed: u32) -> Vec<f32> {
     let f = hz(note);
     let len = n as f32 / SR;
@@ -234,7 +202,6 @@ pub(crate) fn sung(n: usize, note: f32, vowel: Vowel, attack: f32, release_at: f
     )
 }
 
-/// Cubic (Hermite) read of `x` at fractional index `pos` (0 outside).
 #[inline]
 pub(crate) fn read_cubic(x: &[f32], pos: f64) -> f32 {
     let i = pos.floor() as isize;
@@ -247,10 +214,6 @@ pub(crate) fn read_cubic(x: &[f32], pos: f64) -> f32 {
     ((c3 * f + c2) * f + c1) * f + y1
 }
 
-/// Variable-speed playback (tape / turntable): `speed(u)` is the playback
-/// speed at output position u = 0..1 (1 = normal). Pitch and time fall
-/// together; level follows the playback head (∝ speed^`lvl`) and a low pass
-/// tracks the speed (head losses, and it removes interpolation images).
 pub(crate) fn varispeed(src: &Chans, n: usize, lvl: f32, speed: impl Fn(f32) -> f32) -> Chans {
     let mut out: Chans = src.iter().map(|_| vec![0.0f32; n]).collect();
     let mut pos = 0.0f64;
@@ -276,18 +239,13 @@ pub(crate) fn varispeed(src: &Chans, n: usize, lvl: f32, speed: impl Fn(f32) -> 
     out
 }
 
-/// Reverse-reverb swell: `src` through a 100% wet reverb, reversed, so the
-/// tail swells into the very last of `n` samples; `dry` mixes in the
-/// reversed dry source (its attack lands on the end).
 pub(crate) fn reverse_swell(src: &Chans, r: &Rev, n: usize, dry: f32) -> Chans {
     let wet = reverb_wet(src, r, n as f32 / SR + 0.2);
     let mut out = to_stereo(wet);
-    // the dry source decays over its length, so reversed it grows into its attack
     let mut s2 = to_stereo(src.clone());
     shape(&mut s2, |u| (1.0 - u).powi(2));
     add_ch(&mut out, &s2, dry, 0);
     even(&mut out);
-    // first audible sample of the wet+dry sum goes on the last sample
     let pk = peak_ch(&out).max(1e-9);
     let first = out.iter().map(|c| c.iter().position(|v| v.abs() > pk * 1e-3).unwrap_or(0)).min().unwrap_or(0);
     for c in out.iter_mut() {
@@ -295,19 +253,15 @@ pub(crate) fn reverse_swell(src: &Chans, r: &Rev, n: usize, dry: f32) -> Chans {
         c.resize(n, 0.0);
         c.reverse();
     }
-    // a long hall peaks a few hundred ms after its onset; a gentle ramp keeps
-    // the loudest point on the end (where the source's attack lands)
     shape(&mut out, |u| db(-24.0 * (1.0 - u).powf(0.8)));
     out
 }
 
-/// Sample position of a 16th step at 128 BPM.
 #[inline]
 pub(crate) fn s16(step: f32) -> usize {
     (step * BAR as f32 / 16.0).round() as usize
 }
 
-/// A plucked saw/square note: filter envelope + amp decay.
 pub(crate) fn pluck(note: f32, len_s: f32, decay_s: f32, bright: f32, seed: u32) -> Vec<f32> {
     let n = ns(len_s);
     let mut nz = Noise::new(seed);
@@ -329,8 +283,6 @@ pub(crate) fn pluck(note: f32, len_s: f32, decay_s: f32, bright: f32, seed: u32)
     out
 }
 
-/// Exponential pitch glide oscillator mix (sine + `harm` × a soft square),
-/// frequency `f(t)` (Hz), amplitude `a(t)`.
 pub(crate) fn tone(n: usize, harm: f32, f: impl Fn(f32) -> f32, a: impl Fn(f32) -> f32) -> Vec<f32> {
     let mut ph = 0.0f64;
     let mut out = vec![0.0f32; n];

@@ -1,10 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Session view verbs. Grid edits are doc commands (`session.*`, launcher-app's
-// shared/commands/session.ts) through dispatch(); playback goes through
-// window.krypt.session. Every failure ends in a toast: dispatch() toasts
-// failed commands itself, report() toasts failed runtime calls.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { Id } from '@shared/schema/project';
 import type { FollowRule, LaunchClip, LaunchQuant } from '@shared/schema/launcher';
 import type { ActionResult } from '@shared/types';
@@ -12,8 +5,6 @@ import { dispatch, getProject, withGroup } from '../../doc/store';
 import { report, toast } from '../../app/notify';
 import { flashHint } from '../../app/hints';
 import { firstEmptyScene, nameFromPath } from './model';
-
-// ── Runtime (window.krypt.session) ────────────────────────────────────
 
 async function runtime(what: string, fn: () => Promise<ActionResult>): Promise<boolean> {
   try {
@@ -24,7 +15,6 @@ async function runtime(what: string, fn: () => Promise<ActionResult>): Promise<b
   }
 }
 
-/** Launch a clip; `release` = mouse / key up for gate and repeat clips. */
 export function launchClip(clipId: Id, release?: boolean): Promise<boolean> {
   return runtime(release ? 'Release clip' : 'Launch clip', () => window.krypt.session.launch(clipId, release));
 }
@@ -33,7 +23,6 @@ export function launchScene(sceneId: Id): Promise<boolean> {
   return runtime('Launch scene', () => window.krypt.session.launchScene(sceneId));
 }
 
-/** Stop one track's launch clip (quantized) or every track (null). */
 export function stopTrack(trackId: Id | null): Promise<boolean> {
   return runtime(trackId ? 'Stop track' : 'Stop all clips', () => window.krypt.session.stop(trackId));
 }
@@ -55,9 +44,6 @@ export async function setLaunchRecord(on: boolean): Promise<boolean> {
   return ok;
 }
 
-// ── Doc edits (session.* commands) ────────────────────────────────────
-// Arg names follow research/16 §2.1 and shared/commands/session.ts.
-
 export async function addScene(index?: number): Promise<Id | null> {
   const r = await dispatch<{ id: Id }>('session.addScene', index === undefined ? {} : { index });
   return r.ok && r.data ? r.data.id : null;
@@ -76,12 +62,9 @@ export async function moveScene(id: Id, toIndex: number): Promise<boolean> {
 }
 
 export type ClipPatch = Partial<Pick<LaunchClip, 'length' | 'offset' | 'loop' | 'launchMode' | 'gain'>> & {
-  /** null = back to the pattern / channel name. */
   name?: string | null;
   color?: string | null;
-  /** null = back to the global quantize. */
   quantize?: LaunchQuant | null;
-  /** null = no follow action. */
   follow?: FollowRule | null;
 };
 
@@ -93,7 +76,6 @@ export async function removeClip(id: Id): Promise<boolean> {
   return (await dispatch('session.removeClip', { id })).ok;
 }
 
-/** Move (or copy) a clip to another slot; an occupied target is replaced by the command. */
 export async function moveClip(id: Id, trackId: Id, sceneId: Id, copy: boolean): Promise<boolean> {
   return (await dispatch('session.moveClip', { id, trackId, sceneId, copy })).ok;
 }
@@ -102,7 +84,6 @@ export async function setGlobalQuantize(quantize: LaunchQuant): Promise<boolean>
   return (await dispatch('session.setQuantize', { quantize })).ok;
 }
 
-/** Scenes from the arrangement: one per marker section, or every `barsPerScene` bars when the song has no markers. */
 export async function fromArrangement(barsPerScene?: number): Promise<boolean> {
   const r = await dispatch<{ sceneIds?: string[]; clips?: number }>('session.fromArrangement', barsPerScene ? { barsPerScene } : {});
   if (r.ok) {
@@ -132,7 +113,6 @@ export async function setClipFromChannel(trackId: Id, sceneId: Id, channelId: Id
   return r.ok && r.data ? r.data.id : null;
 }
 
-/** Probe a file's length (frames) like the playlist does; {} when the engine can't read it. */
 async function probe(path: string): Promise<{ frames?: number; sampleRate?: number; channels?: number }> {
   try {
     const r = await window.krypt.engine.sampleInfo(path);
@@ -144,16 +124,11 @@ async function probe(path: string): Promise<{ frames?: number; sampleRate?: numb
   return {};
 }
 
-/** A new audio-clip channel for a sample already in the pool (same path as the playlist's audio drop). */
 async function newAudioClipChannel(sampleId: Id, name: string, groupId: string): Promise<Id | null> {
   const c = await dispatch<{ id: Id }>('channels.add', { type: 'krypt.audioclip', sampleId, name: name.slice(0, 64) }, { groupId });
   return c.ok && c.data ? c.data.id : null;
 }
 
-/**
- * An audio file (browser / Explorer) into a slot: pool sample → its own audio-clip channel (and mixer insert)
- * → the launch clip. One undo step.
- */
 export async function setClipFromSample(trackId: Id, sceneId: Id, path: string, name?: string): Promise<Id | null> {
   const label = (name ?? nameFromPath(path)).replace(/\.[a-z0-9]+$/i, '');
   const info = await probe(path);
@@ -168,10 +143,6 @@ export async function setClipFromSample(trackId: Id, sceneId: Id, path: string, 
   return id;
 }
 
-/**
- * A Channel Rack row dropped on a slot: an audio-clip channel plays as itself; a sampler's sample gets its own
- * audio-clip channel; instruments without audio play from patterns, so say so.
- */
 export async function setClipFromChannelDrag(trackId: Id, sceneId: Id, channelId: Id): Promise<Id | null> {
   const p = getProject();
   const ch = p?.channels[channelId];
@@ -192,7 +163,6 @@ export async function setClipFromChannelDrag(trackId: Id, sceneId: Id, channelId
   });
 }
 
-/** Playlist clip menu → "Send to Session view": its track's first empty slot (a new scene when the column is full). */
 export async function sendPlaylistClipToSession(clipId: Id): Promise<boolean> {
   const p = getProject();
   const c = p?.playlist.clips[clipId];

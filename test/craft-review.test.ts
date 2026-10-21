@@ -1,9 +1,3 @@
-// review_song's pure checks (electron/mcp/tools/craftReview.ts) on synthetic
-// analyses and projects built through the real commands: loudness, peaks,
-// bands, stereo, the master chain, sidechains, sections / markers, length,
-// phrase lengths, energy contrast and shape, static loops, transitions at
-// boundaries, intro / ending, bare instruments, flat hats, robotic drums,
-// out-of-key notes; ranking, the 10-issue cap and the score.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost } from '@shared/doc/DocHost';
@@ -71,14 +65,12 @@ function analysis(over: Partial<Analysis> = {}): Analysis {
   };
 }
 
-/** A project built through the real commands (120 bpm: one bar = 2 s). */
 function project() {
   const doc = new DocHost(createDefaultProject('Review'), CATALOG, { strict: true });
   doc.exec('transport.set', { bpm: 120 }, USER);
   const p = () => doc.project;
   const ch = (name: string) => p().channelOrder.find((id) => p().channels[id].name === name)!;
   const track = (i: number) => p().playlist.trackOrder[i];
-  /** A pattern from KPN lines (channel names must exist). */
   const pattern = (name: string, kpn: string): string => {
     const r = parse(kpn, { ts: p().transport.timeSig, drumKey: () => 60 });
     if (!r.ok) throw new Error(JSON.stringify(r.errors));
@@ -102,17 +94,13 @@ function input(doc: DocHost, over: Partial<ReviewInput> = {}): ReviewInput {
 
 const checks = (r: ReturnType<typeof reviewSong>) => r.issues.map((x) => x.check);
 
-// ── Unit helpers ────────────────────────────────────────────────────────
-
 test('kindOf, rangeLoudness and staticRuns', () => {
   assert.deepEqual(['Intro', 'Pre-Chorus', 'Drop 2', 'Breakdown', 'Break', 'Build up', 'Hook', 'Outro', 'Verse 1', 'Bridge', 'Mystery'].map(kindOf), ['intro', 'pre', 'drop', 'breakdown', 'break', 'build', 'hook', 'outro', 'verse', 'bridge', null]);
-  // 120 bpm: 2 s per bar; bars 1-4 = seconds 0-8 (the first 1.5 s skipped on a long section).
   const curve = [-30, -30, -20, -20, -20, -20, -20, -20, -8, -8, -8, -8, -8, -8, -8, -8];
-  assert.equal(rangeLoudness(curve, 120, 0, 0, 4 * BAR), -20.6); // seconds 1-7: one -30 and six -20, power-averaged
+  assert.equal(rangeLoudness(curve, 120, 0, 0, 4 * BAR), -20.6);
   assert.equal(rangeLoudness(curve, 120, 0, 4 * BAR, 8 * BAR), -8);
   assert.equal(rangeLoudness([], 120, 0, 0, BAR), null);
   const bar = (sig: string): BarInfo => ({ sig, drumSig: '', channels: new Set(), notes: sig ? 1 : 0, lastBeatNotes: 0, audio: 0, automation: 0 });
-  // A 2-bar loop for 12 bars, then 4 different bars: one run of 12 (> 8).
   const bars = [...Array.from({ length: 12 }, (_, i) => bar(i % 2 ? 'b' : 'a')), bar('c'), bar('d'), bar('e'), bar('f')];
   assert.deepEqual(staticRuns(bars, 8), [{ start: 0, end: 12, period: 2 }]);
   assert.deepEqual(staticRuns(bars, 12), []);
@@ -133,13 +121,10 @@ test('sections from markers, else inferred where the playing channels change; tr
   marker(9, 'Drop');
   heard = collectHeard(doc.project, 0, 16 * BAR);
   assert.deepEqual(sectionsOf(doc.project, { start: 0, end: 16 * BAR }, heard).map((s) => [s.name, s.kind]), [['Intro', 'intro'], ['Drop', 'drop']]);
-  // A fill in the bar before the boundary counts.
   const fill = pattern('Fill', 'Hat: xxxx xxxx xxxx xxxx');
   doc.exec('playlist.addClip', { kind: 'pattern', trackId: doc.project.playlist.trackOrder[2], start: 7 * BAR, length: BAR, patternId: fill }, USER);
   assert.match(transitionAt(doc.project, collectHeard(doc.project, 0, 16 * BAR), 8 * BAR) ?? '', /pattern "Fill"|drum variation/);
 });
-
-// ── Mix ─────────────────────────────────────────────────────────────────
 
 test('mix checks: loudness vs target (fix = the master limiter), peaks / clipping, band balance, stereo, bare master, ranking and score', () => {
   const { doc, pattern, place } = project();
@@ -165,7 +150,6 @@ test('mix checks: loudness vs target (fix = the master limiter), peaks / clippin
   assert.ok(r.score >= 0 && r.score <= 100 - r.issues.reduce((s, x) => s + SEVERITY_WEIGHT[x.severity], 0) + 0);
   assert.ok(r.score < ok.score);
 
-  // No analysis (the render failed): mix checks are skipped, the rest still runs.
   const none = reviewSong(input(doc, { analysis: null }));
   assert.ok(!checks(none).includes('lufs'));
   assert.ok(none.skipped.some((s) => /loudness/.test(s)));
@@ -188,12 +172,10 @@ test('sidechain: a part the playbook ducks under the kick must be sidechained', 
   assert.ok(after.works.some((w) => /Sidechain in place: Bass/.test(w)) || after.works.length === 4);
 });
 
-// ── Arrangement ─────────────────────────────────────────────────────────
-
 test('arrangement: length vs targets, odd phrase lengths, static loops, missing transitions (with the planned kinds), silent intro, abrupt end', () => {
   const { doc, pattern, place, marker } = project();
   const loop = pattern('Loop', 'Kick: x... x... x... x...\nHat: x.x. x.x. x.x. x.x.');
-  place(loop, 3, 22); // two silent bars, then a 1-bar loop for 20 bars
+  place(loop, 3, 22);
   marker(1, 'Intro');
   marker(9, 'Drop');
   marker(15, 'Break');
@@ -213,7 +195,6 @@ test('arrangement: length vs targets, odd phrase lengths, static loops, missing 
   assert.match(by.intro.problem, /opens with 2 silent bars/);
   assert.match(by.ending.problem, /stops abruptly at full energy/);
 
-  // An FX clip ending on the boundary (a riser) is a transition; an outro marker fixes the ending check.
   const ch = doc.exec<{ clipId: string; channelId: string }>('playlist.addAudio', { path: 'factory:fx/riser-4.wav', name: 'Riser', trackId: doc.project.playlist.trackOrder[3], start: 4 * BAR, frames: 48000 * 8, sampleRate: 48000 }, USER).data!;
   doc.exec('playlist.updateClips', { updates: [{ id: ch.clipId, start: 4 * BAR, length: 4 * BAR }] }, USER);
   marker(19, 'Outro');
@@ -234,7 +215,6 @@ test('energy: flat sections are flagged (contrast and the planned shape); a quie
   assert.equal(by.contrast.severity, 'high');
   assert.match(by.contrast.problem, /Flat energy: every section sits at about -9 LUFS/);
   assert.equal(by.shape, undefined, 'no second issue for the same flatness');
-  // Enough contrast, but the wrong way round: the drop is quieter than the intro.
   const inverted = reviewSong(input(doc, { analysis: analysis({ energyCurve: [...Array.from({ length: 16 }, () => -8), ...Array.from({ length: 16 }, () => -16)] }) }));
   const shape = inverted.issues.find((x) => x.check === 'shape')!;
   assert.equal(shape.severity, 'high');
@@ -244,8 +224,6 @@ test('energy: flat sections are flagged (contrast and the planned shape); a quie
   assert.equal(good.metrics.contrastLu, 8);
   assert.deepEqual(good.sections.map((s) => s.lufs), [-16, -8]);
 });
-
-// ── Sound and performance ───────────────────────────────────────────────
 
 test('sound: bare default synths (fix = load_preset), flat hats and robotic drums (fix = the groove op), out-of-key notes and low clashes', () => {
   const { doc, pattern, place } = project();
@@ -261,7 +239,6 @@ test('sound: bare default synths (fix = load_preset), flat hats and robotic drum
   assert.match(by.key.fix, /"op":"scale_snap","key":"Fm"/);
   assert.match(by.clash.problem, /Low-register clash/);
 
-  // A playbook that swings: on-grid drums with no swing are robotic; the fix is the groove op (or set_swing).
   const swingPb: Playbook = { ...PB, id: 'lofi', name: 'Lo-fi', swing: 25 };
   const lofi = reviewSong(input(doc, { playbook: swingPb, genre: 'lofi', targets: swingPb.targets }));
   const g = lofi.issues.find((x) => x.check === 'groove')!;
@@ -284,8 +261,6 @@ test('generic targets without a playbook; at most 10 issues; 2-4 "what works" li
   const clean = reviewSong(input(doc, { playbook: null, targets: GENERIC_TARGETS, genre: null }));
   assert.ok(clean.works.length >= 2 && clean.works.length <= 4, clean.works.join(' | '));
 });
-
-// ── Against a reference song (study_reference) ──────────────────────────
 
 test('reference: tonal balance and width against the song, the energy shape over time, and what already matches', () => {
   const { doc, pattern, place } = project();
@@ -318,7 +293,6 @@ test('reference: tonal balance and width against the song, the energy shape over
   assert.ok(!close.issues.some((x) => x.check.startsWith('ref-')));
   assert.ok(close.works.some((w) => /Tonal balance within 3 dB of the reference "Night Drive"/.test(w)) || close.works.length === 4, close.works.join(' | '));
   assert.ok(off.score < close.score);
-  // A partial render (a bar range) doesn't judge the shape; no reference, no reference checks.
   assert.ok(!reviewSong(input(doc, { reference: cmp({ corr: -0.5, partial: true }) })).issues.some((x) => x.check === 'ref-shape'));
   assert.ok(!reviewSong(input(doc)).issues.some((x) => x.check.startsWith('ref-')));
 });

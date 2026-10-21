@@ -1,10 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Transport bar: play/pause/stop, pattern ↔ song, the active pattern, tempo,
-// swing, metronome, the BBT position (direct DOM writes from the frame loop),
-// master volume, CPU, engine status, typing keyboard, undo/redo and the AI
-// activity light.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, useState } from 'react';
 import { Bot, Keyboard, Metronome, Pause, Play, Redo2, Square, Undo2 } from 'lucide-react';
 import { formatBBT, ticksToSeconds } from '@shared/schema/time';

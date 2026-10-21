@@ -1,13 +1,3 @@
-// get_playbook's recipe (owned by craft-tools): a genre playbook
-// (shared/playbooks) turned into a step-by-step build for THIS project:
-// the chosen tempo / key / swing, each part with a RESOLVED sound (a preset,
-// or for drums the best factory sample), the KPN starting points, the
-// arrangement in absolute bars, transitions per boundary, the mix plan with
-// resolved chain presets, the mistakes, the targets review_song checks, and
-// a numbered BUILD ORDER of exact tool calls. Pure (no I/O): craft.ts feeds
-// it the presets, the factory index, the project's channel names and the
-// library focus. research/10-sound-and-craft.md.
-
 import type { Playbook, PlaybookPart, PlaybookSection, PlaybookTargets, SectionKind, TransitionKind } from '@shared/playbooks/types';
 import type { ChainPreset, ChainRole, FactorySample, InstrumentPreset, Preset, SampleKind } from '@shared/sounds/types';
 import { rankPresets, rankSamples } from '@shared/sounds/select';
@@ -18,24 +8,19 @@ import { GROOVE_IDS } from '@shared/grooves/apply';
 import type { AdaptedPlaybook, ReferenceBrief } from '@shared/reference';
 import { feelLine, FEEL_ROLES } from '@shared/reference';
 
-// ── Genre ───────────────────────────────────────────────────────────────
-
 export type GenreSource = 'argument' | 'project' | 'brief' | 'reference' | 'focus';
 
 export interface GenreChoice {
   id: GenreId | null;
   source: GenreSource | null;
-  /** What was asked for when it isn't a genre Krypt Studio knows ("polka"). */
   unknown: string | null;
 }
 
-/** A genre id from a name, an alias or free text ("dark uk drill" → drill). */
 export function genreFrom(text: string | null | undefined): GenreId | null {
   if (!text?.trim()) return null;
   return resolveGenre(text) ?? genreInText(text);
 }
 
-/** The argument, else the project's genre, else the brief, else the reference song's closest genre, else the library focus (its name and brief). */
 export function chooseGenre(input: { arg?: string | null; projectGenre?: string | null; brief?: string | null; referenceGenre?: string | null; focusText?: string | null }): GenreChoice {
   if (input.arg?.trim()) {
     const id = genreFrom(input.arg);
@@ -62,9 +47,6 @@ export const SOURCE_WORDS: Record<GenreSource, string> = {
   focus: 'from the library focus',
 };
 
-// ── The user's own references (library style focus) ─────────────────────
-
-/** The numbers of a style focus that override the playbook ("your references say …"). */
 export interface FocusNumbers {
   name: string;
   analysed: number;
@@ -95,7 +77,6 @@ export function focusNumbers(name: string, p: StyleProfile): FocusNumbers | null
   return f;
 }
 
-/** "at 140 bpm" and "in F#m" / "F#m" from the user's words. */
 export function briefNumbers(brief: string | null | undefined): { bpm: number | null; key: string | null } {
   const t = brief ?? '';
   const b = /\b(\d{2,3}(?:\.\d+)?)\s*bpm\b/i.exec(t);
@@ -110,22 +91,15 @@ export function briefNumbers(brief: string | null | undefined): { bpm: number | 
   return { bpm, key };
 }
 
-// ── Groove (transform_notes op "groove": real drummers' timing and accents) ─
-
 export interface GroovePlan {
   template: string;
-  /** Timing 0..1 of the template's offsets. */
   amount: number;
-  /** 0..1: how strongly its accents shape velocities. */
   velocity: number;
-  /** Also groove the bass and keys / chords (genres that swing). */
   melodic: boolean;
-  /** The playbook's own list of parts to groove (e.g. only the hats in trap), when it gives one. */
   parts?: string[];
   source: 'playbook' | 'genre';
 }
 
-/** Per-genre starting points when the playbook names no groove. */
 const GENRE_GROOVE: Partial<Record<GenreId, Omit<GroovePlan, 'source'>>> = {
   'boom-bap': { template: 'hiphop', amount: 0.8, velocity: 0.6, melodic: true },
   lofi: { template: 'hiphop', amount: 0.9, velocity: 0.6, melodic: true },
@@ -151,10 +125,6 @@ const unit = (x: unknown, d: number): number => (typeof x === 'number' && Number
 
 const DRUM_ROLES = new Set(['kick', 'snare', 'clap', 'hat', 'openhat', 'ride', 'crash', 'perc', 'tom']);
 
-/**
- * The groove to apply: the playbook's own (its optional `groove` field: {template, amount, velocity, parts}, or
- * just a template id), else the genre's starting point. Only templates that exist are returned.
- */
 export function grooveFor(pb: Playbook | null, genre: GenreId | null): GroovePlan | null {
   const raw = pb ? (pb as unknown as { groove?: unknown }).groove : undefined;
   const swings = !!pb && pb.swing >= 15;
@@ -182,20 +152,14 @@ export function grooveFor(pb: Playbook | null, genre: GenreId | null): GroovePla
   return null;
 }
 
-// ── Sounds ──────────────────────────────────────────────────────────────
-
 export interface ResolvedSound {
   kind: 'sample' | 'preset' | 'none';
-  /** Preset id ('factory:lead/…') for presets; the sample path for samples. */
   ref: string | null;
   name: string | null;
-  /** Instrument plugin of a preset. */
   plugin?: string;
-  /** The preset brings its own insert chain. */
   hasFx?: boolean;
 }
 
-/** Older kit paths every install has, by sample kind (the fallback when the factory index is missing). */
 const LEGACY_KIT: Partial<Record<SampleKind, string>> = {
   kick: 'factory:drums/kick.wav',
   snare: 'factory:drums/snare.wav',
@@ -217,29 +181,22 @@ function chainPresets(presets: readonly Preset[]): ChainPreset[] {
   return presets.filter((p): p is ChainPreset => p.kind === 'chain');
 }
 
-/** How get_playbook picks sounds in the app: the same helpers load_preset and write_pattern use (instruments.ts). */
 export interface SoundPicker {
-  /** Best factory drum sample for a part, or null. */
   drum(part: PlaybookPart, genre: GenreId | null): FactorySample | null;
-  /** Best playable instrument preset for a part, or null. */
   preset(part: PlaybookPart, genre: GenreId | null): InstrumentPreset | null;
 }
 
-/** The pure fallback picker (rankSamples / rankPresets), for callers without the app's sound library. */
 export function plainPicker(presets: readonly Preset[], samples: readonly FactorySample[] | null): SoundPicker {
   return {
     drum: (part, genre) => (part.sample && samples?.length ? (rankSamples(samples, { kind: part.sample, genre: genre ?? undefined, tags: part.tags }, 1)[0] ?? null) : null),
-    // Without the app's sound library nothing says a sound pack is installed: pack presets (requires) are skipped.
     preset: (part, genre) => rankPresets(instrumentPresets(presets).filter((p) => !p.requires), { role: part.role, kind: 'instrument', genre: genre ?? undefined, tags: part.tags }, 1)[0] ?? null,
   };
 }
 
-/** The legacy kit file for a part (every install has it): by its sample kind, else its role (an 808 part → 808.wav). */
 function legacyFor(part: Pick<PlaybookPart, 'role' | 'sample'>): string | undefined {
   return (part.sample ? LEGACY_KIT[part.sample] : undefined) ?? LEGACY_KIT[part.role as SampleKind];
 }
 
-/** The sound a part gets: drums with a sample kind → the best factory sample; else the best preset for its role; else the legacy kit. */
 export function resolvePart(part: PlaybookPart, genre: GenreId | null, pick: SoundPicker): ResolvedSound {
   if (part.sample) {
     const s = pick.drum(part, genre);
@@ -256,18 +213,12 @@ export function resolveChain(role: ChainRole, genre: GenreId | null, presets: re
   return rankPresets(chainPresets(presets), { role, kind: 'chain', genre: genre ?? undefined, tags }, 1)[0] ?? null;
 }
 
-// ── Arrangement ─────────────────────────────────────────────────────────
-
 export interface PlacedSection extends PlaybookSection {
-  /** 1-based first bar. */
   start: number;
-  /** 1-based last bar (inclusive). */
   end: number;
-  /** Unique display label (duplicates get a number). */
   name: string;
 }
 
-/** Sections laid end to end from bar 1. */
 export function placeSections(sections: readonly PlaybookSection[]): PlacedSection[] {
   const out: PlacedSection[] = [];
   const seen = new Map<string, number>();
@@ -283,7 +234,6 @@ export function placeSections(sections: readonly PlaybookSection[]): PlacedSecti
   return out;
 }
 
-/** Default length (bars) of a transition kind leading into a section, given the section before it. */
 export function transitionLength(kind: TransitionKind | string, prevBars: number): number | undefined {
   switch (kind) {
     case 'riser':
@@ -301,7 +251,6 @@ export function transitionLength(kind: TransitionKind | string, prevBars: number
 }
 
 export interface BoundaryPlan {
-  /** 1-based bar the next section starts on. */
   at: number;
   from: string;
   to: string;
@@ -314,7 +263,6 @@ export function boundaries(sections: readonly PlacedSection[]): BoundaryPlan[] {
   return out;
 }
 
-/** add_transition calls for the boundaries, one per kind + length (several bars per call). */
 export function transitionCalls(sections: readonly PlacedSection[]): Array<{ kind: string; at_bars: number[]; length_bars?: number }> {
   const byKey = new Map<string, { kind: string; at_bars: number[]; length_bars?: number }>();
   for (let i = 1; i < sections.length; i++) {
@@ -329,9 +277,6 @@ export function transitionCalls(sections: readonly PlacedSection[]): Array<{ kin
   return [...byKey.values()];
 }
 
-// ── Generic recipe (no playbook for the genre yet) ──────────────────────
-
-/** review_song's targets when no playbook applies. */
 export const GENERIC_TARGETS: PlaybookTargets = {
   lufs: -10,
   truePeakDb: -1,
@@ -343,7 +288,6 @@ export const GENERIC_TARGETS: PlaybookTargets = {
   minHatVelocitySpread: 5,
 };
 
-/** Relative energy of a section kind when no playbook says (review_song's energy-shape check). */
 export const KIND_ENERGY: Record<SectionKind, number> = {
   intro: 0.3,
   verse: 0.55,
@@ -358,7 +302,6 @@ export const KIND_ENERGY: Record<SectionKind, number> = {
   outro: 0.35,
 };
 
-/** A plain, genre-neutral song plan for genres without a playbook (wording marks it as generic). */
 export function genericPlaybook(genre: GenreId | null): Playbook {
   const name = genre ? genreInfo(genre).name : 'Song';
   return {
@@ -402,31 +345,19 @@ export function genericPlaybook(genre: GenreId | null): Playbook {
   };
 }
 
-// ── The recipe ──────────────────────────────────────────────────────────
-
 export interface RecipeContext {
   genre: GenreId | null;
   source: GenreSource | null;
-  /** Instrument + chain presets (factory and the user's). */
   presets: readonly Preset[];
-  /** The factory sample index's samples, or null when it isn't installed. */
   samples: readonly FactorySample[] | null;
-  /** How sounds are picked (the app passes the helpers load_preset uses); default: plainPicker over presets / samples. */
   picker?: SoundPicker;
-  /** Channel names already in the project (load into them instead of making duplicates). */
   channels: readonly string[];
-  /** Mixer insert names already in the project (bus / send inserts to reuse). */
   inserts?: readonly string[];
   projectBpm: number;
   projectSwing: number;
   brief?: string;
   focus?: FocusNumbers | null;
-  /**
-   * A reference song the build follows (study_reference): the playbook passed in is already adapted to it
-   * (adaptPlaybook: tempo, key, swing, sections, targets); this adds its numbers and drum feel to the text.
-   */
   reference?: { brief: ReferenceBrief; adapted: AdaptedPlaybook; track: string | null } | null;
-  /** True when the playbook is the generic fallback. */
   generic?: boolean;
 }
 
@@ -455,7 +386,6 @@ function nameKey(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-/** Which octave reading of a reference tempo suits the playbook (half / double time is the same pulse). */
 function focusBpm(pb: Playbook, bpm: number): number {
   const cands = [bpm, bpm * 2, bpm / 2].filter((b) => b >= 40 && b <= 250);
   const best = cands.reduce((a, b) => (Math.abs(Math.log2(b / pb.bpm.typical)) < Math.abs(Math.log2(a / pb.bpm.typical)) ? b : a), bpm);
@@ -481,7 +411,6 @@ export function targetsLine(t: PlaybookTargets): string {
   return parts.join(' · ');
 }
 
-/** Turn a playbook into the build for this project. */
 export function buildRecipe(pb: Playbook, ctx: RecipeContext): Recipe {
   const genre = ctx.genre;
   const focus = ctx.focus ?? null;
@@ -489,7 +418,6 @@ export function buildRecipe(pb: Playbook, ctx: RecipeContext): Recipe {
   const brief = briefNumbers(ctx.brief);
   const generic = !!ctx.generic;
 
-  // Tempo, key, swing: the user's words win, then the reference song, then their style focus, then the playbook.
   let bpm = pb.bpm.typical;
   let bpmWhy = `playbook typical, range ${pb.bpm.min}-${pb.bpm.max}`;
   if (ref) {
@@ -524,7 +452,6 @@ export function buildRecipe(pb: Playbook, ctx: RecipeContext): Recipe {
   const picker = ctx.picker ?? plainPicker(ctx.presets, ctx.samples);
   const parts = pb.parts.map((part) => {
     const sound = resolvePart(part, genre, picker);
-    // the part's tags + its role word pick WHICH drums chain (Kick Punch for the kick, Snare Crack for snare / clap)
     const chainP = part.chain ? resolveChain(part.chain, genre, ctx.presets, [...(part.tags ?? []), part.role]) : null;
     return { part, sound, chain: chainP ? { id: chainP.id, name: chainP.name } : null };
   });
@@ -622,7 +549,6 @@ export function buildRecipe(pb: Playbook, ctx: RecipeContext): Recipe {
     for (const m of pb.mistakes) L.push(`  - ${m}`);
   }
 
-  // ── Build order ──
   const steps: string[] = [];
   const step = (s: string) => steps.push(s);
   step(`begin_edit ${j({ label: ref ? `Like ${ref.brief.name}`.slice(0, 80) : `${genreName} song` })}`);
@@ -666,7 +592,6 @@ export function buildRecipe(pb: Playbook, ctx: RecipeContext): Recipe {
   if (tCalls.length) step(`Transitions at every boundary: ${tCalls.map((c) => `add_transition ${j(c)}`).join(' · ')}`);
   const mix: string[] = [];
   const insertNames = new Set((ctx.inserts ?? []).map(nameKey));
-  /** A bus / send insert: loaded when it exists, else created with that name by apply_chain "new:<name>". */
   const busChain = (name: string, _role: ChainRole, id: string): string[] =>
     insertNames.has(nameKey(name)) ? [`apply_chain ${j({ chain: id, insert: name })}`] : [`apply_chain ${j({ chain: id, insert: `new:${name}` })}`];
   for (const b of buses) {
@@ -712,7 +637,6 @@ export function buildRecipe(pb: Playbook, ctx: RecipeContext): Recipe {
   };
 }
 
-/** The reference block of the recipe: what the build takes from the song, and what stays original. */
 function referenceLines(ref: NonNullable<RecipeContext['reference']>): string[] {
   const b = ref.brief;
   const a = ref.adapted;

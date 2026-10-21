@@ -1,7 +1,3 @@
-// The active AI focus, everywhere it matters: a compact chip in the title
-// bar (click → the collection's style profile, × → clear) and a bar in the
-// built-in agent panel (shows the brief; change / clear / choose).
-
 import { useRef } from 'react';
 import { Crosshair, LibraryBig, X } from 'lucide-react';
 import { openMenuAt, type MenuItem } from '../components/Menu';
@@ -14,7 +10,6 @@ function focusHint(name: string, brief: string): string {
   return `AI focus: agents compose from ${name}'s style profile${brief ? ` + your brief “${brief}”` : ''}. Click to open the profile.`;
 }
 
-/** Title bar chip (renders nothing without a focus). */
 export function FocusChip() {
   const focus = useLibrary((s) => s.state?.focus ?? null);
   if (!focus) return null;
@@ -45,7 +40,6 @@ export function FocusChip() {
   );
 }
 
-/** Pick a collection to focus on (menu under an element). */
 export function openFocusPicker(el: Element): void {
   const s = useLibrary.getState().state;
   const cols = s?.collections ?? [];
@@ -66,7 +60,6 @@ export function openFocusPicker(el: Element): void {
   openMenuAt(el, items, { minWidth: 240 });
 }
 
-/** Agent panel bar: the active focus (with its brief), or a prompt to pick one. */
 export function AgentFocusBar() {
   const focus = useLibrary((s) => s.state?.focus ?? null);
   const hasState = useLibrary((s) => !!s.state);

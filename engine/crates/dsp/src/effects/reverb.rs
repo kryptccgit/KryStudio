@@ -1,15 +1,3 @@
-//! krypt.reverb — three algorithms, 100% wet output (the FX slot's mix
-//! knob sets the balance; default 25%).
-//!
-//! * Room / Hall: 8-channel diffuser (delays + polarity flips + Hadamard
-//!   mixing, 4 stages) feeding an 8-line feedback delay network with a
-//!   Householder matrix (Jot), per-line T60 gains, damping and slow delay
-//!   modulation. The diffuser output doubles as early reflections.
-//! * Plate: the plate-class tank topology published by Jon Dattorro
-//!   ("Effect Design Part 1", JAES 1997): input diffusers, two cross-coupled
-//!   modulated allpass/delay branches, output taps. Gains are derived from
-//!   the Decay time instead of a raw feedback coefficient.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::delay::{Allpass, DelayLine};
 use crate::blocks::filters::{OnePole, Svf, SvfMode};
@@ -52,7 +40,6 @@ const ROOM_MS: [f32; N] = [17.3, 21.1, 24.7, 28.9, 32.2, 36.5, 41.1, 45.4];
 const HALL_DIFF_MS: [f32; 4] = [6.0, 11.0, 19.0, 33.0];
 const ROOM_DIFF_MS: [f32; 4] = [2.5, 4.5, 8.0, 14.0];
 
-/// In-place 8-point fast Walsh–Hadamard transform, orthonormal.
 #[inline]
 fn hadamard8(x: &mut [f32; N]) {
     let mut h = 1;
@@ -77,7 +64,6 @@ fn hadamard8(x: &mut [f32; N]) {
 
 struct DiffStage {
     lines: [DelayLine; N],
-    /// fractions (0..1) of the stage length per channel
     frac: [f32; N],
     flip: [bool; N],
     len: [usize; N],
@@ -146,7 +132,6 @@ impl Fdn {
         }
         self.mod_depth = if hall { 0.0006 * sr } else { 0.00025 * sr };
         self.er_gain = if hall { 0.25 } else { 0.55 };
-        // partial loudness compensation: long decays get only a bit louder
         let gm = (gsum / N as f32).min(0.9999);
         self.in_gain = (1.0 - gm).powf(0.25) * 0.7;
     }
@@ -161,7 +146,6 @@ impl Fdn {
 
     #[inline]
     fn tick(&mut self, l: f32, r: f32) -> (f32, f32) {
-        // split stereo into 8 channels
         let mut x: [f32; N] = [l, r, l, r, -l, -r, l, -r];
         for st in self.diff.iter_mut() {
             for c in 0..N {
@@ -169,11 +153,9 @@ impl Fdn {
                 let v = st.lines[c].read(st.len[c]);
                 x[c] = if st.flip[c] { -v } else { v };
             }
-            // channel shuffle (rotate) then mix
             x.rotate_left(3);
             hadamard8(&mut x);
         }
-        // FDN
         let mut d = [0.0f32; N];
         for i in 0..N {
             let m = if self.mod_depth > 0.0 && i < 4 {
@@ -187,7 +169,6 @@ impl Fdn {
             };
             d[i] = self.lines[i].read_frac(self.base_len[i] + m);
         }
-        // householder feedback
         let mut fb = [0.0f32; N];
         let mut sum = 0.0;
         for i in 0..N {
@@ -198,17 +179,15 @@ impl Fdn {
         for i in 0..N {
             self.lines[i].push(crate::blocks::flush(fb[i] - k + x[i] * self.in_gain));
         }
-        // orthogonal output taps (two Hadamard rows) + early part
         let late_l = d[0] - d[1] + d[2] - d[3] + d[4] - d[5] + d[6] - d[7];
         let late_r = d[0] + d[1] - d[2] - d[3] + d[4] + d[5] - d[6] - d[7];
         let er_l = x[0] + x[2] - x[5] - x[7];
         let er_r = x[1] + x[3] - x[4] - x[6];
-        let s = 0.3535; // 1/sqrt(8)
+        let s = 0.3535;
         (late_l * s + er_l * 0.5 * self.er_gain, late_r * s + er_r * 0.5 * self.er_gain)
     }
 }
 
-/// Dattorro delay lengths (samples at 29761 Hz).
 const DT_SR: f32 = 29761.0;
 const DT_IN_AP: [f32; 4] = [142.0, 107.0, 379.0, 277.0];
 const DT_IN_G: [f32; 4] = [0.75, 0.75, 0.625, 0.625];
@@ -216,19 +195,16 @@ const DT_IN_G: [f32; 4] = [0.75, 0.75, 0.625, 0.625];
 struct Plate {
     in_lp: OnePole,
     in_ap: [Allpass; 4],
-    // left branch
     ap_l1: Allpass,
     dl_l1: DelayLine,
     damp_l: OnePole,
     ap_l2: Allpass,
     dl_l2: DelayLine,
-    // right branch
     ap_r1: Allpass,
     dl_r1: DelayLine,
     damp_r: OnePole,
     ap_r2: Allpass,
     dl_r2: DelayLine,
-    // configured lengths (samples)
     len_ap_l1: f32,
     len_l1: usize,
     len_l2: usize,
@@ -286,7 +262,7 @@ impl Plate {
 
     fn configure(&mut self, size: f32, decay_s: f32, damping: f32, diffusion: f32, sr: f32) {
         let k = sr / DT_SR;
-        let scale = 0.45 + size; // 0.6 → ~1.05 (the published plate)
+        let scale = 0.45 + size;
         let s = k * scale;
         self.len_ap_l1 = 672.0 * s;
         self.len_l1 = (4453.0 * s) as usize;
@@ -303,7 +279,6 @@ impl Plate {
         self.g2_l = g(self.ap_l2.len + self.len_l2 as f32);
         self.g1_r = g(self.len_ap_r1 + self.len_r1 as f32);
         self.g2_r = g(self.ap_r2.len + self.len_r2 as f32);
-        // decay diffusion 2 follows decay as in the paper (0.25..0.5)
         let dd2 = (0.15 + self.g2_l).clamp(0.25, 0.5);
         self.ap_l2.g = dd2;
         self.ap_r2.g = dd2;
@@ -348,7 +323,6 @@ impl Plate {
         }
         let m = (self.lfo * TAU).sin() * self.excursion;
         let m2 = (self.lfo * TAU).cos() * self.excursion;
-        // left branch (fed by the right branch's output)
         let a = self.ap_l1.tick_mod(x + self.fb_r, self.len_ap_l1 + m);
         self.dl_l1.push(a);
         let b = self.dl_l1.read(self.len_l1);
@@ -356,7 +330,6 @@ impl Plate {
         let c = self.ap_l2.tick(b);
         self.dl_l2.push(c);
         let out_l = self.dl_l2.read(self.len_l2) * self.g2_l;
-        // right branch (fed by the left branch's output)
         let a = self.ap_r1.tick_mod(x + self.fb_l, self.len_ap_r1 + m2);
         self.dl_r1.push(a);
         let b = self.dl_r1.read(self.len_r1);
@@ -366,7 +339,6 @@ impl Plate {
         let out_r = self.dl_r2.read(self.len_r2) * self.g2_r;
         self.fb_l = crate::blocks::flush(out_l);
         self.fb_r = crate::blocks::flush(out_r);
-        // output taps (paper's table, scaled to rate and size)
         let s = self.taps_scale;
         let yl = Self::tap(&self.dl_r1, 266.0, s) + Self::tap(&self.dl_r1, 2974.0, s) - self.ap_r2.tap((1913.0 * s) as usize)
             + Self::tap(&self.dl_r2, 1996.0, s)
@@ -384,7 +356,6 @@ impl Plate {
 
 pub struct Reverb {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     mode: usize,
@@ -394,7 +365,6 @@ pub struct Reverb {
     fdn: Fdn,
     plate: Plate,
     width: Smooth,
-    /// algorithm switch: fade out, switch + clear, fade in
     fade: f32,
     pending: Option<usize>,
     plate_gain: f32,
@@ -445,7 +415,6 @@ impl Reverb {
         self.width.set(p.get(P::Width as usize));
     }
 
-    /// Configure the ACTIVE algorithm from the current params.
     fn configure(&mut self) {
         let p = &self.pb;
         let sr = self.sr;
@@ -520,7 +489,6 @@ impl Effect for Reverb {
             } else {
                 self.fdn.tick(l, r)
             };
-            // algorithm switch: fade out, switch (tail cleared), fade in
             if let Some(m) = self.pending {
                 self.fade -= xf_step;
                 if self.fade <= 0.0 {

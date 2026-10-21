@@ -1,14 +1,3 @@
-//! Krypt Studio test CLAP bundle (NOT shipped; used by the plugin-host
-//! end-to-end tests). Structure follows the MIT/Apache clack-plugin
-//! examples.
-//!
-//! - `cc.krypt.test.gain`  stereo gain effect. Params: 1 Gain (0..2, ×),
-//!   98 Hang (spins forever in process when on), 99 Crash (aborts the
-//!   process when on). State = gain. Win32 GUI: click/drag sets the gain
-//!   (reported to the host as output param events).
-//! - `cc.krypt.test.sine`  polyphonic sine/square/saw instrument. Params:
-//!   1 Level (0..1), 2 Waveform (enum). State = both.
-
 #![allow(clippy::missing_safety_doc)]
 
 use clack_extensions::audio_ports::*;
@@ -41,8 +30,6 @@ impl AtomicF32 {
     }
 }
 
-// ═════════════════════════════ Gain ═════════════════════════════════════
-
 const P_GAIN: u32 = 1;
 const P_HANG: u32 = 98;
 const P_CRASH: u32 = 99;
@@ -51,7 +38,6 @@ pub struct GainParams {
     gain: AtomicF32,
     hang: AtomicBool,
     crash: AtomicBool,
-    /// Set by the GUI: report the gain to the host on the next process.
     gui_changed: AtomicBool,
 }
 
@@ -118,7 +104,6 @@ impl<'a> PluginAudioProcessor<'a, GainShared, GainMain<'a>> for GainAudio<'a> {
                 params.handle(e);
             }
             if params.crash.load(Relaxed) {
-                // Deliberate crash for the host's crash-isolation tests.
                 std::process::abort();
             }
             while params.hang.load(Relaxed) {
@@ -275,7 +260,6 @@ impl PluginGuiImpl for GainMain<'_> {
 }
 
 mod gui {
-    //! A tiny GDI editor: a bar showing the gain; click/drag to set it.
     use super::GainParams;
     use std::sync::atomic::Ordering::*;
     use std::sync::Arc;
@@ -349,7 +333,7 @@ mod gui {
                 FillRect(dc, &track, tb);
                 DeleteObject(tb as _);
                 let fill = RECT { left: 20, top: 70, right: 20 + ((track.right - 20) as f32 * (g / 2.0)) as i32, bottom: 100 };
-                let fb = CreateSolidBrush(0x00F7_5C8B); // indigo-ish
+                let fb = CreateSolidBrush(0x00F7_5C8B);
                 FillRect(dc, &fill, fb);
                 DeleteObject(fb as _);
                 SetBkMode(dc, TRANSPARENT as _);
@@ -407,8 +391,6 @@ mod gui {
     }
 }
 
-// ═════════════════════════════ Sine ═════════════════════════════════════
-
 const P_LEVEL: u32 = 1;
 const P_WAVE: u32 = 2;
 
@@ -455,7 +437,6 @@ struct Voice {
     phase: f32,
     inc: f32,
     amp: f32,
-    /// 1 while held, decays after release.
     env: f32,
     releasing: bool,
 }
@@ -628,8 +609,6 @@ impl PluginStateImpl for SineMain<'_> {
         Ok(())
     }
 }
-
-// ═════════════════════════════ Entry ════════════════════════════════════
 
 pub struct TestFactory {
     gain: PluginDescriptor,

@@ -1,13 +1,3 @@
-// "Make a song like this one": consent for files outside the Browser folders
-// (electron/mcp/consent.ts: refused paths, the injected asker, allow file /
-// allow folder / deny / timeout, one prompt at a time, de-duplication, the
-// activity feed), the beat / like prompts read as prose (garbled positional
-// words, paths split at their spaces, quotes, Claude Code's extra word slots),
-// library_import of a single song, compare_to_reference against the fake
-// analyzer, and elicitation over the named pipe in both protocol eras
-// (2025 elicitation/create while the call waits; 2026-07-28 input_required).
-// Plus the File access modes (anywhere / ask / browser, the HTTP cap, files
-// the open project already uses, the refusals that hold in every mode).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -61,7 +51,6 @@ function settings0(): Settings {
     browserRoots: [{ id: 'r1', name: 'Browser root', path: BROWSER }],
     recent: [],
     autosaveSec: 60,
-    // These tests are the 'ask' File access mode (the consent flow); the "File access" section covers the others.
     mcp: { enabled: true, httpEnabled: false, httpPort: 47800, requireConsentForDestructive: false, fileAccess: 'ask' },
     agent: { model: 'claude-opus-5-5', hasApiKey: false },
     discordRpc: false,
@@ -69,7 +58,6 @@ function settings0(): Settings {
   };
 }
 
-/** The engine's decoder, faked: files that start with "RIFF" decode (8 s, 44.1 kHz stereo). */
 async function sampleInfo(p: string): Promise<ActionResult<SampleInfo>> {
   try {
     if (fs.readFileSync(p).subarray(0, 4).toString('latin1') !== 'RIFF') return { ok: false, message: 'Unsupported or corrupt audio file' };
@@ -79,7 +67,6 @@ async function sampleInfo(p: string): Promise<ActionResult<SampleInfo>> {
   return { ok: true, data: { path: p, frames: 352800, sampleRate: 44100, channels: 2, durationSec: 8 } };
 }
 
-/** A scripted user: answers in order ('never' waits for the timeout, 'fail' = the asker itself breaks). */
 function scripted(answers: Array<ConsentChoice | 'never' | 'fail'>, where = 'Krypt Studio') {
   const calls: ConsentRequest[] = [];
   let active = 0;
@@ -109,7 +96,6 @@ function scripted(answers: Array<ConsentChoice | 'never' | 'fail'>, where = 'Kry
   return { asker, calls, most: () => most, aborted: () => aborted };
 }
 
-/** The project render: the fake engine writes nothing and returns this analysis. */
 const RENDER: Analysis = {
   durationSec: 8,
   peakDb: -3,
@@ -119,8 +105,6 @@ const RENDER: Analysis = {
   loudnessRange: 4,
   rmsDb: -16,
   crestDb: 10,
-  // The reference (fake analyzer): sub -10, low -12, lowMid -14, mid -20, highMid -24, high -30.
-  // Here the low end sits 6 dB lower and the highs 4 dB higher.
   bands: { sub: -16, low: -18, lowMid: -14, mid: -20, highMid: -20, high: -26 },
   stereoCorrelation: 0.8,
   stereoWidth: 0.2,
@@ -206,8 +190,6 @@ async function rig(opts: { dialog?: ConsentAsker | null; timeoutMs?: number; lib
   return { doc, deps, call, consent, activity, logs, renders, library, settings: () => settings, close };
 }
 
-// ── Consent ─────────────────────────────────────────────────────────────
-
 test('consent: a file inside the Browser folders is used without asking', async () => {
   const u = scripted(['deny']);
   const r = await rig({ dialog: u.asker });
@@ -232,10 +214,8 @@ test('consent: outside the folders → asked; "Allow this file" lasts the sessio
     assert.equal(r.doc.project.playlist.tracks[d.trackId].mute, true, 'mute: the reference track is muted');
     assert.equal(r.doc.project.playlist.tracks[d.trackId].name, 'Reference: My Reference Song');
     assert.match(out.message, /is muted \(the user unmutes it to A\/B\)/);
-    // Same file again: no question. Analysis of it: no question either.
     assert.equal((await r.call('analyze_audio', { target: SPACED })).ok, true);
     assert.equal(u.calls.length, 1, 'the session grant covers the file');
-    // Another file in the same folder is a new question (answered "deny" here).
     const other = await r.call('load_sample', { sample: path.join(DOWNLOADS, 'second.wav') });
     assert.equal(other.ok, false);
     assert.equal(u.calls.length, 2);
@@ -390,10 +370,7 @@ test('consent texts: the dialog and the elicitation name the client, the file an
   assert.deepEqual(dir.choices.map((c) => c.label), ['Allow once', 'Add to Browser folders', 'Deny']);
 });
 
-// ── Prompts ─────────────────────────────────────────────────────────────
-
 test('beat prompt: garbled positional words become the idea; the referenced song gets the whole workflow', () => {
-  // What Claude Code sends for "/krypt-studio:beat make an edm song like this song, C:\…\ref key=Am bpm=128.wav".
   const words = `make an edm song like this song, ${REF}`.split(/\s+/);
   const [genre, bpm, key, bars, mood, idea, ...more] = words;
   const parsed = parseBeatArgs({ genre, bpm, key, bars, mood, idea }, more);
@@ -420,7 +397,6 @@ test('beat prompt: a path with spaces is joined back; quotes are dropped; positi
   const refInIdea = parseBeatArgs({ genre: 'house', bpm: '124', key: 'Am', bars: '8', mood: 'deep', idea: REF.split(' ')[0] }, REF.split(' ').slice(1));
   assert.deepEqual([refInIdea.prose, refInIdea.genre, refInIdea.reference?.path], [false, 'house', REF]);
   for (const bad of [{ bpm: '20' }, { bpm: 'fast' }, { key: 'xyz' }, { bars: '2.5' }]) assert.equal(parseBeatArgs({ genre: 'trap', bpm: '140', key: 'Am', bars: '4', ...bad }).prose, true, JSON.stringify(bad));
-  // A form client (one idea field) gets the same detection.
   const form = beatPrompt({ idea: `an edm song like ${SPACED}` });
   assert.ok(form.includes(`"file":${JSON.stringify(SPACED)}`));
 });
@@ -444,7 +420,6 @@ test('beat / like prompts: a missing file, a path cut off by Claude Code, a requ
   assert.match(likePrompt({ song: SPACED }), /No genre named: make it in the reference's own genre/);
 });
 
-/** prompts/list + prompts/get through a real server instance (in memory), as a given client. */
 async function promptsAs(client: string | null, get?: { name: string; arguments: Record<string, string> }) {
   const r = await rig();
   const hooks: ServerHooks = { caller: () => ({ actor: { kind: 'agent', clientId: 'x', name: 'X' }, session: newSession(), via: 'mcp' }), gate: () => null, client: () => client, pendingConsent: new Map() };
@@ -480,7 +455,6 @@ test('Claude Code gets extra word slots on beat / like; other clients keep their
   const other = await promptsAs('claude-ai');
   assert.deepEqual(other.list.prompts.find((p) => p.name === 'beat')!.arguments!.map((a) => a.name), ['genre', 'bpm', 'key', 'bars', 'mood', 'idea']);
   assert.deepEqual(other.list.prompts.find((p) => p.name === 'like')!.arguments!.map((a) => a.name), ['song', 'request']);
-  // Claude Code zips the words onto the declared names: the whole sentence and the spaced path arrive.
   const names = beat.arguments!.map((a) => a.name);
   const zipped = Object.fromEntries(names.map((k, i) => [k, words[i]]).filter(([, v]) => v !== undefined));
   const got = await promptsAs('claude-code', { name: 'beat', arguments: zipped as Record<string, string> });
@@ -493,8 +467,6 @@ test('server instructions: the like workflow in one sentence, still under Claude
   assert.ok(SERVER_INSTRUCTIONS.length <= 2048, `${SERVER_INSTRUCTIONS.length} chars`);
   for (const w of ['study_reference', 'a path they drop in', 'muted', 'Reference: <name>', 'get_playbook (it follows the reference)', 'ORIGINAL', 'check_originality', 'review_song grades against it', 'the user is asked first']) assert.ok(SERVER_INSTRUCTIONS.includes(w), w);
 });
-
-// ── library_import of one song ──────────────────────────────────────────
 
 test('library_import: one song into "References" (created), its track id returned; outside the folders it is asked about', async () => {
   const u = scripted(['file']);
@@ -521,8 +493,6 @@ test('library_import: one song into "References" (created), its track id returne
     await r.close();
   }
 });
-
-// ── compare_to_reference ────────────────────────────────────────────────
 
 test('compare_to_reference: tempo, key, loudness, band balance, width and energy shape against the reference, in plain words', async () => {
   const r = await rig({ dialog: scripted(['file']).asker });
@@ -577,7 +547,6 @@ test('compare_to_reference: warns when the reference plays in the render; a file
     const out = await r.call('compare_to_reference', { reference: 'Reference: Loud', scope: 'song' });
     assert.equal(out.ok, true, out.message);
     assert.match(out.warnings?.[0] ?? '', /The reference plays in this render/);
-    // Muted, the (longer) reference no longer stretches the render with silence: it ends with the last audible clip.
     const trackId = (imp.data as { trackId: string }).trackId;
     r.doc.exec('playlist.setTrack', { id: trackId, mute: true }, { actor: { kind: 'user' } });
     const byPath = await r.call('compare_to_reference', { reference: REF, scope: 'song' });
@@ -594,9 +563,6 @@ test('compare_to_reference: warns when the reference plays in the render; a file
   assert.equal(correlation([1, 2, 3], [5, 5, 5]), null);
 });
 
-// ── study_reference: one call, then get_playbook / review_song follow it ──
-
-/** The fake analyzer reads any "fullsong" file as a 2-minute, 128 bpm Am four-on-the-floor track (A B C D C A). */
 const FULL = path.join(DOWNLOADS, 'fullsong house.wav');
 fs.writeFileSync(FULL, riff('fullsong'));
 
@@ -612,7 +578,6 @@ test('study_reference: the song lands muted as "Reference: …" and comes back a
     assert.equal(p.playlist.tracks[p.playlist.clips[d.clipId].trackId].mute, true, 'its track is muted');
     const b = d.brief;
     assert.deepEqual([b.bpm, b.key, b.form, b.totalBars, b.drums?.fourOnFloor, b.drums?.backbeat, b.mix.lufs], [128, 'Am', 'A B C D C A', 64, true, 'two-four', -8.5]);
-    // The kick-aware energy: the intro, break and outro have no kick (the drum stem says so), so they sit lower than loudness alone says.
     assert.deepEqual(b.plan.map((x) => [x.startBar, x.bars, x.energy]), [[1, 8, 0.1], [9, 8, 0.6], [17, 16, 1], [33, 8, 0.2], [41, 16, 1], [57, 8, 0.25]]);
     assert.equal(b.drums?.source, 'stem', 'the drums come from the drum stem (a stem model is installed)');
     assert.deepEqual(b.harmony.loop, ['i', 'VI', 'III', 'VII']);
@@ -624,17 +589,14 @@ test('study_reference: the song lands muted as "Reference: …" and comes back a
     assert.match(out.text!.split('\n').pop()!, /^NEXT: build_from_reference /, 'the result ends with the next call');
     assert.equal(u.calls.length, 1, 'asked once about the file outside the Browser folders');
     assert.ok(r.library!.collections().some((c) => c.name === 'References' && c.counts.total === 1), 'added to References');
-    // Again, now asking for house: nothing new is imported, the call still answers (no "No change").
     const again = await r.call('study_reference', { file: FULL, genre: 'house' });
     assert.equal(again.ok, true, again.message);
     assert.match(again.message, /already on the Playlist/);
     assert.equal(Object.values(r.doc.project.channels).filter((c) => c.name.startsWith('Reference')).length, 1);
     assert.deepEqual([(again.data as { brief: ReferenceBrief }).brief.genre, (again.data as { brief: ReferenceBrief }).brief.genreSource], ['house', 'given']);
-    // Without file or clip it re-reads the project's reference.
     const bare = await r.call('study_reference', {});
     assert.equal(bare.ok, true, bare.message);
     assert.match(bare.message, /the project's reference/);
-    // A clip already on the Playlist can be adopted: renamed "Reference: …" and muted.
     const imp = await r.call('import_audio', { path: path.join(BROWSER, 'inside.wav'), name: 'Their Song' });
     const adopt = await r.call('study_reference', { clip: (imp.data as { clipId: string }).clipId });
     assert.equal(adopt.ok, true, adopt.message);
@@ -662,7 +624,6 @@ test('get_playbook follows the reference (tempo, key, section plan, drum feel); 
     for (const s of ['REFERENCE SONG "fullsong house" (the muted track "Reference: fullsong house")', 'Its chord loop: Am F C G (i VI III VII)', 'check_originality: rewrite any line', 'Like fullsong house']) assert.ok(pb.text!.includes(s), s);
     const none = await r.call('get_playbook', { genre: 'house', reference: 'none' });
     assert.doesNotMatch(none.text!, /REFERENCE SONG/);
-    // No genre anywhere: the reference's closest genre.
     const auto = await r.call('get_playbook', {});
     assert.match(auto.message, /the reference song's closest genre/);
 
@@ -676,7 +637,6 @@ test('get_playbook follows the reference (tempo, key, section plan, drum feel); 
     const rd = rv.data as { targets: { lufs: number }; reference: { comparison: { bands: { groups: Record<string, number> } } } };
     assert.equal(rd.targets.lufs, -8.5, "the reference's loudness is the target");
     assert.ok(rd.reference.comparison.bands.groups['low end'] < -2);
-    // The reference playing in the render would be graded as the song: refused, with the call that mutes it.
     const refCh = Object.values(r.doc.project.channels).find((c) => c.name === 'Reference: fullsong house')!;
     const clip = Object.values(r.doc.project.playlist.clips).find((c) => c.channelId === refCh.id)!;
     r.doc.exec('playlist.setTrack', { id: clip.trackId, mute: false }, { actor: { kind: 'user' } });
@@ -685,14 +645,11 @@ test('get_playbook follows the reference (tempo, key, section plan, drum feel); 
     assert.match(loud.message, /isn't muted.*set_channel \{"channel":"Reference: fullsong house","mute":true\}/);
     assert.equal((await r.call('set_channel', { channel: 'Reference: fullsong house', mute: true })).ok, true);
     assert.equal((await r.call('review_song', {})).ok, true);
-    // "none" reviews against the playbook alone.
     assert.doesNotMatch((await r.call('review_song', { genre: 'house', reference: 'none' })).text!, /vs the reference/);
   } finally {
     await r.close();
   }
 });
-
-// ── Elicitation over the named pipe (both protocol eras) ────────────────
 
 async function pipeClient(pipe: string, token: string) {
   const net = await import('node:net');
@@ -752,12 +709,10 @@ test('pipe: a 2025-era client that declared elicitation is asked with elicitatio
     assert.equal(res.id, 2);
     assert.equal(res.result.isError, false, JSON.stringify(res.result));
     assert.ok(r.settings().browserRoots.some((x) => x.path === real(OTHER)), 'folder added');
-    // A second file in that folder: no question.
     c.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'import_audio', arguments: { path: path.join(OTHER, 'b.wav') } } });
     const res2 = await c.next();
     assert.equal(res2.id, 3);
     assert.equal(res2.result.isError, false, JSON.stringify(res2.result));
-    // A decline: the refusal message.
     c.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'import_audio', arguments: { path: path.join(DOWNLOADS, 'second.wav') } } });
     const ask2 = await c.next();
     c.send({ jsonrpc: '2.0', id: ask2.id, result: { action: 'decline' } });
@@ -798,7 +753,6 @@ test('pipe: on protocol 2026-07-28 the question goes back as input_required and 
     assert.equal(req.method, 'elicitation/create');
     assert.match(req.params.message, /wants to use "a\.wav"/);
     assert.equal(r.doc.getHistory().length, 0, 'nothing ran yet');
-    // An unsolicited answer under another key is ignored: still asked.
     c.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { ...call, _meta: meta, inputResponses: { 'krypt-file-access-0000000000000000': { action: 'accept', content: { access: 'file' } } } } });
     assert.equal((await c.next()).result.resultType, 'input_required');
     c.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { ...call, _meta: meta, inputResponses: { [key]: { action: 'accept', content: { access: 'file' } } } } });
@@ -807,7 +761,6 @@ test('pipe: on protocol 2026-07-28 the question goes back as input_required and 
     assert.equal(done.result.isError, false, JSON.stringify(done.result));
     assert.match(done.result.content[0].text, /Imported "Reference: A"/);
     assert.equal(dialog.calls.length, 0);
-    // A client without elicitation: Krypt Studio's own dialog asks.
     const plain = { ...meta, 'io.modelcontextprotocol/clientCapabilities': {} };
     c.send({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'analyze_audio', arguments: { target: path.join(OTHER, 'b.wav') }, _meta: plain } });
     const viaDialog = await c.next();
@@ -820,8 +773,6 @@ test('pipe: on protocol 2026-07-28 the question goes back as input_required and 
     await r.close();
   }
 });
-
-// ── File access modes ───────────────────────────────────────────────────
 
 test('file access "anywhere" (the default): any local audio file opens without a prompt, and it is logged', async () => {
   const u = scripted(['deny']);
@@ -845,7 +796,6 @@ test('file access "anywhere" (the default): any local audio file opens without a
   } finally {
     await r.close();
   }
-  // No setting at all (an old settings object) means the default: anywhere.
   const fresh = await rig({ dialog: null });
   try {
     delete (fresh.deps.getSettings().mcp as { fileAccess?: FileAccessMode }).fileAccess;
@@ -903,7 +853,6 @@ test('file access: a song the user dropped in is ALWAYS readable (clip, channel 
     const u = scripted(['deny']);
     const r = await rig({ dialog: u.asker, fileAccess: mode });
     try {
-      // What a drag & drop does: the user (not an agent) puts the file on the Playlist.
       const p = r.doc.project;
       const drop = r.doc.exec<{ clipId: string; channelId: string }>('playlist.addAudio', { path: SPACED, name: 'Dropped Song', trackId: p.playlist.trackOrder[0], start: 0, frames: 352800, sampleRate: 44100 }, { actor: USER });
       assert.equal(drop.ok, true, drop.message);
@@ -913,7 +862,6 @@ test('file access: a song the user dropped in is ALWAYS readable (clip, channel 
       }
       const cmp = await r.call('audio_to_pattern', { target: SPACED, mode: 'drums' });
       assert.equal(cmp.ok, true, `${mode}: audio_to_pattern by path: ${cmp.message}`);
-      // The same folder's OTHER files are not covered by the drop.
       const other = await r.call('analyze_audio', { target: path.join(DOWNLOADS, 'second.wav') });
       assert.equal(other.ok, mode === 'anywhere', `${mode}: second.wav ${other.message}`);
       assert.equal(u.calls.length, mode === 'ask' ? 1 : 0, `${mode}: asked only about second.wav, and only in ask mode`);

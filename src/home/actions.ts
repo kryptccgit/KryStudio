@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// What Home cards, Home screens and Guides buttons do. One implementation
-// per HomeActionId (a full Record, so typecheck fails on a missing one).
-// Panel actions go through wm.*, whose reveal hook steps Home aside so
-// the panel is visible; dialogs (export, originality) open over Home.
-// Every action ends in visible feedback: a view change, a dialog or a toast.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { SingletonKind } from '../workspace/panels';
 import { wm } from '../workspace/WindowManager';
 import { importMidi, newProject, openExport, openProject } from '../app/actions';
@@ -24,7 +16,6 @@ import { startTour } from '../tours/store';
 import { openTourPicker } from '../tours/TourOverlay';
 import { openBooth } from '../booth/actions';
 
-/** Absolute path of the first bundled demo project, via the read-only "Demo projects" browser root. */
 export async function findDemo(): Promise<string | null> {
   const roots = await window.krypt.browser.roots();
   const demos = roots.find((r) => r.id === 'demos');
@@ -41,7 +32,7 @@ export async function openDemo(): Promise<boolean> {
       toast.error("The demo project isn't installed. Reinstall Krypt Studio, or run `npm run make-demo` in a dev checkout.");
       return false;
     }
-    return await openProject(demo); // success → Studio (onProjectPicked)
+    return await openProject(demo);
   } catch (err) {
     toast.error(`Couldn't open the demo: ${(err as Error)?.message ?? err}`);
     return false;
@@ -98,7 +89,6 @@ export const HOME_ACTIONS: Record<HomeActionId, { label: string; run: () => unkn
   tourMaster: { label: 'Tour: master a song', run: () => startTour('master') },
 };
 
-/** Run a Home / Guides action by id; failures toast (never silent). */
 export function runHomeAction(id: HomeActionId): void {
   const a = HOME_ACTIONS[id];
   if (!a) {

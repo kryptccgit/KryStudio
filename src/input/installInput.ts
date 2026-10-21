@@ -1,7 +1,3 @@
-// Global keyboard handling for a window (main + every popout): keymap
-// first, then the typing-keyboard piano. Ignores keys while typing in
-// inputs unless a binding opts in.
-
 import { areBareKeysBlocked, bindingFor, eventToKeys, isBareCombo, isKeymapSuspended } from './keymap';
 import { runCommand } from './commands';
 import { pianoAllOff, pianoKeyDown, pianoKeyUp } from './typingPiano';
@@ -13,7 +9,6 @@ function isTyping(t: EventTarget | null): boolean {
   if (el.isContentEditable) return true;
   const tag = el.tagName;
   if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
-  // A focused tutorial video (Guides) owns Space and the arrows (play / pause, seek).
   if (tag === 'VIDEO' || tag === 'AUDIO') return true;
   if (tag === 'INPUT') {
     const type = (el as HTMLInputElement).type;
@@ -34,12 +29,9 @@ export function installInput(win: Window): void {
     (e) => {
       if (e.defaultPrevented || isKeymapSuspended()) return;
       const target = e.target as Element | null;
-      // Tool dialogs own their keys (Enter applies, Escape closes): no shortcuts, no piano.
       if (target?.closest?.('[data-krypt-dialog]')) return;
       const typing = isTyping(e.target);
-      // The Home hub covers the main window: bare keys are its own (buttons, search), no piano.
       const covered = win === window && areBareKeysBlocked();
-      // Keyboard controller maps (Settings ▸ Controllers) own their keys before shortcuts and the piano.
       if (!typing && !covered && controllerKeyDown(e)) {
         e.preventDefault();
         e.stopPropagation();
@@ -75,7 +67,6 @@ export function installInput(win: Window): void {
     true,
   );
 
-  // Never let a stray file drop navigate the window away from the app.
   const guard = (e: DragEvent): void => {
     if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault();
   };

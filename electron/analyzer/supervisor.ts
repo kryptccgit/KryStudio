@@ -1,22 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// AnalyzerSupervisor: owns the krypt-studio-analyzer.exe sidecar
-// (docs/ANALYZER_PROTOCOL.md). Unlike the audio engine it is LAZY:
-//
-//   first job ─▶ spawn (absolute path, hidden, piped) ─▶ hello
-//     ─▶ {id, cmd, args} jobs, any number concurrently; progress events
-//        stream per id; exactly one response line per id
-//   cancel(job)  ─▶ {cmd:'cancel', target}; the job answers cancelled. If it
-//                   doesn't within the grace period the process is killed.
-//   crash        ─▶ every in-flight job resolves ok:false with a clear
-//                   message; the NEXT job restarts it (exponential backoff,
-//                   5 crashes in a minute = refuse for a while)
-//   idle 10 min  ─▶ graceful shutdown (frees model memory); next job respawns
-//   stop()       ─▶ shutdown request, kill after 2 s
-//
-// Every call resolves (never throws). Node-only: no Electron imports, so
-// test/analyzer-supervisor.test.ts drives it against a fake analyzer.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import readline from 'node:readline';
 import type { AnalyzerDevice, AnalyzeArgs, ExtractArgs, FingerprintArgs, HelloResult, SeparateArgs, SingArgs, SyllablesArgs, TranscribeArgs, TtsArgs } from '@shared/analyzer/protocol';
@@ -39,13 +20,11 @@ export interface JobOutcome<T> {
   ok: boolean;
   data?: T;
   message?: string;
-  /** The job was cancelled (by cancel(), shutdown or the analyzer). */
   cancelled?: boolean;
 }
 
 export interface JobHandle<T> {
   done: Promise<JobOutcome<T>>;
-  /** Ask the analyzer to stop the job (idempotent). */
   cancel(): void;
 }
 
@@ -54,24 +33,17 @@ export interface AnalyzerProcessStatus {
   pid: number | null;
   version: string | null;
   devices: AnalyzerDevice[];
-  /** Last start failure / crash summary, cleared by a successful start. */
   message?: string;
 }
 
 export interface AnalyzerSupervisorOptions {
-  /** Absolute exe to launch (dev: a shadow copy), or null if not built. */
   resolveExe(): string | null;
-  /** Cheap "is the exe there" check for status (default: resolveExe() !== null). */
   exists?(): boolean;
-  /** Returned for every job while the exe is missing. */
   missingMessage: string;
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
-  /** Test hook: replaces the real sidecar spawner. */
   spawn?: (exe: string, args: string[]) => ChildProcessWithoutNullStreams;
   helloTimeoutMs?: number;
-  /** How long a cancelled job may take to answer before the process is killed. */
   cancelGraceMs?: number;
-  /** Shut the idle process down after this long without jobs (0 = never). */
   idleShutdownMs?: number;
 }
 
@@ -114,12 +86,9 @@ export class AnalyzerSupervisor {
   private idleTimer: NodeJS.Timeout | null = null;
   private jobsInFlight = 0;
   private listeners = new Set<(s: AnalyzerProcessStatus) => void>();
-  /** Child processes we killed on purpose (cancel grace, failed hello): not crashes. */
   private killedOnPurpose = new WeakSet<ChildProcessWithoutNullStreams>();
 
   constructor(private readonly opts: AnalyzerSupervisorOptions) {}
-
-  // ── Status ─────────────────────────────────────────────────────────
 
   status(): AnalyzerProcessStatus {
     const s: AnalyzerProcessStatus = {
@@ -143,12 +112,10 @@ export class AnalyzerSupervisor {
       try {
         fn(s);
       } catch {
-        /* a listener must never break the supervisor */
       }
     }
   }
 
-  /** The exe exists (a job can be attempted). */
   available(): boolean {
     try {
       return this.opts.exists ? this.opts.exists() : !!this.opts.resolveExe();
@@ -157,9 +124,6 @@ export class AnalyzerSupervisor {
     }
   }
 
-  // ── Lifecycle ──────────────────────────────────────────────────────
-
-  /** Start the process if needed and complete the hello handshake. */
   ensureStarted(): Promise<JobOutcome<HelloResult>> {
     if (this.child && this.hello) return Promise.resolve({ ok: true, data: this.hello });
     if (this.starting) return this.starting;
@@ -193,8 +157,6 @@ export class AnalyzerSupervisor {
 
     let child: ChildProcessWithoutNullStreams;
     try {
-      // No arguments (protocol): every path arrives inside a job. Never
-      // detached, so the kill-on-close job object takes it down with us.
       child = (this.opts.spawn ?? spawnSidecar)(exe, []);
     } catch (err) {
       return this.startFailed(`Couldn't start the audio analyzer: ${(err as Error).message}`);
@@ -265,7 +227,6 @@ export class AnalyzerSupervisor {
     this.emit();
   }
 
-  /** Graceful shutdown (app quit): shutdown request, kill after 2 s. */
   async stop(): Promise<void> {
     this.stopping = true;
     this.clearIdle();
@@ -276,7 +237,6 @@ export class AnalyzerSupervisor {
       else child.once('exit', () => r());
     });
     void this.send(this.generation, { cmd: 'shutdown' }, undefined, 2000);
-    // No new job goes to the exiting process: the next one spawns a fresh analyzer.
     this.hello = null;
     this.emit();
     const killTimer = setTimeout(() => killSidecar(child), 2000);
@@ -285,7 +245,6 @@ export class AnalyzerSupervisor {
     try {
       child.stdin.end();
     } catch {
-      /* already closed */
     }
   }
 
@@ -308,8 +267,6 @@ export class AnalyzerSupervisor {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = null;
   }
-
-  // ── Requests ───────────────────────────────────────────────────────
 
   private send<T>(gen: number, req: { cmd: string; args?: unknown }, onProgress?: (stage: string, fraction: number) => void, timeoutMs = 0, onSent?: (id: number) => void): Promise<JobOutcome<T>> {
     const child = this.child;
@@ -340,10 +297,6 @@ export class AnalyzerSupervisor {
     });
   }
 
-  /**
-   * Run a job. Starts the analyzer when needed. `done` always resolves:
-   * {ok:true,data} | {ok:false,message} | {ok:false,cancelled:true}.
-   */
   run<C extends AnalyzerJobCmd, T = unknown>(cmd: C, args: AnalyzerJobArgs[C], onProgress?: (stage: string, fraction: number) => void): JobHandle<T> {
     let cancelled = false;
     let sentId: number | null = null;
@@ -413,7 +366,6 @@ export class AnalyzerSupervisor {
         try {
           p?.onProgress?.(typeof msg.stage === 'string' ? msg.stage : '', Number.isFinite(fraction) ? (fraction < 0 ? -1 : Math.min(1, fraction)) : -1);
         } catch {
-          /* progress listeners are best-effort */
         }
       } else if (msg.event === 'log') {
         const level = msg.level === 'error' ? 'error' : msg.level === 'warn' ? 'warn' : 'debug';
@@ -423,7 +375,7 @@ export class AnalyzerSupervisor {
     }
     if (typeof msg.id !== 'number') return;
     const p = this.pending.get(msg.id);
-    if (!p) return; // timed out earlier
+    if (!p) return;
     if (msg.ok === true) p.resolve({ ok: true, data: msg.data });
     else {
       const message = typeof msg.message === 'string' && msg.message ? msg.message : `Audio analyzer error while ${VERB[p.cmd] ?? p.cmd}`;

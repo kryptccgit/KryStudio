@@ -1,5 +1,3 @@
-// EngineSupervisor + EngineBridge against a fake NDJSON engine (a Node
-// script speaking the docs/ENGINE_PROTOCOL.md control channel).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -103,7 +101,6 @@ test('handshake, coalesced applies, transport, render progress, crash restart, h
   assert.equal(st.loads, 1);
   assert.equal(st.samplePath.startsWith('C:/factory/'), true, 'factory: paths resolved for the engine');
 
-  // A burst of edits within the coalesce window becomes ONE apply at the latest version.
   const pat = doc.project.transport.activePatternId!;
   const kick = doc.project.channelOrder[0];
   for (let i = 0; i < 5; i++) doc.exec('notes.add', { patternId: pat, channelId: kick, notes: [{ tick: i * 240, key: 60 }] }, { actor: USER });
@@ -128,7 +125,6 @@ test('handshake, coalesced applies, transport, render progress, crash restart, h
   const bad = await engine.request({ cmd: 'fail' } as never);
   assert.deepEqual(bad, { ok: false, message: 'nope' });
 
-  // Crash → restarting → running again, project reloaded, playing reset.
   void engine.request({ cmd: 'crash' } as never);
   await waitFor(engine, (x) => x.state === 'restarting');
   assert.equal(engine.isPlaying(), false);
@@ -138,13 +134,11 @@ test('handshake, coalesced applies, transport, render progress, crash restart, h
   assert.equal(st.loads, 1, 'fresh process got exactly one loadProject');
   assert.equal(st.lastVersion, doc.version);
 
-  // Hang → 3 missed heartbeats → killed and restarted.
   void engine.request({ cmd: 'hang' } as never, 200);
   await waitFor(engine, (x) => x.state === 'restarting', 8000);
   await waitFor(engine, (x) => x.state === 'running', 8000);
   assert.ok(logs.some((l) => /missed heartbeats/.test(l)), 'logged the hang');
 
-  // Reset (open/new project) → full loadProject on the live engine.
   doc.reset(createDefaultProject('Other'));
   await sleep(50);
   st = (await engine.request<Stats>({ cmd: 'stats' } as never)).data!;
@@ -170,7 +164,6 @@ test('render waits for edits still in the coalescing window (an agent writes, th
     assert.equal(r.ok, true);
     assert.equal((r.data as unknown as { modelVersion: number }).modelVersion, doc.version, 'the render saw the edit made right before it');
   }
-  // Reset (open project) immediately followed by a render: the render follows the full load.
   doc.reset(createDefaultProject('Fresh'));
   const r2 = await engine.render({ path: 'C:/out.wav', scope: { kind: 'song' }, format: 'wav24' });
   assert.equal((r2.data as unknown as { modelVersion: number }).modelVersion, doc.version);

@@ -1,10 +1,3 @@
-// Audio → project commands for the analyzer ("Ears", Wave 3A). Each one is
-// a single atomic command, so a stem separation or a transcription is ONE
-// undo step whether the user or an agent asked for it, and it lands
-// all-or-nothing (a clip deleted while the analyzer worked fails cleanly).
-// The analyzer itself (I/O, ML) runs in electron/analyzer; these only
-// write the results into the document.
-
 import { z } from 'zod';
 import { defineCommand, must, CommandError, type CommandContext } from './types';
 import { defaultNote, paletteColor, type Channel, type Clip, type Project } from '../schema/project';
@@ -15,12 +8,10 @@ import { samplesAdd } from './misc';
 
 const plain = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
-/** "drums" → "Drums" (stem names as shown on tracks / channels). */
 export function stemLabel(stem: string): string {
   return stem ? stem[0].toUpperCase() + stem.slice(1) : stem;
 }
 
-/** Run another command's body inside this one (same draft), with its zod defaults applied. */
 function sub<A, R>(def: { id: string; args: z.ZodType<A>; run: (d: Project, a: A, ctx: CommandContext) => R }, d: Project, args: unknown, ctx: CommandContext): R {
   const parsed = def.args.safeParse(args);
   if (!parsed.success) {
@@ -37,13 +28,9 @@ function newTrackAfter(d: Project, index: number, name: string, color: string, h
   return id;
 }
 
-// ── Stems ─────────────────────────────────────────────────────────────
-
 const zStem = z.object({
   stem: z.string().min(1).max(32),
-  /** Absolute path of the stem WAV (userData/stems/...). */
   path: z.string().min(1),
-  /** Display name; default "<source channel> · <Stem>". */
   name: z.string().max(64).optional(),
   frames: z.number().int().min(1).optional(),
   sampleRate: z.number().min(1).optional(),
@@ -58,7 +45,6 @@ export const audioAddStems = defineCommand({
     'Place stems separated from an audio clip: each stem becomes a sample (origin = stem of the source sample), an audio-clip channel that copies the source channel (generator params incl. stretch / pitch / tempo sync, volume, pan) on its own mixer insert routed like the source, and a playlist track directly under the source clip\'s track with a clip at the same start / length / offset. muteSource (default true) mutes the source clip so the stems don\'t double it. Returns trackIds, channelIds, clipIds, sampleIds (stem order).',
   args: z.object({
     clipId: z.string(),
-    /** Model id from the Model Manager catalog, e.g. 'htdemucs'. */
     model: z.string().min(1).max(64),
     stems: z.array(zStem).min(1).max(8),
     muteSource: z.boolean().default(true),
@@ -84,7 +70,6 @@ export const audioAddStems = defineCommand({
     const out = { trackIds: [] as string[], channelIds: [] as string[], clipIds: [] as string[], sampleIds: [] as string[] };
     a.stems.forEach((s, i) => {
       const label = (s.name ?? `${src.name} · ${stemLabel(s.stem)}`).slice(0, 64);
-      // Sample (deduplicated by path: re-running a cached separation reuses it).
       let sample = Object.values(d.samples).find((x) => x.path === s.path);
       if (!sample) {
         const sid = ctx.newId(ID_PREFIX.sample);
@@ -101,14 +86,12 @@ export const audioAddStems = defineCommand({
         for (const k of ['frames', 'sampleRate', 'channels', 'hash'] as const) if (sample[k] === undefined) delete sample[k];
       }
       const color = paletteColor(d.channelOrder.length);
-      // Mixer insert, routed where the source insert goes.
       const insId = ctx.newId(ID_PREFIX.insert);
       d.mixer.inserts[insId] = {
         id: insId, name: label, color, volume: 1, pan: 0, stereoSep: 0, mute: false, solo: false,
         phaseInvert: false, swapLR: false, slots: {}, slotOrder: [], routes: { ...routes }, isMaster: false,
       };
       d.mixer.insertOrder.push(insId);
-      // Channel: a copy of the source audio-clip channel playing the stem.
       const chId = ctx.newId(ID_PREFIX.channel);
       const ch: Channel = {
         ...plain(base),
@@ -121,7 +104,6 @@ export const audioAddStems = defineCommand({
       };
       d.channels[chId] = ch;
       d.channelOrder.splice(srcChannelIndex >= 0 ? srcChannelIndex + 1 + i : d.channelOrder.length, 0, chId);
-      // Track directly under the source (stems in order), clip aligned with the source clip.
       const trkId = newTrackAfter(d, trackAt++, label, srcTrack?.color ?? '#3F3F52', srcTrack?.height ?? 44, ctx);
       const clipId = ctx.newId(ID_PREFIX.clip);
       const c: Clip = { ...baseClip, id: clipId, trackId: trkId, channelId: chId, mute: false };
@@ -136,8 +118,6 @@ export const audioAddStems = defineCommand({
   },
 });
 
-// ── Transcription → pattern ───────────────────────────────────────────
-
 const zNote = z.object({
   tick: z.number().int().min(0),
   key: z.number().int().min(0).max(127),
@@ -147,10 +127,8 @@ const zNote = z.object({
 });
 
 const zCreate = z.object({
-  /** Instrument plugin id (e.g. 'krypt.triosc', 'krypt.sampler'). */
   type: z.string(),
   name: z.string().min(1).max(64),
-  /** Sample for sample-based instruments ('factory:drums/kick.wav' or absolute). */
   samplePath: z.string().min(1).optional(),
   params: z.record(z.string(), z.number()).optional(),
   poly: z.object({ mono: z.boolean(), glideMs: z.number().min(0).max(5000), cutGroup: z.number().int().min(0).max(64), cutBy: z.number().int().min(0).max(64) }).partial().optional(),
@@ -159,9 +137,7 @@ const zCreate = z.object({
 
 const zLane = z
   .object({
-    /** Existing channel that receives the notes … */
     channelId: z.string().optional(),
-    /** … or a channel to create. */
     create: zCreate.optional(),
     notes: z.array(zNote).max(20000),
   })
@@ -176,7 +152,6 @@ export const audioAddTranscription = defineCommand({
     name: z.string().min(1).max(64),
     lanes: z.array(zLane).min(1).max(16),
     clipId: z.string().optional(),
-    /** Name of the new playlist track (default: the pattern name). */
     trackName: z.string().max(64).optional(),
     select: z.boolean().default(true),
   }),
@@ -218,7 +193,6 @@ export const audioAddTranscription = defineCommand({
     let clipId: string | null = null;
     if (src) {
       const srcTrack = d.playlist.tracks[src.trackId];
-      // Directly below the source clip's track.
       trackId = newTrackAfter(d, d.playlist.trackOrder.indexOf(src.trackId) + 1, a.trackName ?? a.name, srcTrack?.color ?? '#3F3F52', srcTrack?.height ?? 44, ctx);
       clipId = ctx.newId(ID_PREFIX.clip);
       d.playlist.clips[clipId] = { id: clipId, trackId, kind: 'pattern', start: src.start, length: src.length, offset: src.offset, mute: false, color: null, patternId };

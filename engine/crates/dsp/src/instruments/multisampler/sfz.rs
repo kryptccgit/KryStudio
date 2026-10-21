@@ -1,23 +1,5 @@
-//! SFZ subset parser for krypt.multisampler (pure: text in, regions out).
-//!
-//! Supported (shared/packs/types.ts `SFZ_OPCODES`, plus `ampeg_delay` and the
-//! common v1 aliases `loopmode` / `loopstart` / `loopend` / `offby`):
-//! - headers `<control>` (`default_path`), `<global>`, `<master>`, `<group>`,
-//!   `<region>`, with inheritance global → master → group → region (a later
-//!   level overrides an earlier one; a new `<global>` resets master and group,
-//!   a new `<master>` resets group);
-//! - `#define $NAME value` (substituted in every later line); `#include` is
-//!   not supported and produces a warning;
-//! - `//` line comments and `/* … */` block comments;
-//! - values with spaces for `sample` / `default_path` (the value runs to the
-//!   end of the line or to the next `opcode=`);
-//! - note names (`c4` = 60, `c#4`, `db4`) or numbers wherever a key goes.
-//!
-//! Unknown opcodes and headers are ignored and counted (one warning per file).
-
 use std::collections::BTreeMap;
 
-/// `loop_mode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoopMode {
     NoLoop,
@@ -26,37 +8,27 @@ pub enum LoopMode {
     LoopSustain,
 }
 
-/// `trigger`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trigger {
     Attack,
     Release,
 }
 
-/// `off_mode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OffMode {
-    /// ~5 ms fade.
     Fast,
-    /// The region's own release.
     Normal,
 }
 
-/// `pitch_keycenter=sample`: use the file's root key (WAV `smpl`), else 60.
 pub const KEYCENTER_FROM_SAMPLE: f32 = -1000.0;
 
-/// One region with every inherited opcode applied, still in SFZ units.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RegionDef {
-    /// `default_path` + `sample`, forward slashes, as written (relative to the .sfz).
     pub sample: String,
-    /// 1-based line of the `<region>` header (for messages).
     pub line: usize,
     pub lokey: i32,
     pub hikey: i32,
-    /// Fractional MIDI key, or [`KEYCENTER_FROM_SAMPLE`].
     pub pitch_keycenter: f32,
-    /// Cents per key.
     pub pitch_keytrack: f32,
     pub lovel: i32,
     pub hivel: i32,
@@ -64,34 +36,23 @@ pub struct RegionDef {
     pub xfin_hivel: i32,
     pub xfout_lovel: i32,
     pub xfout_hivel: i32,
-    /// Percent, -100..100.
     pub amp_veltrack: f32,
-    /// dB.
     pub volume: f32,
-    /// -100..100.
     pub pan: f32,
-    /// Cents.
     pub tune: f32,
-    /// Semitones.
     pub transpose: i32,
-    /// First frame kept.
     pub offset: u64,
-    /// Last frame played (inclusive); None = the whole file; Some(-1) = never plays.
     pub end: Option<i64>,
-    /// None = no_loop (no loop points are read from files).
     pub loop_mode: Option<LoopMode>,
     pub loop_start: Option<u64>,
     pub loop_end: Option<u64>,
-    /// Seconds.
     pub ampeg_delay: f32,
     pub ampeg_attack: f32,
     pub ampeg_hold: f32,
     pub ampeg_decay: f32,
-    /// Percent.
     pub ampeg_sustain: f32,
     pub ampeg_release: f32,
     pub trigger: Trigger,
-    /// dB per second the note was held.
     pub rt_decay: f32,
     pub seq_length: u32,
     pub seq_position: u32,
@@ -146,20 +107,15 @@ impl Default for RegionDef {
     }
 }
 
-/// Parse result.
 #[derive(Clone, Debug, Default)]
 pub struct SfzParsed {
     pub regions: Vec<RegionDef>,
-    /// Human sentences (bad values, `#include`, unsupported headers …).
     pub warnings: Vec<String>,
-    /// Occurrences of opcodes outside the supported subset.
     pub unknown_count: usize,
-    /// Their distinct names, in first-seen order.
     pub unknown_names: Vec<String>,
 }
 
 impl SfzParsed {
-    /// The one warning about unknown opcodes (None when there were none).
     pub fn unknown_warning(&self) -> Option<String> {
         if self.unknown_count == 0 {
             return None;
@@ -175,7 +131,6 @@ impl SfzParsed {
     }
 }
 
-/// Opcodes this parser understands (canonical names).
 pub const SUPPORTED: &[&str] = &[
     "default_path",
     "sample",
@@ -228,7 +183,6 @@ fn canonical(name: &str) -> &str {
     }
 }
 
-/// Note name (`c4`, `c#4`, `db4`, `C-1`) or number → MIDI key. c4 = 60.
 pub fn parse_key(s: &str) -> Option<i32> {
     let s = s.trim();
     if let Ok(n) = s.parse::<i32>() {
@@ -257,7 +211,6 @@ pub fn parse_key(s: &str) -> Option<i32> {
     } else if let Some(r) = rest.strip_prefix('♭') {
         (-1, r)
     } else if rest.len() > 1 && rest.starts_with('b') {
-        // "bb3" = B flat 3 (but "b3" is B3: the accidental needs a number after it)
         (-1, &rest[1..])
     } else {
         (0, rest)
@@ -266,7 +219,6 @@ pub fn parse_key(s: &str) -> Option<i32> {
     Some((octave + 1) * 12 + base + acc)
 }
 
-/// Strip `//` and `/* */` comments. `in_block` carries a block comment across lines.
 fn strip_comments(line: &str, in_block: &mut bool) -> String {
     let mut out = String::with_capacity(line.len());
     let b = line.as_bytes();
@@ -290,7 +242,6 @@ fn strip_comments(line: &str, in_block: &mut bool) -> String {
             i += 2;
             continue;
         }
-        // copy one UTF-8 char
         let ch_len = utf8_len(b[i]);
         let end = (i + ch_len).min(b.len());
         out.push_str(&line[i..end]);
@@ -316,7 +267,6 @@ fn is_ident(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }
 
-/// Replace `$NAME` with its #define (longest defined name that prefixes the identifier).
 fn substitute(line: &str, defines: &[(String, String)]) -> String {
     if defines.is_empty() || !line.contains('$') {
         return line.to_string();
@@ -349,7 +299,6 @@ fn substitute(line: &str, defines: &[(String, String)]) -> String {
     out
 }
 
-/// Is there an `ident=` starting at `j`?
 fn opcode_at(b: &[u8], j: usize) -> Option<usize> {
     if j >= b.len() || !is_ident_start(b[j]) {
         return None;
@@ -366,7 +315,6 @@ enum Tok {
     Op(String, String),
 }
 
-/// Tokenize one (comment-free, substituted) line.
 fn tokenize(line: &str) -> Vec<Tok> {
     let b = line.as_bytes();
     let mut toks = Vec::new();
@@ -389,7 +337,6 @@ fn tokenize(line: &str) -> Vec<Tok> {
         if let Some(eq) = opcode_at(b, i) {
             let name = line[i..eq].to_string();
             let vstart = eq + 1;
-            // The value runs to the next header or the next whitespace-preceded `opcode=`.
             let mut j = vstart;
             let mut vend = b.len();
             while j < b.len() {
@@ -407,7 +354,6 @@ fn tokenize(line: &str) -> Vec<Tok> {
             i = vend;
             continue;
         }
-        // junk: skip a word
         while i < b.len() && !b[i].is_ascii_whitespace() {
             i += 1;
         }
@@ -423,7 +369,6 @@ enum Level {
     Master,
     Group,
     Region,
-    /// An unsupported header: its opcodes are ignored.
     Other,
 }
 
@@ -452,7 +397,6 @@ impl Parser {
     }
 
     fn warn_value(&mut self, line: usize, msg: String) {
-        // Cap per file so a broken file can't produce thousands of lines.
         if self.warned_values < 10 {
             self.out.warnings.push(format!("line {line}: {msg}"));
         }
@@ -613,7 +557,6 @@ impl Parser {
             Level::Master => &mut self.master,
             Level::Group => &mut self.group,
             Level::Region => &mut self.region,
-            // <control> only holds default_path in our subset; opcodes before any header are ignored.
             Level::Control | Level::None => {
                 self.stray += 1;
                 return;
@@ -630,7 +573,6 @@ impl Parser {
     }
 }
 
-/// Parse SFZ text.
 pub fn parse(text: &str) -> SfzParsed {
     let mut p = Parser {
         out: SfzParsed::default(),

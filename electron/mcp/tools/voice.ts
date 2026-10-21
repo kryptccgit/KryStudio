@@ -1,10 +1,3 @@
-// Krypt Voice tools (research/21): list the voices, speak a line as an audio
-// clip (ad-libs, tags, intros, guide vocals) and sing typed lyrics on a
-// pattern's melody. The work happens in electron/voice (the Krypt Voice panel
-// and the piano roll's "Sing my notes" use the same service through IPC);
-// every call is one undo group under the agent. Agents never set the Fish key,
-// clone or remove voices: those stay in the user's hands (Settings ▸ Voice).
-
 import { z } from 'zod';
 import type { MainDeps, VoiceAccess } from '../types';
 import { defineTool, fail, ok, type RunCtx } from './types';
@@ -23,8 +16,6 @@ function runOpts(ctx: RunCtx) {
 }
 
 const apply = (ctx: RunCtx) => <T>(cmd: string, args: unknown): T => ctx.exec<T>(cmd, args);
-
-// ── list_voices ─────────────────────────────────────────────────────────
 
 export const listVoices = defineTool({
   name: 'list_voices',
@@ -45,8 +36,6 @@ export const listVoices = defineTool({
     return ok(message, { local: st.local, fish: st.fish, voices }, { text: lines.join('\n') });
   },
 });
-
-// ── generate_voice ──────────────────────────────────────────────────────
 
 export const generateVoice = defineTool({
   name: 'generate_voice',
@@ -77,8 +66,6 @@ export const generateVoice = defineTool({
     return ok(r.message ?? 'Added', { clipId: d.clipId, channelId: d.channelId, durationSec: d.durationSec, engine: d.engine, notes: d.notes });
   },
 });
-
-// ── sing_notes ──────────────────────────────────────────────────────────
 
 export const singNotes = defineTool({
   name: 'sing_notes',

@@ -1,13 +1,3 @@
-// Craft tools (owned by craft-tools): get_playbook, review_song,
-// add_transition. They turn "make an EDM song" into a FINISHED song in one
-// prompt: the playbook says how the genre is built (with real sounds
-// resolved), add_transition puts risers / fills / sweeps at the section
-// boundaries, and review_song is the agent's mandatory self-check before it
-// answers. research/10-sound-and-craft.md.
-//
-// The pure parts live next door: craftRecipe.ts (the playbook → build
-// order) and craftReview.ts (the checks).
-
 import fs from 'node:fs';
 import { z } from 'zod';
 import type { MainDeps } from '../types';
@@ -38,7 +28,6 @@ import { soundCloseness } from './closenessSounds';
 
 const zLabel = z.string().max(80).optional().describe("Short description of this change for the user's AI-history panel.");
 
-/** Where get_playbook / review_song find playbooks (tests pass a fixture registry). */
 export interface PlaybookRegistry {
   playbookFor(genre: string | null | undefined): Playbook | null;
   list(): readonly Playbook[];
@@ -46,7 +35,6 @@ export interface PlaybookRegistry {
 
 const DEFAULT_REGISTRY: PlaybookRegistry = { playbookFor, list: listPlaybooks };
 
-/** Presets and the factory sample index, from the same sound library load_preset uses (index null when not installed). */
 function soundsOf(deps: MainDeps): { presets: readonly Preset[]; samples: readonly FactorySample[] | null; picker: SoundPicker } {
   let presets: readonly Preset[] = FACTORY_PRESETS;
   let index: FactoryIndex | null = null;
@@ -57,18 +45,15 @@ function soundsOf(deps: MainDeps): { presets: readonly Preset[]; samples: readon
   } catch (err) {
     deps.log('warn', `Craft tools: couldn't read the sound library, using the factory presets: ${(err as Error)?.message ?? err}`);
   }
-  // The same picks write_pattern / load_preset make (playable presets, installed samples, name words refine).
   const picker: SoundPicker = {
     drum: (part, genre) =>
       bestDrumSample(deps, index, part.role, genre, [part.sample, part.name, ...(part.tags ?? [])].filter(Boolean).join(' ')) ??
-      // Non-drum roles with a sample kind (a vinyl texture, an 808 one-shot): the best of that kind.
       (part.sample && index ? (rankSamples(index.samples, { kind: part.sample, genre: genre ?? undefined, tags: part.tags }, 1)[0] ?? null) : null),
     preset: (part, genre) => bestPreset(deps, presets, part.role, genre, undefined, [part.name, ...(part.tags ?? [])].join(' ')),
   };
   return { presets, samples: index?.samples ?? null, picker };
 }
 
-/** The library style focus: its words (genre fallback) and its numbers (overrides). Never throws. */
 async function focusOf(deps: MainDeps, numbers: boolean): Promise<{ text: string; numbers: FocusNumbers | null } | null> {
   const lib = deps.library;
   if (!lib) return null;
@@ -92,8 +77,6 @@ function knownList(reg: PlaybookRegistry): string {
   return ids.length ? `Playbooks: ${ids.join(', ')}.` : 'No genre playbooks are installed in this build yet.';
 }
 
-// ── get_playbook ────────────────────────────────────────────────────────
-
 function getPlaybookTool(reg: PlaybookRegistry) {
   return defineTool({
     name: 'get_playbook',
@@ -111,7 +94,6 @@ function getPlaybookTool(reg: PlaybookRegistry) {
       const p = deps.doc.project;
       const focus = await focusOf(deps, true);
       const warnings: string[] = [];
-      // The reference song (study_reference): first read with its own best genre, then laid out for the chosen one.
       let ref = await projectReference(deps, a.reference, genreFrom(a.genre), ctx, warnings);
       const choice = chooseGenre({ arg: a.genre, projectGenre: p.meta.genre, brief: a.brief, referenceGenre: ref?.brief.genres[0]?.id ?? null, focusText: focus?.text });
       if (ref && choice.id && ref.brief.genre !== choice.id) ref = await studyReference(deps, ref.track, choice.id, ctx);
@@ -153,9 +135,6 @@ function getPlaybookTool(reg: PlaybookRegistry) {
   });
 }
 
-// ── review_song ─────────────────────────────────────────────────────────
-
-/** review_song renders whole songs: 256 bars is 8 minutes at 128 bpm. */
 const MAX_REVIEW_BARS = 256;
 
 function issueLine(x: ReviewIssue, i: number): string {
@@ -191,18 +170,15 @@ function reviewTool(reg: PlaybookRegistry) {
       }
       if (ref && choice.id && ref.brief.genre !== choice.id) ref = await studyReference(deps, ref.track, choice.id, ctx);
       const pb0 = choice.id ? reg.playbookFor(choice.id) : null;
-      // With a reference the plan it graded against is the reference's (sections, energy shape, loudness, contrast).
       const pb = ref ? adaptPlaybook(pb0 ?? genericPlaybook(choice.id), ref.brief).playbook : pb0;
       const targets = pb?.targets ?? GENERIC_TARGETS;
       ctx.progress?.(-1, 'rendering the song');
       const t0 = Date.now();
-      // With a reference, the same single render also writes every insert (stems) for the per-part balance.
       const out = await renderAndAnalyse(deps, whole ? { scope: 'song' } : { scope: 'bars', bars: scope }, { maxBars: MAX_REVIEW_BARS, audibleSong: whole, prefix: 'review', stems: !!ref });
       const renderMs = Date.now() - t0;
       const range = out.plan.range;
       if (!range) fail('review_song reviews the arranged song: switch to song mode content (arrange) first.');
       const { presets, samples } = soundsOf(deps);
-      // The render against the reference song: tempo, key, loudness, tonal balance, width, energy shape.
       const keyEst = out.plan.symbolic?.key.estimated ?? null;
       const comparison =
         ref && out.ok && out.raw
@@ -288,12 +264,9 @@ function reviewTool(reg: PlaybookRegistry) {
   });
 }
 
-// ── add_transition ──────────────────────────────────────────────────────
-
 export const TRANSITION_KINDS = ['riser', 'reverse-cymbal', 'impact', 'downlifter', 'sub-drop', 'sweep-up', 'sweep-down', 'snare-roll', 'drum-fill', 'filter-sweep', 'crash', 'silence', 'whoosh', 'tape-stop', 'swell'] as const;
 type Kind = (typeof TRANSITION_KINDS)[number];
 
-/** Audio kinds: which factory sample kind, whether it ENDS at the boundary or STARTS there, its default level. */
 const AUDIO_KINDS: Partial<Record<Kind, { sample: SampleKind; align: 'end' | 'start'; gainDb: number }>> = {
   riser: { sample: 'riser', align: 'end', gainDb: -8 },
   'reverse-cymbal': { sample: 'reverse-cymbal', align: 'end', gainDb: -8 },
@@ -304,17 +277,13 @@ const AUDIO_KINDS: Partial<Record<Kind, { sample: SampleKind; align: 'end' | 'st
   crash: { sample: 'crash', align: 'start', gainDb: -8 },
   downlifter: { sample: 'downlifter', align: 'start', gainDb: -9 },
   'sweep-down': { sample: 'sweep-down', align: 'start', gainDb: -10 },
-  // Wave 7b: a whoosh peaks as it crosses the boundary, a tape stop brings the music to a halt into a break or an
-  // ending, a swell (reverse reverb / volume) blooms into the downbeat. All three END on the boundary.
   whoosh: { sample: 'whoosh', align: 'end', gainDb: -10 },
   'tape-stop': { sample: 'tape-stop', align: 'end', gainDb: -8 },
   swell: { sample: 'swell', align: 'end', gainDb: -9 },
 };
 
-/** Recorded pack samples aren't normalised like the factory's (-1 dBFS): level them by their measured peak. */
 const FACTORY_PEAK_DB = -1;
 
-/** The default level of a picked sample: the kind's level, moved by how far a pack sample's peak sits from the factory's. */
 export function transitionGainDb(s: Pick<FactorySample, 'path' | 'peakDb'>, gainDb: number): number {
   if (!s.path.startsWith('pack:') || !Number.isFinite(s.peakDb)) return gainDb;
   return gainDb + Math.max(-6, Math.min(12, FACTORY_PEAK_DB - s.peakDb));
@@ -350,7 +319,6 @@ const pos = (tick: number, barTicks: number): string => {
   return step === 1 ? `${bar}` : `${bar}.${Number.isInteger(step) ? step : step.toFixed(2)}`;
 };
 
-/** A Playlist lane named "FX" (or "FX 2" …) free over [start, end): reused, else created under the used lanes. */
 function fxLane(t: TCtx, start: number, end: number): string {
   const p = t.deps.doc.project;
   const clips = Object.values(p.playlist.clips);
@@ -364,7 +332,6 @@ function fxLane(t: TCtx, start: number, end: number): string {
   return t.ctx.exec<{ id: string }>('playlist.addTrack', { name: fx.length ? `FX ${fx.length + 1}` : 'FX', index }).id;
 }
 
-/** Route a new FX audio channel into the shared "FX" insert (created from its own new insert the first time). */
 function intoFxInsert(t: TCtx, channelId: string, newInsertId: string): void {
   const p = t.deps.doc.project;
   const existing = p.mixer.insertOrder.find((id) => id !== newInsertId && !p.mixer.inserts[id].isMaster && p.mixer.inserts[id].name.trim().toLowerCase() === 'fx');
@@ -380,7 +347,6 @@ function sameParams(ch: Channel, want: Record<string, number>): boolean {
   return ['tempo_sync', 'src_bpm', 'reverse'].every((k) => Math.abs(val(k) - (want[k] ?? 0)) < 0.01);
 }
 
-/** Place one FX sample so it ends (risers) or starts (impacts) at the boundary; tempo-synced FX span exact bars. */
 async function placeAudio(t: TCtx, kind: Kind, s: FactorySample, at: number, opts: { align: 'end' | 'start'; gainDb: number; lengthBars?: number; reverse?: boolean }): Promise<void> {
   const p = t.deps.doc.project;
   const B = (at - 1) * t.barTicks;
@@ -438,7 +404,6 @@ async function placeAudio(t: TCtx, kind: Kind, s: FactorySample, at: number, opt
       const r = await t.deps.engine.sampleInfo(t.deps.project.resolveSamplePath(s.path));
       if (r.ok && r.data && r.data.frames > 0 && r.data.sampleRate > 0) info = { frames: r.data.frames, sampleRate: r.data.sampleRate, channels: r.data.channels };
     } catch {
-      /* fall back to the index's length */
     }
     if (!info.frames) info = { frames: Math.max(1, Math.round(s.lengthSec * 48000)), sampleRate: 48000, channels: s.channels };
     const r = t.ctx.exec<{ clipId: string; channelId: string; insertId: string }>('playlist.addAudio', { path: s.path, name: s.name, trackId: lane, start, ...info });
@@ -453,10 +418,6 @@ async function placeAudio(t: TCtx, kind: Kind, s: FactorySample, at: number, opt
   t.placed.push({ at, what: `${opts.reverse ? 'reversed ' : ''}"${safeName(s.name, 64)}"${from}${how ? ` (${how})` : ''}`, clipId, startBar: pos(start, t.barTicks), endBar: pos(start + length, t.barTicks) });
 }
 
-/**
- * The best sample of a kind from the library (factory + installed sound packs; closest to `bars` for tempo-synced
- * FX), or null. Ranking ties go to the factory sound; a pack sound wins when it fits the genre / length better.
- */
 function pickSample(t: TCtx, kind: SampleKind, bars?: number): FactorySample | null {
   const installed = (s: FactorySample) => {
     try {
@@ -471,19 +432,16 @@ function pickSample(t: TCtx, kind: SampleKind, bars?: number): FactorySample | n
   return (bars !== undefined ? rankSamples(pool, { ...q, bars }, 1)[0] : undefined) ?? rankSamples(pool, q, 1)[0] ?? null;
 }
 
-/** The original kit's crash (every install has it), measured by the engine when it can. */
 async function legacyCrash(t: TCtx): Promise<FactorySample> {
   let lengthSec = 2.5;
   try {
     const r = await t.deps.engine.sampleInfo(t.deps.project.resolveSamplePath(LEGACY_CRASH));
     if (r.ok && r.data && r.data.frames > 0 && r.data.sampleRate > 0) lengthSec = r.data.frames / r.data.sampleRate;
   } catch {
-    /* default length */
   }
   return { path: LEGACY_CRASH, name: 'Crash', kind: 'crash', tags: [], genres: [], lengthSec, channels: 2, peakDb: -1 };
 }
 
-/** The snare (else clap) channel for rolls and fills: `target`, else found by name, else a new sampler "Snare". */
 function snareChannel(t: TCtx, target?: string): Channel {
   const p = t.deps.doc.project;
   if (target) return findChannel(p, target);
@@ -500,7 +458,6 @@ function snareChannel(t: TCtx, target?: string): Channel {
 
 type NoteIn = { tick: number; key: number; dur: number; vel: number };
 
-/** 8ths → 16ths → 32nds over `bars`, velocity ramping up into the downbeat. */
 export function snareRollNotes(bars: number, barTicks: number, key: number): NoteIn[] {
   const total = bars * barTicks;
   const out: NoteIn[] = [];
@@ -513,7 +470,6 @@ export function snareRollNotes(bars: number, barTicks: number, key: number): Not
   return out;
 }
 
-/** A short snare fill: 16ths over the last half of the bar(s), crescendo. */
 export function drumFillNotes(bars: number, barTicks: number, key: number): NoteIn[] {
   const total = bars * barTicks;
   const out: NoteIn[] = [];
@@ -529,7 +485,6 @@ function noteSig(notes: Array<{ tick: number; key: number; vel: number }>): stri
     .join(';');
 }
 
-/** The roll / fill pattern: an identical one is reused, else a new one ("Snare Roll", "Snare Roll 2" …). */
 function ensurePattern(t: TCtx, base: string, ch: Channel, notes: NoteIn[], length: number): { id: string; name: string } {
   const p = t.deps.doc.project;
   const want = noteSig(notes);
@@ -668,7 +623,6 @@ export const addTransition = defineTool({
           for (const at of ats) await placeAudio(t, kind, s, at, { align: spec.align, gainDb: spec.gainDb, lengthBars: a.length_bars });
           break;
         }
-        // Fallbacks without the sample.
         if (kind === 'drum-fill') {
           fallbacks.push(`${noKit(t, kind, spec.sample)} Wrote a snare fill pattern instead.`);
           placePattern(t, kind, 'Drum Fill', ats, Math.max(1, Math.min(4, Math.round(a.length_bars ?? 1))), a.target, drumFillNotes);
@@ -711,7 +665,6 @@ export const addTransition = defineTool({
   },
 });
 
-/** The craft tools over a playbook registry (tests pass a fixture one). */
 export function craftTools(reg: PlaybookRegistry = DEFAULT_REGISTRY): ToolDef[] {
   return [getPlaybookTool(reg), reviewTool(reg), addTransition] as ToolDef[];
 }

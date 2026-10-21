@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Plugin Manager: third-party VST3 + CLAP plugins. Folders, rescans, the
-// installed list (format, vendor, kind), scan problems + the blocklist, and
-// the plugins running in the out-of-process host (with Reload after a
-// crash). VST2 is not supported — said plainly, with how many VST2 files
-// were seen.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AlertTriangle, Ban, FolderOpen, FolderPlus, Loader2, Plug, RefreshCw, RotateCcw, Search, ShieldOff, Trash2, Zap } from 'lucide-react';
 import type { PluginDescriptor } from '@shared/plugins/types';
@@ -118,7 +110,6 @@ export function PluginManager() {
   const [kind, setKind] = useState<'all' | 'instrument' | 'effect'>('all');
   const [format, setFormat] = useState<'all' | 'vst3' | 'clap'>('all');
 
-  // Fresh state (incl. running instances) whenever the panel opens.
   useEffect(() => {
     window.krypt.plugins
       .state()

@@ -1,10 +1,3 @@
-//! Synthesized drum models (Krypt-original), used by krypt.drumsynth in real
-//! time and by the factory kit generator offline.
-//!
-//! Recipes follow well-known analog drum-machine topologies (sine body with
-//! pitch sweep, multi-burst clap, six-square metallic hats, bridged-T style
-//! damped resonances for rim/tom) — implemented from scratch.
-
 use crate::blocks::filters::{Svf, SvfMode};
 use crate::blocks::osc::{blep_wave, Shape};
 use crate::blocks::{tanh_fast, Rng, TAU};
@@ -39,8 +32,6 @@ impl DrumKind {
         }
     }
 
-    /// The `decay` knob is scaled per voice so every voice sounds right at
-    /// the shared default (250 ms): hats short, open hat/crash long.
     pub fn decay_scale(self) -> f32 {
         match self {
             DrumKind::Kick => 1.4,
@@ -59,7 +50,6 @@ impl DrumKind {
 
 #[derive(Clone, Copy, Debug)]
 pub struct DrumParams {
-    /// Semitones (includes key tracking).
     pub tune: f32,
     pub decay_ms: f32,
     pub tone: f32,
@@ -76,7 +66,6 @@ impl Default for DrumParams {
 const HAT_FREQS: [f32; 6] = [205.3, 304.4, 369.6, 522.7, 540.0, 800.0];
 const CRASH_FREQS: [f32; 6] = [263.0, 401.0, 541.0, 627.0, 773.0, 911.0];
 
-/// One sounding drum hit.
 #[derive(Clone, Debug)]
 pub struct DrumHit {
     pub kind: DrumKind,
@@ -135,7 +124,6 @@ impl DrumHit {
         self.dc_y = 0.0;
         self.done = false;
         let tr = (p.tune / 12.0).exp2();
-        // total length: decay (to -60 dB) + margin
         let tail_ms = match kind {
             DrumKind::Clap => p.decay_ms * 1.5 + 30.0,
             DrumKind::Snare => p.decay_ms * 1.45,
@@ -143,7 +131,6 @@ impl DrumHit {
             _ => p.decay_ms,
         };
         self.len = ((tail_ms + 5.0) * 0.001 * self.sr) as u32;
-        // drive: tanh(k x)/tanh(k), peak-preserving
         let dk = match kind {
             DrumKind::Rim => 1.5 + p.drive * 6.0,
             _ => 1.0 + p.drive * 5.0,
@@ -153,12 +140,10 @@ impl DrumHit {
         let tone = p.tone as f64;
         match kind {
             DrumKind::Kick => {
-                // beater click: band-passed noise around 3-5 kHz (tone moves it)
                 self.flt[0].design(SvfMode::Bandpass, (3000.0 * (2f64).powf(tone * 1.2)).min(sr * 0.4), 0.8, 0.0, sr);
                 self.flt[1].design(SvfMode::Lowpass, (9000.0 * (2f64).powf(tone)).min(sr * 0.45), 0.7, 0.0, sr);
             }
             DrumKind::Tom | DrumKind::Perc => {
-                // click/noise path filter
                 self.flt[0].design(SvfMode::Highpass, 1500.0 + 2500.0 * tone, 0.7, 0.0, sr);
                 self.flt[1].design(SvfMode::Lowpass, 3000.0 * (2f64).powf(tone * 2.5), 0.7, 0.0, sr);
             }
@@ -175,7 +160,6 @@ impl DrumHit {
                 self.flt[0].design(SvfMode::Bandpass, fc, 1.4, 0.0, sr);
                 self.flt[1].design(SvfMode::Highpass, 480.0, 0.7, 0.0, sr);
                 self.flt[2].design(SvfMode::Highpass, 3000.0, 0.7, 0.0, sr);
-                // burst times (ms) with a little human jitter
                 for (i, b) in self.burst.iter_mut().enumerate() {
                     let base = [0.0, 8.5, 17.5, 27.0][i];
                     *b = (base + if i == 0 { 0.0 } else { self.rng.bipolar() * 1.1 }) * 0.001 * self.sr;
@@ -254,13 +238,12 @@ impl DrumHit {
         v
     }
 
-    /// Next mono sample. Sets `done` when finished.
     #[inline]
     pub fn next(&mut self) -> f32 {
         if self.done {
             return 0.0;
         }
-        let t = self.t as f32 / self.sr; // seconds
+        let t = self.t as f32 / self.sr;
         let ms = t * 1000.0;
         let p = self.p;
         let u = (ms / p.decay_ms).min(1.0);
@@ -270,9 +253,7 @@ impl DrumHit {
                 let a1 = 3.5 + 4.0 * p.tone;
                 let f = f_end * (1.0 + a1 * (-ms / 3.5).exp() + 1.2 * (-ms / 28.0).exp());
                 let body = self.sine(0, f);
-                // body envelope: holds, then falls to -60 dB at `decay`
                 let amp = (-6.9 * (0.25 * u + 0.75 * u * u)).exp();
-                // transient: band-passed noise "beater" + a short knock tick
                 let n = self.rng.bipolar();
                 let nb = self.flt[0].tick(n as f64) as f32;
                 let att = (ms / 0.15).min(1.0);
@@ -301,7 +282,6 @@ impl DrumHit {
             DrumKind::Clap => {
                 let n = self.rng.bipolar();
                 let s = self.t as f32;
-                // envelope = max of short bursts; the last one rings out as the tail
                 let mut env = 0.0f32;
                 for (i, &b) in self.burst.iter().enumerate() {
                     if s >= b {
@@ -336,7 +316,6 @@ impl DrumHit {
                 let env = if self.kind == DrumKind::ClosedHat {
                     att * (-6.9 * u).exp()
                 } else {
-                    // open hat: slower body with a quick initial drop
                     att * (0.35 * (-ms / 18.0).exp() + 0.65 * (-6.9 * u * u.sqrt()).exp())
                 };
                 self.drive(mix * env)
@@ -380,7 +359,6 @@ impl DrumHit {
                 let x = metal * 0.5 + n * 0.55;
                 let x = self.flt[0].tick(x as f64);
                 let x = self.flt[1].tick(x);
-                // brightness falls over the decay
                 let lp = self.flt[2].tick(x) as f32;
                 let dark = self.flt[3].tick(x) as f32;
                 let bright = 1.0 - 0.6 * u;
@@ -403,7 +381,6 @@ impl DrumHit {
                 self.drive(v * amp * 0.9 + click)
             }
         };
-        // DC blocker (~8 Hz)
         let r = 1.0 - TAU * 8.0 / self.sr;
         let out = y - self.dc_x + r * self.dc_y;
         self.dc_x = y;
@@ -412,7 +389,6 @@ impl DrumHit {
         if self.t >= self.len {
             self.done = true;
         }
-        // short end fade: never truncate with a click
         let left = self.len.saturating_sub(self.t);
         let fade_n = (0.004 * self.sr) as u32;
         if left < fade_n {
@@ -423,7 +399,6 @@ impl DrumHit {
     }
 }
 
-/// Render a whole hit offline (factory kit, tests).
 pub fn render(kind: DrumKind, p: DrumParams, sr: f32, seed: u32) -> Vec<f32> {
     let mut h = DrumHit::new(sr);
     h.trigger(kind, p, seed);

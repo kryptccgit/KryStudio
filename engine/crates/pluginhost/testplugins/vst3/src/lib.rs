@@ -189,7 +189,6 @@ impl IComponentTrait for GainProcessor {
     }
 }
 
-/// State layout: b"KTV3" + f64 LE gain.
 unsafe fn read_gain(state: *mut IBStream) -> Option<f64> {
     let s = ComRef::from_raw(state)?;
     let mut buf = [0u8; 12];

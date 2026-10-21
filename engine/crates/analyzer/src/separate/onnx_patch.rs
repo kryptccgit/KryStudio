@@ -1,18 +1,3 @@
-//! Load-time ONNX graph fix for the DirectML execution provider.
-//!
-//! The published HT-Demucs export (torch dynamo) writes `output_padding=[0]`
-//! explicitly on its 1-D `ConvTranspose` nodes. ONNX Runtime's DirectML EP
-//! rejects exactly that ("The parameter is incorrect", MLOperatorAuthorImpl)
-//! while accepting the identical node without the attribute (its default is
-//! all zeros). We drop all-zero `output_padding` attributes from top-level
-//! `ConvTranspose` nodes before creating the session, so the downloaded file
-//! stays byte-identical to the published one (its SHA-256 still verifies).
-//!
-//! This is a minimal protobuf rewriter: it walks ModelProto → GraphProto →
-//! NodeProto → AttributeProto, copies every other field verbatim and
-//! re-encodes the lengths of the messages it touched. Field numbers are from
-//! onnx/onnx.proto3.
-
 const MODEL_GRAPH: u32 = 7;
 const GRAPH_NODE: u32 = 1;
 const NODE_OP_TYPE: u32 = 4;
@@ -28,9 +13,7 @@ const WIRE_I32: u8 = 5;
 pub(crate) struct Field<'a> {
     pub num: u32,
     pub wire: u8,
-    /// The whole field (tag + payload) as it appears in the input.
     pub raw: &'a [u8],
-    /// Length-delimited payload (wire type 2) or the varint/fixed bytes.
     pub payload: &'a [u8],
 }
 
@@ -102,7 +85,6 @@ pub(crate) fn write_len_field(out: &mut Vec<u8>, num: u32, payload: &[u8]) {
     out.extend_from_slice(payload);
 }
 
-/// `true` when this AttributeProto is `output_padding` with only zeros.
 fn is_zero_output_padding(attr: &[u8]) -> Result<bool, String> {
     let mut name_ok = false;
     let mut all_zero = true;
@@ -110,7 +92,6 @@ fn is_zero_output_padding(attr: &[u8]) -> Result<bool, String> {
         match (f.num, f.wire) {
             (ATTR_NAME, WIRE_LEN) => name_ok = f.payload == b"output_padding",
             (ATTR_INTS, WIRE_LEN) => {
-                // packed repeated int64
                 let mut p = 0;
                 while p < f.payload.len() {
                     if read_varint(f.payload, &mut p)? != 0 {
@@ -165,9 +146,6 @@ fn rewrite_graph(graph: &[u8], removed: &mut usize) -> Result<Option<Vec<u8>>, S
     Ok(changed.then_some(out))
 }
 
-/// Returns the model with all-zero `output_padding` removed from top-level
-/// ConvTranspose nodes, and how many attributes were removed. Unchanged models
-/// come back as an identical copy.
 pub fn strip_zero_output_padding(model: &[u8]) -> Result<(Vec<u8>, usize), String> {
     let mut removed = 0;
     let mut out = Vec::with_capacity(model.len());
@@ -207,7 +185,6 @@ mod tests {
                 write_varint(&mut a, i);
             }
         }
-        // type = INTS (field 20, varint 7)
         write_varint(&mut a, (20 << 3) | u64::from(WIRE_VARINT));
         write_varint(&mut a, 7);
         a
@@ -230,7 +207,7 @@ mod tests {
         }
         g.extend(str_field(2, "graph-name"));
         let mut m = Vec::new();
-        write_varint(&mut m, (1 << 3) | u64::from(WIRE_VARINT)); // ir_version
+        write_varint(&mut m, (1 << 3) | u64::from(WIRE_VARINT));
         write_varint(&mut m, 10);
         write_len_field(&mut m, MODEL_GRAPH, &g);
         m.extend(str_field(2, "pytorch"));

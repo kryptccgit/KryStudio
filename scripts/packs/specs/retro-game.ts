@@ -1,11 +1,3 @@
-// Retro Game FX: 8-bit coins, jumps, power-ups, blips, lasers and explosions, chip-style alarms and falls, plus
-// arcade-announcer voice shots. research/14 §5 has each source's licence evidence.
-//   junkala  "The Essential Retro Video Game Sound Effects Collection [512 sounds]" by Juhani Junkala (SubspaceAudio),
-//            CC0 on opengameart.org/content/512-sound-effects-8-bit-style and in its INFO.txt. 44.1 kHz 16-bit mono WAV.
-//   kdigital Kenney "Digital Audio" (CC0, kenney.nl/assets/digital-audio + License.txt in the ZIP). Ogg Vorbis.
-//   kfighter Kenney "Voiceover Pack: Fighter" (CC0, kenney.nl/assets/voiceover-pack-fighter + License.txt).
-//   kvoice   Kenney "Voiceover Pack" (CC0, kenney.nl/assets/voiceover-pack + License.txt).
-// Left out: death screams, guns, footsteps/ladders/vehicles (not musical), byte-identical or near-identical takes.
 import type { GenreId } from '@shared/sounds/genres';
 import { sample, type SampleDef, type SamplePackSpec } from '../lib';
 
@@ -36,14 +28,12 @@ export const RETRO_GAME: SamplePackSpec = {
     kvoice: { type: 'zip', url: 'https://kenney.nl/media/pages/assets/voiceover-pack/3f7f168698-1677589897/kenney_voiceover-pack.zip', path: 'downloads/voiceover.zip' },
   },
   samples: [
-    // ── Junkala: pickups and rewards
     ...series('General Sounds/Coins', 'sfx_coin_single', range(1, 6), 'Coin Pickup', 'retro', ['coin', 'short', 'bright']),
     ...series('General Sounds/Coins', 'sfx_coin_double', range(1, 7), 'Double Coin', 'retro', ['coin', 'short', 'bright']),
     ...series('General Sounds/Coins', 'sfx_coin_cluster', [1, 2, 3, 4, 7, 8, 9], 'Coin Shower', 'retro', ['coin', 'bright']),
     ...series('General Sounds/Positive Sounds', 'sfx_sounds_powerup', range(1, 18), 'Power Up', 'retro', ['power-up', 'rising', 'bright']),
     ...series('General Sounds/Fanfares', 'sfx_sounds_fanfare', range(1, 3), 'Chip Fanfare', 'retro', ['fanfare', 'win', 'bright']),
     j('General Sounds/Weird Sounds', 'sfx_sound_bling.wav', 'Chip Bling', 'retro', ['bright', 'short']),
-    // ── jumps, falls, portals (pitch sweeps: good little risers / drops for game-flavoured beats)
     ...series('Movement/Jumping and Landing', 'sfx_movement_jump', range(1, 20), 'Chip Jump', 'retro', ['jump', 'rising', 'short']),
     ...series('Movement/Jumping and Landing', 'sfx_movement_jump', [9, 11, 13, 15, 17, 19].map((n) => n), 'Chip Landing', 'retro', ['landing', 'short']).map((s, i) => ({
       ...s,
@@ -56,7 +46,6 @@ export const RETRO_GAME: SamplePackSpec = {
     j('General Sounds/Weird Sounds', 'sfx_sound_shutdown2.wav', 'Chip Power Down 2', 'retro', ['falling', 'transition']),
     j('General Sounds/Weird Sounds', 'sfx_sound_vaporizing.wav', 'Chip Vaporize', 'zap', ['falling', 'noise']),
     j('General Sounds/Weird Sounds', 'sfx_sound_depressurizing.wav', 'Chip Air Release', 'retro', ['noise', 'long']),
-    // ── blips, menus, buttons
     ...series('General Sounds/Simple Bleeps', 'sfx_sounds_Blip', range(1, 11), 'Chip Blip', 'retro', ['blip', 'short']),
     ...series('General Sounds/Menu Sounds', 'sfx_menu_move', range(1, 5), 'Menu Move', 'retro', ['blip', 'short']),
     ...series('General Sounds/Menu Sounds', 'sfx_menu_select', range(1, 5), 'Menu Select', 'retro', ['blip', 'short']),
@@ -68,20 +57,17 @@ export const RETRO_GAME: SamplePackSpec = {
       j('General Sounds/Pause Sounds', `sfx_sounds_pause${n}_in.wav`, `Pause In ${n}`, 'retro', ['blip', 'short']),
       ...(n === 7 ? [] : [j('General Sounds/Pause Sounds', `sfx_sounds_pause${n}_out.wav`, `Pause Out ${n}`, 'retro', ['blip', 'short'])]),
     ]),
-    // ── hits, errors, damage
     ...series('General Sounds/Impacts', 'sfx_sounds_impact', range(1, 15), 'Chip Hit', 'retro', ['hit', 'short', 'punchy']),
     ...series('General Sounds/Simple Damage Sounds', 'sfx_damage_hit', range(1, 10), 'Chip Damage', 'retro', ['hit', 'short']),
     ...series('General Sounds/Negative Sounds', 'sfx_sounds_error', range(1, 15), 'Chip Error', 'retro', ['error', 'short']),
     ...series('General Sounds/Negative Sounds', 'sfx_sounds_damage', range(1, 3), 'Chip Hurt', 'retro', ['hit', 'short']),
     ...series('General Sounds/Negative Sounds', 'sfx_sounds_negative', range(1, 2), 'Chip Fail', 'retro', ['error', 'falling']),
-    // ── alarms (looping chip alarms; not tempo-synced)
     ...series('General Sounds/Alarms/Alarms', 'sfx_alarm_loop', range(1, 8), 'Chip Alarm Loop', 'retro', ['alarm', 'loop']),
     ...series('General Sounds/Alarms/Low health Alarms', 'sfx_lowhealth_alarmloop', [1, 2, 3, 5, 6, 7], 'Low Health Beep Loop', 'retro', ['alarm', 'loop']),
     j('General Sounds/Weird Sounds', 'sfx_sound_nagger1.wav', 'Chip Nag 1', 'retro', ['alarm']),
     j('General Sounds/Weird Sounds', 'sfx_sound_nagger2.wav', 'Chip Nag 2', 'retro', ['alarm']),
     j('General Sounds/Weird Sounds', 'sfx_sound_noise.wav', 'Chip Noise Burst', 'noise', ['noise', 'short']),
     j('General Sounds/Weird Sounds', 'sfx_sound_refereewhistle.wav', 'Chip Whistle', 'retro', ['whistle']),
-    // ── lasers and explosions
     ...series('Weapons/Lasers', 'sfx_wpn_laser', range(1, 12), 'Chip Laser', 'zap', ['laser', 'short'], GAME_TRAP),
     j('Weapons/Grenade Whistles', 'sfx_wpn_grenadewhistle1.wav', 'Chip Falling Whistle 1', 'downlifter', ['falling', 'whistle']),
     j('Weapons/Grenade Whistles', 'sfx_wpn_grenadewhistle2.wav', 'Chip Falling Whistle 2', 'downlifter', ['falling', 'whistle']),
@@ -96,7 +82,6 @@ export const RETRO_GAME: SamplePackSpec = {
     ...series('Explosions/Odd', 'sfx_exp_odd', range(1, 7), 'Chip Odd Blast', 'impact', ['explosion', 'gritty']),
     ...series('Explosions/Various', 'sfx_exp_various', range(1, 7), 'Chip Crash', 'impact', ['explosion']),
 
-    // ── Kenney Digital Audio: synth zaps, phasers and power-ups
     ...range(1, 9).map((n) => kd(`laser${n}.ogg`, `Synth Laser ${n}`, 'zap', ['laser', 'short'])),
     ...range(1, 7).map((n) => kd(`phaserUp${n}.ogg`, `Phaser Up ${n}`, 'zap', ['rising', 'short'])),
     ...range(1, 3).map((n) => kd(`phaserDown${n}.ogg`, `Phaser Down ${n}`, 'zap', ['falling', 'short'])),
@@ -116,7 +101,6 @@ export const RETRO_GAME: SamplePackSpec = {
     kd('threeTone2.ogg', 'Three Tone Chime', 'retro', ['blip']),
     kd('twoTone2.ogg', 'Two Tone Chime', 'retro', ['blip']),
 
-    // ── Kenney voiceovers: arcade-announcer shots (in our words: what is said)
     kf('fight.ogg', 'Announcer Fight', ['hype']),
     kf('ready.ogg', 'Announcer Ready', ['hype']),
     kf('begin.ogg', 'Announcer Begin', ['hype']),

@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Piano roll tool dialogs (FL's Tools menu): Quantize, Chop, Strum,
-// Arpeggiate, Randomize, Limit, Levels/LFO, Snap to scale. Every dialog
-// previews live on the roll (PianoRollController.previewTool runs the real
-// command on a scratch copy) and applies as ONE undo step. Settings are
-// remembered for the session, like FL.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useState, type ReactNode } from 'react';
 import { create } from 'zustand';
 import {
@@ -47,8 +39,6 @@ import { openGenerateDialog } from './generateDialog';
 import { openScriptsDialog } from './scriptsDialog';
 import { openSingDialog } from '../../voice/SingDialog';
 
-// ── Remembered settings ───────────────────────────────────────────────
-
 interface Prefs {
   quantize: { grid: number; strength: number; starts: boolean; ends: boolean; swing: number };
   chop: { mode: 'grid' | 'pieces'; grid: number; pieces: number };
@@ -78,9 +68,6 @@ function usePref<K extends keyof Prefs>(k: K): [Prefs[K], (patch: Partial<Prefs[
 
 const newSeed = (): number => Math.floor(Math.random() * 2 ** 31);
 
-// ── Formatting / options ──────────────────────────────────────────────
-
-/** Musical name for a tick span ("1/4 beat", "1 bar", "90 ticks"). */
 export function ticksLabel(t: number): string {
   const bar = ticksPerBar(getProject()?.transport.timeSig ?? { num: 4, den: 4 });
   if (t > 0 && t % bar === 0) return `${t / bar} bar${t === bar ? '' : 's'}`;
@@ -115,7 +102,6 @@ const SCALE_LABELS: Record<string, string> = {
   chromatic: 'Chromatic',
 };
 
-/** The key highlighted in the toolbar, if any. */
 function highlightedKey(): { root: number; scale: string } | null {
   const v = usePianoRollView.getState();
   return v.scale === 'off' ? null : { root: v.scaleRoot, scale: v.scale };
@@ -125,8 +111,6 @@ function scopeText(ctl: PianoRollController): string {
   const n = ctl.selectionSize;
   return n ? `${n} selected note${n === 1 ? '' : 's'}` : `all ${ctl.noteCount} notes of the channel`;
 }
-
-// ── Dialog shell with live preview ────────────────────────────────────
 
 function ToolForm({
   ctl,
@@ -151,7 +135,6 @@ function ToolForm({
   useEffect(() => {
     const raf = requestAnimationFrame(() => setErr(ctl.previewTool(cmd, args)));
     return () => cancelAnimationFrame(raf);
-    // args are compared by value (key)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctl, cmd, key]);
   return (
@@ -191,14 +174,12 @@ function open(ctl: PianoRollController, title: string, icon: LucideIcon, width: 
     icon,
     width,
     doc: ctl.rootDocument(),
-    near: ctl.rootRect() ?? undefined, // beside the roll: the live preview stays visible
+    near: ctl.rootRect() ?? undefined,
     subtitle: `Applies to ${scopeText(ctl)}`,
     render: body,
     onClose: () => ctl.clearPreview(),
   });
 }
-
-// ── Dialogs ───────────────────────────────────────────────────────────
 
 function QuantizeBody({ ctl, close }: { ctl: PianoRollController; close: () => void }) {
   const [p, set] = usePref('quantize');
@@ -460,8 +441,6 @@ function ScaleSnapBody({ ctl, close }: { ctl: PianoRollController; close: () => 
   );
 }
 
-// ── Entry points (menus, app commands) ────────────────────────────────
-
 export const toolDialogs = {
   quantize: (ctl: PianoRollController) => open(ctl, 'Quantize', Grid3x3, 420, (close) => <QuantizeBody ctl={ctl} close={close} />),
   chop: (ctl: PianoRollController) => open(ctl, 'Chop', Scissors, 400, (close) => <ChopBody ctl={ctl} close={close} />),
@@ -477,7 +456,6 @@ export const toolDialogs = {
   },
 };
 
-/** One-shot tools (no dialog). */
 export const quickTools = {
   quickChop: (ctl: PianoRollController) => void ctl.runTool('notes.chop', { mode: 'grid', grid: Math.max(1, ctl.snapGridTicks() > 1 ? ctl.snapGridTicks() : PPQ / 4) }, 'Quick chop'),
   glue: (ctl: PianoRollController) => void ctl.runTool('notes.glue', {}, 'Glue'),
@@ -490,7 +468,6 @@ export const quickTools = {
   toggleMute: (ctl: PianoRollController) => void ctl.runTool('notes.setProps', { mute: 'toggle' }, 'Mute / unmute'),
   toggleSlide: (ctl: PianoRollController) => void ctl.runTool('notes.setProps', { slide: 'toggle' }, 'Slide on / off'),
   setColor: (ctl: PianoRollController, color: number) => void ctl.runTool('notes.setProps', { color }, `Colour group ${color + 1}`),
-  /** Snap to the toolbar's highlighted scale directly; ask when no scale is highlighted. */
   scaleSnap: (ctl: PianoRollController) => {
     const k = highlightedKey();
     if (k) void ctl.runTool('notes.scaleSnap', { root: k.root, scale: k.scale }, `Snap to ${NOTE_NAMES_SHARP[k.root]} ${SCALE_LABELS[k.scale] ?? k.scale}`);
@@ -498,7 +475,6 @@ export const quickTools = {
   },
 };
 
-/** Note colour swatches for menus (draw colour + recolour the selection). */
 export function colorItems(ctl: PianoRollController): MenuItem[] {
   const cur = usePianoRollView.getState().noteColor;
   return NOTE_COLORS.map((c, i) => ({
@@ -514,7 +490,6 @@ export function colorItems(ctl: PianoRollController): MenuItem[] {
   }));
 }
 
-/** Tools ▸ Groove: timing + accents measured from real drummers (shared/grooves, GMD CC BY 4.0). */
 function grooveItems(ctl: PianoRollController): MenuItem[] {
   return [
     { type: 'header', label: 'Feel of real drummers · Groove MIDI Dataset (CC BY 4.0)' },
@@ -526,7 +501,6 @@ function grooveItems(ctl: PianoRollController): MenuItem[] {
   ];
 }
 
-/** The Tools menu of the piano roll toolbar (FL's piano-roll Tools menu). */
 export function toolsMenuItems(ctl: PianoRollController): MenuItem[] {
   const sc = (id: string) => shortcutFor(id);
   const k = highlightedKey();

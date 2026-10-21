@@ -1,38 +1,25 @@
-//! The Rust catalog must keep every id / param / range / default / unit /
-//! scale / options / group of the seed spec (tests/seed-catalog.json, a copy
-//! of the original shared/plugins/catalog.gen.json), except the deliberate
-//! changes listed in `DELIBERATE`. Plugins shipped later are frozen the
-//! same way by their own snapshot (tests/wave2-catalog.json).
-
 use krypt_studio_dsp::{create_effect, create_instrument, descriptors, PluginKind};
 use serde_json::Value;
 
-/// (plugin id, param id, field) that intentionally differ from the seed.
 const DELIBERATE: &[(&str, &str, &str)] = &[
-    // DrumSynth gained two voices (the factory kit's crash and perc models).
     ("krypt.drumsynth", "voice", "max"),
     ("krypt.drumsynth", "voice", "options"),
 ];
 
-/// Params added on top of the seed (must come after the seed params).
 const ADDED: &[(&str, &str)] = &[
     ("krypt.kick808", "gate"),
-    // wave 3A: audio-clip time-stretch / pitch-shift
     ("krypt.audioclip", "pitch"),
     ("krypt.audioclip", "formant"),
     ("krypt.audioclip", "tempo_sync"),
     ("krypt.audioclip", "src_bpm"),
     ("krypt.audioclip", "stretch"),
-    // wave 12.2: sampler region end (slices)
     ("krypt.sampler", "end"),
-    // wave 12.2b: TriOsc LFOs
     ("krypt.triosc", "lfo1Shape"), ("krypt.triosc", "lfo1Dest"), ("krypt.triosc", "lfo1Amount"), ("krypt.triosc", "lfo1Sync"),
     ("krypt.triosc", "lfo1Rate"), ("krypt.triosc", "lfo1Division"), ("krypt.triosc", "lfo1Retrig"), ("krypt.triosc", "lfo1Fade"),
     ("krypt.triosc", "lfo2Shape"), ("krypt.triosc", "lfo2Dest"), ("krypt.triosc", "lfo2Amount"), ("krypt.triosc", "lfo2Sync"),
     ("krypt.triosc", "lfo2Rate"), ("krypt.triosc", "lfo2Division"), ("krypt.triosc", "lfo2Retrig"), ("krypt.triosc", "lfo2Fade"),
 ];
 
-/// Plugins added after the seed (wave 2), appended after the seed plugins.
 const ADDED_PLUGINS: &[&str] = &[
     "krypt.fm",
     "krypt.wavetable",
@@ -47,23 +34,18 @@ const ADDED_PLUGINS: &[&str] = &[
     "krypt.pitch",
 ];
 
-/// Plugins added in wave 5 (real instruments), appended after the wave-2 plugins.
 const WAVE5_PLUGINS: &[&str] = &["krypt.multisampler"];
 
-/// Wave 12.2 devices, appended after the wave-5 plugins.
 const WAVE12_PLUGINS: &[&str] = &["krypt.heat", "krypt.tapeecho", "krypt.grain", "krypt.glue"];
 
-/// Auto Mix (research/20): the vocal de-esser, appended after the wave-12.2 devices.
 const AUTOMIX_PLUGINS: &[&str] = &["krypt.deesser"];
 
-/// research/13 §8.5: the loop slicer, appended after the de-esser.
 const SLICER_PLUGINS: &[&str] = &["krypt.slicer"];
 
 fn seed() -> Value {
     serde_json::from_str(include_str!("seed-catalog.json")).expect("seed json")
 }
 
-/// JSON equality where numbers compare by value (1 == 1.0).
 fn same(a: Option<&Value>, b: Option<&Value>) -> bool {
     match (a.and_then(Value::as_f64), b.and_then(Value::as_f64)) {
         (Some(x), Some(y)) => (x - y).abs() < 1e-6,
@@ -114,7 +96,6 @@ fn every_seed_plugin_and_param_exists_unchanged() {
             assert!(ADDED.contains(&(id, pid)), "{id}: undeclared extra param {pid}");
         }
     }
-    // the deliberate drumsynth change only appends options
     let ds = ours.iter().find(|p| p["id"] == "krypt.drumsynth").unwrap();
     let opts = ds["params"][0]["options"].as_array().unwrap();
     let seed_ds = seed_plugins.iter().find(|p| p["id"] == "krypt.drumsynth").unwrap();
@@ -122,14 +103,10 @@ fn every_seed_plugin_and_param_exists_unchanged() {
     assert_eq!(&opts[..seed_opts.len()], &seed_opts[..]);
 }
 
-/// (plugin id, param id, field) of wave-2 plugins that intentionally differ from the snapshot.
 const WAVE2_DELIBERATE: &[(&str, &str, &str)] = &[
-    // Wave 12.2: the vocoder goes up to 40 bands (stored values keep their meaning).
     ("krypt.vocoder", "bands", "max"),
 ];
 
-/// Wave-2 plugins: ids, param order and specs are frozen by the snapshot
-/// (params may only be appended; options may only be appended).
 #[test]
 fn wave2_plugins_keep_their_ids_and_params() {
     let snap: Value = serde_json::from_str(include_str!("wave2-catalog.json")).expect("wave2 json");
@@ -218,10 +195,8 @@ fn catalog_serializes_like_the_ts_types() {
     let p = &v["plugins"][0];
     assert!(p.get("usesSample").is_some());
     assert!(p["params"][0].get("min").is_some());
-    // optional fields are omitted, not null
     let s = serde_json::to_string(&v).unwrap();
     assert!(!s.contains(":null"), "nulls in catalog json");
-    // f32 values print in shortest form even through serde_json::Value
     assert!(!s.contains("0000000"), "f32 widening artifacts in catalog json");
     assert!(s.contains("\"default\":0.8") && s.contains("\"min\":0.1"));
 }

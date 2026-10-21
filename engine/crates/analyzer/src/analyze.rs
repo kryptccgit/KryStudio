@@ -1,13 +1,3 @@
-//! `analyze`: tempo, beats, key, chords, swing, sections, loudness, stereo,
-//! energy, and (on request) drum hits.
-//!
-//! Pipeline (all on a 22 050 Hz mono mix except loudness/levels/stereo,
-//! which use the file's own channels and rate):
-//! levels (engine analysis) → onset envelopes → chroma → tempo (DSP) →
-//! beats + downbeats (Beat This! small when `beatModelDir` is given, else
-//! the DSP tracker) → key → chords → swing → sections → energy curve.
-//! Drum hits (`drums`) run on their own thread from the same mono mix.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -23,14 +13,12 @@ use crate::{chords, drums, sections, tempo, transcribe, JobCtx, JobError};
 pub const BEAT_MEL_FILE: &str = "mel_spectrogram.onnx";
 pub const BEAT_MODEL_FILE: &str = "beat_this_small.onnx";
 
-/// Energy curve hop (seconds).
 pub const ENERGY_HOP_SEC: f32 = 0.5;
 
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     pub sections: bool,
     pub beat_model_dir: Option<PathBuf>,
-    /// Also transcribe drum hits (as `transcribe` mode 'drums', default sensitivity).
     pub drums: bool,
 }
 
@@ -42,7 +30,6 @@ pub fn run(args: &AnalyzeArgs, ctx: &JobCtx) -> Result<AudioAnalysis, JobError> 
     analyze_channels(&args.path, &data.channels, data.sample_rate, &opts, ctx)
 }
 
-/// Round to milliseconds (compact JSON, no false precision).
 pub(crate) fn ms(x: f32) -> f32 {
     if x.is_finite() {
         (x * 1000.0).round() / 1000.0
@@ -62,7 +49,6 @@ fn r2(x: f32) -> f32 {
 struct ModelBeats {
     beats: Vec<f32>,
     downbeats: Vec<f32>,
-    /// Mean beat probability at the detected beats (0..1).
     clarity: f32,
 }
 
@@ -70,7 +56,6 @@ fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
-/// Beat This! small (CPJKU, MIT) through the beat-this crate's pipeline on rten.
 fn model_beats(dir: &Path, x22: &[f32], ctx: &JobCtx, p0: f32, p1: f32) -> Result<ModelBeats, JobError> {
     let mel_frames = x22.len() / 441 + 1;
     let expected = (mel_frames.div_ceil(1536) + mel_frames.div_ceil(1488)).max(1);
@@ -93,7 +78,6 @@ fn model_beats(dir: &Path, x22: &[f32], ctx: &JobCtx, p0: f32, p1: f32) -> Resul
             JobError::Failed(format!("Beat tracking failed ({}): {e}", dir.display()))
         }
     })?;
-    // Logits are at 50 fps.
     let clarity = if a.beats.is_empty() {
         0.0
     } else {
@@ -102,15 +86,12 @@ fn model_beats(dir: &Path, x22: &[f32], ctx: &JobCtx, p0: f32, p1: f32) -> Resul
     Ok(ModelBeats { beats: a.beats, downbeats: a.downbeats, clarity })
 }
 
-/// Stage timings on stderr when `KRYPT_ANALYZER_TIMING` is set (diagnostics).
 fn timing(stage: &str, since: std::time::Instant) {
     if std::env::var_os("KRYPT_ANALYZER_TIMING").is_some() {
         eprintln!("analyzer timing: {stage} {:.3} s", since.elapsed().as_secs_f32());
     }
 }
 
-/// Harmonic change at each beat: cosine distance between the chroma of the
-/// beat before and the beat after.
 fn harmonic_change(chroma: &Chroma, beats: &[f32]) -> Vec<f32> {
     (0..beats.len())
         .map(|i| {
@@ -123,11 +104,8 @@ fn harmonic_change(chroma: &Chroma, beats: &[f32]) -> Vec<f32> {
         .collect()
 }
 
-/// Analyse decoded audio. `channels` are at `sr` (1 or 2 channels).
 pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Options, ctx: &JobCtx) -> Result<AudioAnalysis, JobError> {
     let has_model = opts.beat_model_dir.is_some();
-    // Progress: with a beat model, the model reports 0.05..0.85 while the DSP
-    // front end runs alongside it silently; without one, the DSP stages do.
     let front = if has_model { 0.05 } else { 0.3 };
     let dsp_step = |f: f32| {
         if !has_model {
@@ -147,8 +125,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
     dsp_step(0.05);
     let fsr = ANALYSIS_SR as f32;
 
-    // The beat model (seconds of work) runs on its own thread while the DSP
-    // front end runs here.
     let (model_res, drum_res, dsp) = std::thread::scope(|scope| {
         let model_thread = opts.beat_model_dir.as_ref().map(|dir| {
             let x = &x;
@@ -159,7 +135,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
                 r
             })
         });
-        // Drum hits: the same algorithm and default as `transcribe` 'drums'.
         let drum_thread = opts.drums.then(|| {
             let x = &x;
             scope.spawn(move || {
@@ -171,7 +146,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
         });
         let t_dsp = std::time::Instant::now();
         let dsp = (|| -> Result<_, JobError> {
-            // ── measured: levels, stereo, loudness ──
             let levels = krypt_studio_dsp::analysis::analyze(left, right, sr);
             let (mut em, mut es) = (0f64, 0f64);
             for i in 0..n {
@@ -187,7 +161,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
             let loud = Loudness::measure(&chans, sr);
             ctx.check()?;
             dsp_step(0.12);
-            // ── front end at 22 050 Hz ──
             let ons: Onsets = features::onsets(&x, fsr, ctx)?;
             dsp_step(0.2);
             let chroma = key::chroma(&x, fsr, ctx)?;
@@ -212,10 +185,8 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
     let mut sources: Vec<String> = vec!["levels: EBU R128 (ebur128) + krypt-dsp spectrum".into()];
     let mut estimated: Vec<String> = Vec::new();
 
-    // ── tempo + beats ──
     let dsp_tempo = tempo::estimate_tempo(&ons.env, fps, ons.onsets.len());
     let mut model: Option<ModelBeats> = None;
-    // Same "is there a pulse at all" gate as the DSP tempo: ≥ 0.75 onsets/s.
     let pulse_possible = ons.onsets.len() as f32 >= 0.75 * duration;
     match model_res {
         None => {}
@@ -235,14 +206,12 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
     let mut tempo_out: Option<Tempo> = None;
     let mut beats_out: Option<Beats> = None;
     let mut beat_frames: Vec<f32> = Vec::new();
-    // Onset times (s), for extending beat grids into sparse edges.
     let lat = features::onset_latency(1024, ANALYSIS_SR as f32);
     let onset_secs: Vec<f32> = ons.onsets.iter().map(|&f| f as f32 / fps + lat).collect();
     if let Some(m) = model {
         let bpm = tempo::bpm_from_beats(&m.beats).unwrap_or(0.0);
         if bpm > 0.0 {
             let period = 60.0 / bpm;
-            // Regularity: how far the model's intervals sit from whole periods.
             let dev: Vec<f32> = m.beats.windows(2).map(|w| {
                 let d = w[1] - w[0];
                 (d - (d / period).round().max(1.0) * period).abs() / period
@@ -250,8 +219,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
             let regular = (1.0 - features::mean(&dev) / 0.1).clamp(0.0, 1.0);
             let conf = (0.6 * m.clarity + 0.4 * regular).clamp(0.0, 1.0);
             tempo_out = Some(Tempo { bpm: r2(bpm), confidence: r2(conf), alternatives: alternatives(bpm, dsp_tempo.as_ref()) });
-            // Beat This! can fall to half time for a stretch (a sparse intro) or
-            // drop beats: fill the grid at the tracked tempo.
             let beats = tempo::smooth_beats(&tempo::regularize_beats(&m.beats, period, &onset_secs, duration), 4);
             let nearest = |t: f32| -> Option<usize> {
                 let i = beats.partition_point(|&b| b < t);
@@ -259,8 +226,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
             };
             let mut idx: Vec<usize> = m.downbeats.iter().filter_map(|&d| nearest(d)).collect();
             idx.dedup();
-            // Bar length: most common beat count between consecutive downbeats
-            // (2..7; 8..14 count as two bars), default 4.
             let mut counts = [0u32; 8];
             for w in idx.windows(2) {
                 let d = w[1] - w[0];
@@ -271,7 +236,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
                 }
             }
             let mut bpb = counts.iter().enumerate().max_by_key(|(_, &n)| n).filter(|(_, &n)| n > 0).map(|(i, _)| i).unwrap_or(4);
-            // One consistent bar phase: the most common downbeat index mod bpb.
             let phase_of = |bpb: usize| -> usize {
                 let mut votes = vec![0u32; bpb];
                 for &i in &idx {
@@ -281,8 +245,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
             };
             let mut phase = phase_of(bpb);
             if bpb == 2 {
-                // 2/4 readings are nearly always 4/4 with a strong beat 3: pick the
-                // half with more harmonic change and low-end weight (first on a tie).
                 let low = |t: f32| -> f32 {
                     let c = ((t - lat) * fps).round() as i64;
                     (c - 2..=c + 2).filter(|&k| k >= 0 && (k as usize) < ons.low.len()).map(|k| ons.low[k as usize]).fold(0.0, f32::max)
@@ -322,8 +284,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
             tempo_out = Some(Tempo { bpm: r2(bpm), confidence: r2(t.confidence), alternatives: t.alternatives.iter().map(|&a| r2(a)).collect() });
             sources.push("tempo: krypt-dsp onset autocorrelation".into());
             if times.len() >= 4 {
-                // The tracker trims weak edge beats; extend the grid while it
-                // keeps landing on onsets (a hats-only intro or outro).
                 let times = tempo::smooth_beats(&tempo::regularize_beats(&times, 60.0 / bpm, &onset_secs, duration), 4);
                 let frames: Vec<f32> = times.iter().map(|t| (t - lat) * fps).collect();
                 let change = harmonic_change(&chroma, &times);
@@ -342,11 +302,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
     }
     ctx.check()?;
 
-    // ── key + chords ──
-    // Chords need a key-able (tonal) file: drum stems with pitched kicks and
-    // tuned rolls pass the chroma gates but not the profile fit. Key-neutral
-    // chords re-rank near-tied keys by harmonic function; the reported
-    // chords then use the final key.
     let t_chords = std::time::Instant::now();
     let key_guess = if key::detect_key(&chroma).is_some() {
         let neutral = chords::estimate_full(&chroma, beats_out.as_ref(), None, duration);
@@ -388,8 +343,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
     }
     step(after_model + (1.0 - after_model) * 0.3);
 
-    // ── swing ──
-    // Swing lives mostly in hats/percussion: broadband flux + high-region rise.
     let swing_env: Vec<f32> = {
         let (m1, m2) = (ons.env.iter().cloned().fold(1e-9, f32::max), ons.rise[2].iter().cloned().fold(1e-9, f32::max));
         ons.env.iter().zip(&ons.rise[2]).map(|(a, b)| a / m1 + b / m2).collect()
@@ -400,7 +353,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
     }
     ctx.check()?;
 
-    // ── sections ──
     let mut sections_out = Vec::new();
     if opts.sections {
         let (grid, bars, fpb): (Vec<f32>, Vec<f32>, usize) = match &beats_out {
@@ -430,7 +382,6 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
     ctx.check()?;
     step(after_model + (1.0 - after_model) * 0.8);
 
-    // ── energy + onset rate ──
     let energy = Energy { hop_sec: ENERGY_HOP_SEC, lufs: loud.short_term_curve(ENERGY_HOP_SEC, duration).into_iter().map(r2).collect() };
     let onset_rate = if duration > 0.0 { r2(ons.onsets.len() as f32 / duration) } else { 0.0 };
     step(1.0);
@@ -457,12 +408,9 @@ pub fn analyze_channels(path: &str, channels: &[Vec<f32>], sr: f32, opts: &Optio
     })
 }
 
-/// Half/double readings for a model tempo, the DSP reading's octave first
-/// when it disagrees with the model.
 fn alternatives(bpm: f32, dsp: Option<&tempo::TempoEstimate>) -> Vec<f32> {
     let mut alts: Vec<f32> = [bpm * 0.5, bpm * 2.0].into_iter().filter(|a| (tempo::MIN_BPM * 0.9..=tempo::MAX_BPM * 1.1).contains(a)).collect();
     if let Some(d) = dsp {
-        // Put the alternative closest to the DSP reading first.
         alts.sort_by(|a, b| (a / d.bpm).ln().abs().total_cmp(&(b / d.bpm).ln().abs()));
     }
     alts.into_iter().map(r2).collect()

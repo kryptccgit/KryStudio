@@ -1,5 +1,3 @@
-// Factory FX and TEXTURE presets: zaps, sweeps, risers, impacts and background beds.
-
 import type { InstrumentPreset } from '../../types';
 import { DIV, HALL, K808, LFO, ROOM, SH, T, TRI, WAVE, delay, eq, filter, k808, preset, reverb, tri, wave } from './kit';
 

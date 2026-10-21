@@ -1,6 +1,3 @@
-/* Krypt dockview theme: void panels, hairlines, the gradient only as the
-   focused-tab rail. Loaded after dockview.css. */
-
 .dockview-theme-krypt {
   color-scheme: dark;
   --dv-paneview-active-outline-color: #a855f7;
@@ -76,7 +73,6 @@
   border-right: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-/* Focused window: the gradient rail under its active tab (the one accent). */
 .dockview-theme-krypt .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-active-tab::after {
   content: '';
   position: absolute;
@@ -98,7 +94,6 @@
   pointer-events: none;
 }
 
-/* Floating windows: glass card with rounded corners. */
 .dockview-theme-krypt .dv-resize-container {
   border-radius: 10px;
   overflow: hidden;
@@ -121,7 +116,6 @@
   border-radius: 6px;
 }
 
-/* Krypt tab content */
 .krypt-tab {
   display: flex;
   align-items: center;

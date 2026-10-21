@@ -1,6 +1,3 @@
-// Panel registry: every dockable window kind, its title, icon, FL shortcut
-// and where it opens by default. Pure data — the WindowManager reads it.
-
 import { Blocks, BookOpen, Bot, BrainCircuit, FolderTree, Grid3x3, History, Info, LayoutGrid, LibraryBig, ListMusic, Piano, Plug, Settings, SlidersVertical, type LucideIcon } from 'lucide-react';
 
 export type SingletonKind = 'browser' | 'channelRack' | 'pianoRoll' | 'playlist' | 'mixer' | 'agent' | 'history' | 'settings' | 'about' | 'pluginManager' | 'modelManager' | 'library' | 'guides' | 'session';

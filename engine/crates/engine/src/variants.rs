@@ -1,19 +1,3 @@
-//! Time-stretched / pitch-shifted copies ("variants") of samples for
-//! `krypt.audioclip` channels (docs/ENGINE_PROTOCOL.md §4, audio clips).
-//!
-//! A variant is rendered OFF the audio thread (Signalsmith Stretch via
-//! krypt-studio-stretch) — by the variant workers for the live engine, inline
-//! for offline renders — and reaches the instrument like any sample: as an
-//! `Arc<SampleData>` given to `set_sample` when the compiler (re)creates the
-//! instance. The audio thread only ever plays plain buffers.
-//!
-//! The cache is keyed by sample identity (resolved path + file mtime), the
-//! time ratio (quantized to 1e-9), the pitch (quantized to 0.001 st), the
-//! formant flag and the clip's warp map (warp.rs: mode, markers, mode
-//! settings and, when they matter, the project tempo). It is LRU-bounded by `cap` bytes: entries that an instrument
-//! still holds or that the live project currently wants are never evicted
-//! (correctness over the cap; going over is logged once).
-
 use crate::model_ext::WarpMap;
 use crate::warp::{self, WarpKey};
 use krypt_studio_dsp::SampleData;
@@ -24,15 +8,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-/// Ratio quantum (1e-9: no audible drift even over 30 min of audio).
 const RATIO_SCALE: f64 = 1e9;
-/// Pitch quantum: 0.001 semitone (0.1 cent).
 const SEMI_SCALE: f64 = 1000.0;
-/// Default memory cap for cached variants (bytes of f32 sample data).
 pub const DEFAULT_CAP_BYTES: usize = 1 << 30;
-/// Longest variant we render (same limit as decoded samples).
 pub const MAX_VARIANT_SECONDS: f64 = 30.0 * 60.0;
-/// Failure entries kept (cleared wholesale beyond this).
 const MAX_FAILED: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -42,16 +21,12 @@ pub struct VariantKey {
     ratio_q: i64,
     semis_q: i32,
     formant: bool,
-    /// Warp markers / mode (None = the plain Signalsmith stretch path).
     warp: Option<Arc<WarpKey>>,
 }
 
-/// What a variant's timing is: (quantized Stretch ratio, warp marker hash or 0).
 pub type Timing = (i64, u64);
 
 impl VariantKey {
-    /// Quantizes; the formant flag only matters when pitched. Ratios are
-    /// clamped to the stretcher's range.
     pub fn new(path: &Path, mtime: Option<SystemTime>, ratio: f64, semitones: f64, keep_formants: bool) -> Self {
         let ratio = if ratio.is_finite() { ratio.clamp(MIN_RATIO, MAX_RATIO) } else { 1.0 };
         let semitones = if semitones.is_finite() { semitones.clamp(-48.0, 48.0) } else { 0.0 };
@@ -59,10 +34,6 @@ impl VariantKey {
         let semis_q = (semitones * SEMI_SCALE).round() as i32;
         Self { path: path.to_path_buf(), mtime, ratio_q, semis_q, formant: keep_formants && semis_q != 0, warp: None }
     }
-    /// The key for a clip with an optional warp map at the project tempo
-    /// (warp::resolve), plus a warning if the map was unusable. Normalized so
-    /// that 'complex' without markers, and any mode without markers at ratio
-    /// 1 and 0 st, is exactly the un-warped key (bit-identical playback).
     #[allow(clippy::too_many_arguments)]
     pub fn warped(path: &Path, mtime: Option<SystemTime>, ratio: f64, semitones: f64, keep_formants: bool, map: Option<&WarpMap>, bpm: f64) -> (Self, Option<String>) {
         let r = warp::resolve(map, ratio, semitones, bpm);
@@ -87,14 +58,12 @@ impl VariantKey {
     pub fn keep_formants(&self) -> bool {
         self.formant
     }
-    /// Equal values = identical timing (pitch / formants / warp mode may differ).
     pub fn timing(&self) -> Timing {
         (self.ratio_q, self.warp.as_ref().map_or(0, |w| w.timing_hash()))
     }
     pub fn is_identity(&self) -> bool {
         self.ratio_q == RATIO_SCALE as i64 && self.semis_q == 0 && self.warp.is_none()
     }
-    /// "drums.wav ×1.2500 +3.00 st (formants kept)"
     pub fn describe(&self) -> String {
         let name = self.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| self.path.display().to_string());
         let mut s = format!("'{name}' ×{:.4}", self.ratio());
@@ -108,7 +77,6 @@ impl VariantKey {
     }
 }
 
-/// Timing of the original sample (ratio 1, no warp markers).
 pub const IDENTITY_TIMING: Timing = (RATIO_SCALE as i64, 0);
 
 pub enum VLookup {
@@ -132,8 +100,6 @@ struct Inner {
     logs: Vec<(&'static str, String)>,
 }
 
-/// LRU cache of rendered variants, shared by the control thread, the variant
-/// workers and render threads (lives inside `SampleCache`).
 pub struct VariantCache {
     inner: Mutex<Inner>,
     cap: AtomicUsize,
@@ -168,7 +134,6 @@ impl VariantCache {
         }
     }
 
-    /// Store a rendered variant (`pinned`: the live project wants it right now).
     pub fn insert(&self, key: VariantKey, data: Arc<SampleData>, pinned: bool) {
         let bytes = data_bytes(&data);
         let cap = self.cap.load(Ordering::Relaxed);
@@ -194,8 +159,6 @@ impl VariantCache {
         g.failed += 1;
     }
 
-    /// The live project's current set of wanted variants: these are never
-    /// evicted (a variant rendered but not yet installed must survive).
     pub fn set_pins(&self, wanted: &HashSet<VariantKey>) {
         let cap = self.cap.load(Ordering::Relaxed);
         let mut g = self.lock();
@@ -207,7 +170,6 @@ impl VariantCache {
         Self::evict(&mut g, cap);
     }
 
-    /// Re-apply the cap (periodic prune).
     pub fn trim(&self) {
         let cap = self.cap.load(Ordering::Relaxed);
         Self::evict(&mut self.lock(), cap);
@@ -230,14 +192,12 @@ impl VariantCache {
         self.len() == 0
     }
 
-    /// Log lines produced by evictions (drained by whoever can emit logs).
     pub fn drain_logs(&self) -> Vec<(&'static str, String)> {
         std::mem::take(&mut self.lock().logs)
     }
 
     fn evict(g: &mut Inner, cap: usize) {
         while g.bytes > cap {
-            // Least recently used entry nobody holds and the project doesn't want.
             let victim = g
                 .map
                 .iter()
@@ -269,9 +229,6 @@ impl VariantCache {
     }
 }
 
-/// Render a variant of `src` (blocking: worker / render threads only).
-/// The result has `src`'s sample rate and root key and exactly
-/// `round(frames × ratio)` frames (warped: the time map's end, warp.rs).
 pub fn compute(src: &SampleData, key: &VariantKey, cancel: &AtomicBool) -> Result<SampleData, StretchError> {
     let sr = src.sample_rate as f64;
     let frames = src.channels.iter().take(2).map(|c| c.len()).min().unwrap_or(0);
@@ -292,22 +249,18 @@ pub fn compute(src: &SampleData, key: &VariantKey, cancel: &AtomicBool) -> Resul
     Ok(SampleData { sample_rate: src.sample_rate, channels, root_key: src.root_key })
 }
 
-/// A job for the live variant workers.
 pub struct VariantJob {
     pub key: VariantKey,
     pub source: Arc<SampleData>,
     pub cancel: Arc<AtomicBool>,
 }
 
-/// Outcome reported back to the control thread.
 pub enum VariantOutcome {
-    /// Rendered and cached (seconds of compute).
     Ready(f64),
     Failed(String),
     Cancelled,
 }
 
-/// Run one job: render, cache, report. Never panics.
 pub fn run_job(cache: &VariantCache, job: &VariantJob) -> VariantOutcome {
     if job.cancel.load(Ordering::Relaxed) {
         return VariantOutcome::Cancelled;
@@ -336,9 +289,6 @@ pub fn run_job(cache: &VariantCache, job: &VariantJob) -> VariantOutcome {
     }
 }
 
-/// Render several variants in parallel, blocking until all are cached
-/// (offline renders: correctness over speed) or `cancel` is raised.
-/// Returns failures.
 pub fn compute_all(cache: &VariantCache, jobs: Vec<(VariantKey, Arc<SampleData>)>, cancel: &Arc<AtomicBool>) -> Vec<String> {
     if jobs.is_empty() {
         return Vec::new();
@@ -389,7 +339,7 @@ mod tests {
     #[test]
     fn lru_eviction_respects_pins_and_holders() {
         let c = VariantCache::default();
-        let d = Arc::new(sd(1000)); // 4000 bytes
+        let d = Arc::new(sd(1000));
         c.set_cap(10_000);
         c.insert(key(1.1), d.clone(), false);
         drop(d);
@@ -398,7 +348,6 @@ mod tests {
             VLookup::Hit(h) => h,
             _ => panic!(),
         };
-        // 3 × 4000 > 10_000: 1.1 and 1.3 are held, 1.2 pinned → nothing evictable yet.
         let held3 = Arc::new(sd(1000));
         c.insert(key(1.3), held3.clone(), false);
         assert_eq!(c.len(), 3);
@@ -408,7 +357,6 @@ mod tests {
         assert!(matches!(c.lookup(&key(1.1)), VLookup::Miss), "unheld LRU entry evicted");
         assert!(matches!(c.lookup(&key(1.2)), VLookup::Hit(_)));
         assert!(c.drain_logs().iter().any(|(l, m)| *l == "info" && m.contains("evicted")));
-        // Unpin 1.2, release 1.3 and touch it: 1.2 is now the LRU victim.
         drop(held3);
         c.set_pins(&HashSet::new());
         let _ = c.lookup(&key(1.3));

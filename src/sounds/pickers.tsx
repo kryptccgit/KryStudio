@@ -1,8 +1,3 @@
-// Openers for the preset browser: the channel preset popover (preset bar),
-// the chain popover (Mixer FX header) and the "Load chain…" dialog (insert
-// menus). The popovers ride on the Menu system (custom item), so they
-// position, close on outside click / Esc and work in popout windows.
-
 import { Layers } from 'lucide-react';
 import { getProject } from '../doc/store';
 import { toggleMenuAt } from '../components/Menu';
@@ -16,7 +11,6 @@ function fitWidth(el: Element, want: number): number {
   return Math.max(260, Math.min(want, win.innerWidth - 16));
 }
 
-/** The preset bar's browser, anchored under `anchor` (second click closes it). */
 export function toggleChannelPresetPopover(anchor: HTMLElement, channelId: string): void {
   const width = fitWidth(anchor, 380);
   toggleMenuAt(
@@ -39,7 +33,6 @@ export function toggleChannelPresetPopover(anchor: HTMLElement, channelId: strin
   );
 }
 
-/** The chain browser for an insert, anchored under `anchor`. */
 export function toggleChainPopover(anchor: HTMLElement, insertId: string): void {
   const ins = getProject().mixer.inserts[insertId];
   if (!ins) {
@@ -61,7 +54,6 @@ export function toggleChainPopover(anchor: HTMLElement, insertId: string): void 
   );
 }
 
-/** "Load chain…" from an insert menu: the chain browser in a dialog. */
 export function openChainPicker(insertId: string, doc?: Document | null): void {
   const ins = getProject().mixer.inserts[insertId];
   if (!ins) {

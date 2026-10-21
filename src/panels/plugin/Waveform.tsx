@@ -1,18 +1,11 @@
-// Sample waveform from engine.peaks (cached per path). Degrades to a flat
-// line + a note when the engine is unavailable. `overlay` draws on top in
-// source-time coordinates (x = sec / durationSec × width): the Audio Clip's
-// warp markers and beat grid (./WarpOverlay.tsx).
-
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { setupCanvas } from '../../render/frameLoop';
 
 interface WavePeaks {
   data: number[];
-  /** Source length (frames / sampleRate), null when the engine didn't say. */
   durationSec: number | null;
 }
 
-/** What an overlay needs to place things on the waveform. */
 export interface WaveGeometry {
   width: number;
   height: number;
@@ -55,7 +48,6 @@ export function Waveform({
   path: string | null;
   color: string;
   height?: number;
-  /** Drawn over the waveform once the peaks are loaded. */
   overlay?: (g: WaveGeometry) => ReactNode;
 }) {
   const wrap = useRef<HTMLDivElement>(null);

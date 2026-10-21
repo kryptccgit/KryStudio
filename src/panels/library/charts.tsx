@@ -1,9 +1,3 @@
-// Style profile charts. Single-series marks use the Krypt purple; the
-// minor / major split uses indigo + pink (validated on the dark panel:
-// CVD ΔE 14.7, normal ΔE 26.9, contrast ≥ 3:1). Thin marks, 4px rounded
-// data ends, 2px gaps, hairline guides; every mark reports its value to
-// the card's readout line on hover (values never live in color alone).
-
 import { useMemo, useState } from 'react';
 import type { DrumRole } from '@shared/analyzer/protocol';
 import type { Percentiles } from '@shared/library/types';
@@ -14,8 +8,6 @@ import { C } from './ui';
 
 export type Hover = (text: string | null) => void;
 
-// ── Tempo histogram ───────────────────────────────────────────────────
-
 export function TempoHistogram({ hist, bpm, onHover }: { hist: Array<{ bpm: number; count: number }>; bpm: Percentiles; onHover: Hover }) {
   const bars = useMemo(() => histogramBars(hist), [hist]);
   if (!bars.length) return <div className="py-6 text-center text-[10px] text-krypt-muted">No tempo data</div>;
@@ -24,7 +16,6 @@ export function TempoHistogram({ hist, bpm, onHover }: { hist: Array<{ bpm: numb
   return (
     <div>
       <div className="relative h-[84px]">
-        {/* typical range (p25–p75) wash */}
         <div className="absolute inset-y-0 rounded-sm bg-white/[0.04]" style={{ left: `${pos(bpm.p25)}%`, width: `${Math.max(0.5, pos(bpm.p75) - pos(bpm.p25))}%` }} />
         <div className="absolute inset-x-0 bottom-0 h-px bg-white/10" />
         <div className="relative flex h-full items-end gap-[2px]">
@@ -42,7 +33,6 @@ export function TempoHistogram({ hist, bpm, onHover }: { hist: Array<{ bpm: numb
             </div>
           ))}
         </div>
-        {/* median marker */}
         <div className="pointer-events-none absolute inset-y-0 w-px bg-white/80" style={{ left: `${pos(bpm.median)}%` }}>
           <span className="absolute -top-px left-1 whitespace-nowrap rounded bg-black/60 px-1 font-mono text-[9px] text-white">{Math.round(bpm.median)}</span>
         </div>
@@ -55,8 +45,6 @@ export function TempoHistogram({ hist, bpm, onHover }: { hist: Array<{ bpm: numb
     </div>
   );
 }
-
-// ── Minor / major split + key list ────────────────────────────────────
 
 export function ModeSplit({ minorShare, onHover }: { minorShare: number; onHover: Hover }) {
   const minor = Math.max(0, Math.min(1, minorShare));
@@ -93,7 +81,6 @@ export function ModeSplit({ minorShare, onHover }: { minorShare: number; onHover
   );
 }
 
-/** Horizontal bars with a label and a value (top keys). */
 export function HBars({ items, onHover }: { items: Array<{ label: string; value: number; frac: number; text: string; hint: string }>; onHover: Hover }) {
   return (
     <div className="space-y-[3px]">
@@ -110,7 +97,6 @@ export function HBars({ items, onHover }: { items: Array<{ label: string; value:
   );
 }
 
-/** Vertical columns with labels under them (bass degrees, band balance). */
 export function Columns({ items, height = 64, onHover }: { items: Array<{ label: string; frac: number; hint: string; dim?: boolean }>; height?: number; onHover: Hover }) {
   return (
     <div>
@@ -141,13 +127,6 @@ export function Columns({ items, height = 64, onHover }: { items: Array<{ label:
   );
 }
 
-// ── Drum heatmap ──────────────────────────────────────────────────────
-
-/**
- * Roles × 32 steps (one 4/4 bar of 32nds). Cell intensity = share of bars
- * with a hit there. Beats are separated by wider gaps (bar / beat lines);
- * the "and" of each beat gets a slightly wider gap than the 16ths.
- */
 export function DrumHeatmap({ roles, onHover }: { roles: Partial<Record<DrumRole, { prob: number[]; vel: number[] }>>; onHover: Hover }) {
   const [hot, setHot] = useState<string | null>(null);
   const present = DRUM_ROLES.filter((r) => roles[r]);
@@ -155,7 +134,6 @@ export function DrumHeatmap({ roles, onHover }: { roles: Partial<Record<DrumRole
   const beats = [0, 1, 2, 3];
   return (
     <div className="select-none">
-      {/* beat numbers */}
       <div className="flex items-end pb-1">
         <span className="w-[76px] flex-shrink-0" />
         <div className="flex min-w-0 flex-1 gap-[5px]">
@@ -205,7 +183,6 @@ export function DrumHeatmap({ roles, onHover }: { roles: Partial<Record<DrumRole
           );
         })}
       </div>
-      {/* sequential legend */}
       <div className="mt-2 flex items-center justify-end gap-1.5 text-[9px] text-krypt-muted">
         <span>Rare</span>
         {[0.05, 0.2, 0.4, 0.7, 1].map((p) => (
@@ -217,9 +194,6 @@ export function DrumHeatmap({ roles, onHover }: { roles: Partial<Record<DrumRole
   );
 }
 
-// ── Ranges (percentiles) ──────────────────────────────────────────────
-
-/** p10–p90 line, p25–p75 band and a median tick on a fixed domain. */
 export function RangeRow({
   label,
   p,
@@ -256,9 +230,6 @@ export function RangeRow({
   );
 }
 
-// ── Energy shape ──────────────────────────────────────────────────────
-
-/** Median energy across a track (0..1 at evenly spaced points), with a snapping crosshair. */
 export function EnergyShape({ values, onHover }: { values: number[]; onHover: Hover }) {
   const W = 300;
   const H = 54;
@@ -304,8 +275,6 @@ export function EnergyShape({ values, onHover }: { values: number[]; onHover: Ho
     </div>
   );
 }
-
-// ── Section forms ─────────────────────────────────────────────────────
 
 export function FormRow({ form, count, total, onHover }: { form: string[]; count: number; total: number; onHover: Hover }) {
   return (

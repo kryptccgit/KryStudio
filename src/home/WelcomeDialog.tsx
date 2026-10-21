@@ -1,8 +1,3 @@
-// First install: a welcome window over Home with the 3-minute overview video (the keys and windows, connecting an
-// AI, a song made with AI, the guides and audio tools) and the Krypt Discord and free-tools links. It opens once:
-// closing it (or watching to the end) marks it seen, and Help ▸ Video tutorials keeps the video after that. Shows
-// only when the video ships (shared/guides/videos.ts) and never for returning users (quickstartCardVisible).
-
 import { Globe, MessageCircle, Sparkles } from 'lucide-react';
 import { QUICKSTART_VIDEO, guideVideoById, isVideoReady } from '@shared/guides/videos';
 import { openDialog } from '../components/Dialog';
@@ -16,7 +11,6 @@ import { FOCUS_RING } from './ui';
 
 let shownThisSession = false;
 
-/** Open the welcome window if this is a first install and it hasn't been seen. Safe to call on every Home open. */
 export function maybeShowWelcome(): void {
   if (shownThisSession) return;
   const video = guideVideoById(QUICKSTART_VIDEO);
@@ -29,7 +23,7 @@ export function maybeShowWelcome(): void {
     icon: Sparkles,
     width: 880,
     render: (close) => <WelcomeView close={close} />,
-    onClose: () => dismissQuickstart(), // seen: it never opens by itself again
+    onClose: () => dismissQuickstart(),
   });
 }
 

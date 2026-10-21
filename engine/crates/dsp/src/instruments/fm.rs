@@ -1,24 +1,3 @@
-//! krypt.fm — "Krypt FM": four-operator phase-modulation synth.
-//!
-//! Our own design (no third-party code). Eight algorithms cover the usual
-//! 4-operator topologies, from a full 4→3→2→1 stack to four additive
-//! carriers. Operator 4 can modulate itself (feedback, averaged over two
-//! samples for stability). Each operator has a frequency ratio
-//! (coarse × (1 + fine)) plus detune, an output level on a 48 dB taper
-//! (as a modulator, level 1 = 4π rad of index), velocity sensitivity and its
-//! own AHDSR envelope.
-//!
-//! Anti-aliasing: below 88.2 kHz the operators run at 2x and every voice
-//! decimates through the shared halfband design (`Decimator2x`). Voice
-//! gain, velocity fade-in and choke fades are applied after decimation, so
-//! a voice can stop at any sample without truncating the filter's memory
-//! audibly. Sines come from a 4096-point table with linear interpolation
-//! (error < −120 dB) and 32-bit phase accumulators.
-//!
-//! After the operators: a TPT SVF per voice (type, cutoff, resonance, key
-//! tracking, decaying envelope), vibrato, per-note pan, Mod X → cutoff,
-//! Mod Y → modulator brightness.
-
 use super::sampler::{reso_to_k, sanitize_sr, svf_typed};
 use super::{instrument_process, NoteStart, OutStage, Voice, VoiceManager, CHOKE_MS};
 use crate::blocks::env::{Ahdsr, EnvParams, ExpDecay};
@@ -113,15 +92,10 @@ pub fn descriptor() -> PluginDescriptor {
 const TABLE_BITS: u32 = 12;
 const TABLE_SIZE: usize = 1 << TABLE_BITS;
 const FRAC_BITS: u32 = 32 - TABLE_BITS;
-/// Phase-modulation depth at level 1, in cycles (2 cycles = 4π rad).
 const MOD_CYCLES: f32 = 2.0;
-/// Op 4 feedback depth at 100%, in cycles.
 const FB_CYCLES: f32 = 0.3;
 const TWO32: f32 = 4_294_967_296.0;
 
-/// (modulation sources per op, carrier flags); op index 0 = operator 1.
-/// In every algorithm a modulator has a higher index than its target, so
-/// evaluating 4 → 1 is always in dependency order.
 const ALGS: [([[bool; 4]; 4], [bool; 4]); 8] = {
     const F: bool = false;
     const T: bool = true;
@@ -137,7 +111,6 @@ const ALGS: [([[bool; 4]; 4], [bool; 4]); 8] = {
     ]
 };
 
-/// Level knob → amplitude on a 48 dB taper (0 → silent).
 #[inline]
 fn level_amp(level: f32) -> f32 {
     if level <= 0.0 {
@@ -197,7 +170,6 @@ pub(crate) struct FmVoice {
     amp_s: [Smooth; 4],
     fenv: ExpDecay,
     filt: Svf,
-    /// smoothed log2 cutoff (automation without zipper)
     cut_s: Smooth,
     dec: Decimator2x,
     vib_ph: f32,
@@ -237,7 +209,6 @@ impl FmVoice {
         }
     }
 
-    /// Operator amplitude: level × velocity scaling (× Mod Y on modulators).
     #[inline]
     fn amp_target(&self, sh: &FmShared, k: usize) -> f32 {
         let b = if sh.carrier[k] { 1.0 } else { self.bright };
@@ -249,7 +220,6 @@ impl FmVoice {
         (0..4).any(|k| sh.carrier[k] && !self.env[k].idle())
     }
 
-    /// One operator pass (the 4 → 1 evaluation) at phase increments `inc`.
     #[inline]
     fn tick_ops(&mut self, sh: &FmShared, amp: &[f32; 4], inc: &[u32; 4]) -> f32 {
         let mut out = [0.0f32; 4];
@@ -360,7 +330,6 @@ impl Voice for FmVoice {
         let mut pitch_ctr = 0u32;
         for i in 0..l.len() {
             if pitch_ctr == 0 {
-                // pitch (glide + vibrato) at a 16-sample control rate
                 self.vib_ph += vib_inc * 16.0;
                 if self.vib_ph >= 1.0 {
                     self.vib_ph -= 1.0;
@@ -388,7 +357,6 @@ impl Voice for FmVoice {
             } else {
                 self.tick_ops(sh, &amp, &inc)
             };
-            // filter
             let fe = self.fenv.next();
             let y = if sh.filter_on {
                 if self.coef_count == 0 {
@@ -481,7 +449,6 @@ impl Fm {
         let stride = P::Op2Ratio as usize - base;
         for k in 0..4 {
             let o = base + k * stride;
-            // ratio, fine, detune, level, vel, attack, hold, decay, sustain, release
             let ratio = p.get(o) as f64 * (1.0 + p.get(o + 1) as f64);
             sh.ratio[k] = ratio * (p.get(o + 2) as f64 / 1200.0).exp2();
             sh.amp[k] = level_amp(p.get(o + 3));

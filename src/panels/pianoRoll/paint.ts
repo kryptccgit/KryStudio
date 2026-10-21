@@ -1,5 +1,3 @@
-// Piano-roll painters: pure functions of (ctx, views, data, opts).
-
 import type { Note } from '@shared/schema/project';
 import { noteName } from '@shared/music/theory';
 import { keyToY, tickToX, visibleKeys, xToTick, type KeyView, type TimeView } from '../../editors/viewport';
@@ -12,12 +10,10 @@ const BLACK = [false, true, false, true, false, false, true, false, true, false,
 export const isBlackKey = (key: number): boolean => BLACK[((key % 12) + 12) % 12];
 
 export interface ScaleMask {
-  /** 12 booleans: pitch class in scale. */
   inScale: boolean[];
   root: number;
 }
 
-/** Key-row backgrounds (black/white rows, scale tint, octave lines). */
 export function paintKeyRows(ctx: CanvasRenderingContext2D, kv: KeyView, w: number, h: number, dpr: number, scale: ScaleMask | null): void {
   ctx.fillStyle = C.gridBg;
   ctx.fillRect(0, 0, w, h);
@@ -42,13 +38,10 @@ export interface NoteStyle {
   ghostColor?: string;
   labels?: boolean;
   dim?: boolean;
-  /** FL look: fill in the note's colour group, velocity as opacity. */
   velAlpha?: boolean;
-  /** Tool-dialog preview (overlay): outlined in the glow colour. */
   preview?: boolean;
 }
 
-/** What drawNote needs from a note (previews pass plain objects). */
 export interface NoteLook {
   key: number;
   vel: number;
@@ -59,7 +52,6 @@ export interface NoteLook {
 
 export const NOTE_FONT = `9px ${FONT_MONO}`;
 
-/** The 16 note colour groups (group 0 = Krypt purple). */
 export const NOTE_COLORS = [
   '#A855F7', '#6366F1', '#EC4899', '#22C55E', '#F59E0B', '#06B6D4', '#EF4444', '#84CC16',
   '#8B5CF6', '#14B8A6', '#F97316', '#3B82F6', '#E879F9', '#FACC15', '#F43F5E', '#94A3B8',
@@ -69,7 +61,6 @@ export function noteGroupColor(color: number | undefined): string {
   return NOTE_COLORS[color ?? 0] ?? NOTE_COLORS[0];
 }
 
-/** Fill + opacity of a note body (shared by the detailed and the dense painter). */
 export function noteFill(n: NoteLook, velAlpha: boolean): { fill: string; alpha: number } {
   const v = Math.max(0, Math.min(1, n.vel));
   const fill = velAlpha ? noteGroupColor(n.color) : velocityColor(v);
@@ -78,7 +69,6 @@ export function noteFill(n: NoteLook, velAlpha: boolean): { fill: string; alpha:
   return { fill, alpha };
 }
 
-/** One note rectangle in CSS px. */
 export function drawNote(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, n: NoteLook, dpr: number, s: NoteStyle): void {
   const ww = Math.max(2, w - 1);
   const hh = Math.max(2, h - 1);
@@ -95,17 +85,15 @@ export function drawNote(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   ctx.globalAlpha = alpha * (s.dim ? 0.55 : 1);
   ctx.fillStyle = s.selected ? lighten('#F0ABFC', 0.15) : fill;
   ctx.fillRect(x, y, ww, hh);
-  // bevel + left accent (the accent shows the colour group in the velocity-ramp look)
   ctx.fillStyle = s.selected ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.22)';
   ctx.fillRect(x, y, ww, Math.min(1, hh));
   ctx.globalAlpha = outer;
   ctx.fillStyle = s.selected ? 'rgba(88,28,135,0.7)' : group && !s.velAlpha ? group : 'rgba(255,255,255,0.32)';
   ctx.fillRect(x, y, Math.min(group && !s.velAlpha ? 3 : 2, ww), hh);
   if (s.selected) ctx.fillStyle = '#FFFFFF';
-  else if (s.velAlpha) ctx.fillStyle = rgba(fill, 0.9); // keeps soft notes readable
+  else if (s.velAlpha) ctx.fillStyle = rgba(fill, 0.9);
   else ctx.fillStyle = 'rgba(0,0,0,0.35)';
   if (n.mute && !s.selected) {
-    // muted: dashed outline instead of a solid frame
     ctx.strokeStyle = 'rgba(255,255,255,0.6)';
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 2]);
@@ -114,7 +102,6 @@ export function drawNote(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   } else strokeRectCrisp(ctx, x, y, ww, hh, dpr);
   let labelX = x + 4;
   if (n.slide && ww >= 6 && hh >= 4) {
-    // slide note: a ramp wedge at the start
     const sw = Math.min(ww - 2, hh + 2);
     ctx.fillStyle = s.selected ? '#3B0764' : 'rgba(255,255,255,0.8)';
     ctx.beginPath();
@@ -147,11 +134,6 @@ export function drawNote(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   }
 }
 
-/**
- * Portamento / slide display: a curve from the previous note's pitch into a
- * slide note (over its length, solid) or, on a mono channel with glide, into
- * every legato note (over the glide time, dashed).
- */
 export function paintGlides(
   ctx: CanvasRenderingContext2D,
   index: SpanIndex<Note>,
@@ -193,13 +175,11 @@ export function paintGlides(
         }
       }
     }
-    // the pitch that keeps sounding: latest start, and the top voice of a chord
     if (!prev || n.tick > prev.tick || n.key > prev.key) prev = n;
   }
   ctx.setLineDash([]);
 }
 
-/** Visit notes of an index visible in the viewport (time + key culled). */
 export function forVisibleNotes(index: SpanIndex<Note>, tv: TimeView, kv: KeyView, w: number, h: number, fn: (n: Note) => void): void {
   const [lo, hi] = visibleKeys(kv, h);
   index.query(tv.scrollTick, xToTick(tv, w), (n) => {
@@ -211,8 +191,6 @@ export function noteRect(n: { tick: number; dur: number; key: number }, tv: Time
   const x = tickToX(tv, n.tick);
   return [x, keyToY(kv, n.key), Math.max(1, n.dur * tv.pxPerTick), kv.rowH];
 }
-
-// ── Keyboard column ──────────────────────────────────────────────────
 
 export function paintKeyboard(
   ctx: CanvasRenderingContext2D,
@@ -232,7 +210,6 @@ export function paintKeyboard(
   ctx.font = `${fontPx}px ${FONT_MONO}`;
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'right';
-  // white-key body: a soft left→right sheen so the column reads as a keyboard
   const sheen = ctx.createLinearGradient(0, 0, w, 0);
   sheen.addColorStop(0, '#9C9CB0');
   sheen.addColorStop(1, '#C9C9D8');
@@ -255,11 +232,9 @@ export function paintKeyboard(
       ctx.fillRect(0, y + 1, blackW, kv.rowH - 2);
       ctx.fillStyle = 'rgba(255,255,255,0.10)';
       ctx.fillRect(blackW - 1, y + 2, 1, kv.rowH - 4);
-      // the white keys' boundary continues to the right of a black key
       ctx.fillStyle = 'rgba(20,20,30,0.45)';
       hline(ctx, y + kv.rowH / 2, blackW, w - 1, dpr);
     }
-    // white|white boundaries (B|C and E|F)
     if (pc === 0 || pc === 5) {
       ctx.fillStyle = pc === 0 ? 'rgba(20,20,30,0.85)' : 'rgba(20,20,30,0.45)';
       hline(ctx, y + kv.rowH - 1 / dpr, 0, w - 1, dpr);
@@ -278,8 +253,6 @@ export function paintKeyboard(
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(w - 1, 0, 1, h);
 }
-
-// ── Note property lane ───────────────────────────────────────────────
 
 export function laneNorm(prop: LaneProp, v: number): number {
   const s = LANE_PROPS[prop];
@@ -323,7 +296,6 @@ export function paintLane(
   const anySel = selected.size > 0;
   const t0 = xToTick(tv, -8);
   const t1 = xToTick(tv, w + 8);
-  // level of detail: when steps are only a few px apart, draw 1-px stems with colour batching
   if (tv.pxPerTick * 240 < 4) {
     let last = '';
     index.query(t0, t1, (n) => {
@@ -340,7 +312,6 @@ export function paintLane(
     });
     return;
   }
-  // draw unselected first, then selected on top
   for (let pass = 0; pass < 2; pass++) {
     index.query(t0, t1, (n) => {
       const sel = selected.has(n.id);

@@ -1,7 +1,3 @@
-// What every generator gets (the key, the bar range, the chords already in
-// the pattern) and gives back (notes with absolute pattern ticks), plus the
-// chord timeline the arp, bass and melody generators follow.
-
 import {
   GenerateError,
   applyVoicing,
@@ -15,15 +11,12 @@ import type { Rng } from './random';
 
 export interface GenContext {
   key: GenKey;
-  /** Range in pattern ticks [start, end). */
   start: number;
   end: number;
   barTicks: number;
   beatTicks: number;
   seed: number;
-  /** Chords already in the pattern (absolute ticks), read before anything is replaced. */
   patternChords: ChordEvent[];
-  /** Pitch for one-note rhythms when the options give none (the channel's root key). */
   defaultNote: number;
 }
 
@@ -37,11 +30,8 @@ export interface GenNote {
 
 export interface GenOutput {
   notes: GenNote[];
-  /** Chord names followed or written, in order. */
   chords?: string[];
-  /** Where the harmony came from. */
   chordSource?: 'pattern' | 'progression' | 'none';
-  /** One line for the summary ("progression Pop anthem", "E(5,16) rotation 2"). */
   detail: string;
 }
 
@@ -53,11 +43,6 @@ export interface Timeline {
   label: string;
 }
 
-/**
- * The harmony to follow: the pattern's own chords ("pattern", or "auto"
- * when there are any in range), else a progression laid out from the range
- * start, `barsPerChord` bars per chord, voiced close around `octave`.
- */
 export function chordTimeline(
   o: { chords: 'auto' | 'pattern' | 'progression' | 'none'; progression: string; extensions?: Extensions | 'auto'; barsPerChord: number; octave?: number },
   ctx: GenContext,
@@ -86,11 +71,9 @@ export function chordTimeline(
   return { events, source: 'progression', label: `progression ${prog.label}` };
 }
 
-/** Distinct chord names in order of appearance (repeats of the loop collapsed). */
 export function chordNames(events: ChordEvent[], start: number, end: number): string[] {
   const out: string[] = [];
   for (const e of events) if (e.tick < end && e.end > start) out.push(e.name);
-  // collapse a repeating loop: "Am F C G Am F C G" → "Am F C G"
   for (let len = 1; len <= out.length / 2; len++) {
     if (out.length % len === 0 && out.every((n, i) => n === out[i % len])) return out.slice(0, len);
   }

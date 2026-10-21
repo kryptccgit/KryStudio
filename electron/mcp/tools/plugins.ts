@@ -1,8 +1,3 @@
-// Third-party plugin tools. Installed VST3 / CLAP plugins are otherwise used
-// through the regular tools (list_plugins, add_channel, add_effect,
-// describe_plugin, set_params) — their params are ParamRefs like stock ones.
-// This tool shows a plugin's OWN window to the user, or restarts the
-// plugin host after a crash.
 import { z } from 'zod';
 import { defineTool, fail } from './types';
 import { findChannel, findInsert, findSlot, pluginName, safeName } from './util';

@@ -1,4 +1,3 @@
-// Future bass: half-time drums, lush stabbed supersaw chords with 7ths and 9ths, bright melodic leads.
 import type { Playbook } from './types';
 
 export const FUTURE_BASS: Playbook = {

@@ -1,14 +1,3 @@
-// "Make something like this song" in one call: study_reference puts the
-// song the user gives on the Playlist as a muted "Reference: <name>" track
-// (or adopts a clip already there), reads it on-device (tempo, key, swing,
-// sections, drums, chords, loudness, tonal balance, width) and answers with
-// a brief: the closest genres, the section plan in bars, the drum feel, the
-// chord loop and the mix numbers. From then on get_playbook follows the
-// reference (its tempo, key, swing, section plan, loudness) and review_song
-// grades the song against it, without the agent passing anything along:
-// the reference is the muted track, so it survives restarts, and the
-// numbers come from the analyzer's cache. shared/reference holds the maths.
-
 import path from 'node:path';
 import { z } from 'zod';
 import type { MainDeps } from '../types';
@@ -27,12 +16,10 @@ const REFERENCE_NAME = /^\s*ref(?:erence)?\b/i;
 const AUDIOCLIP = 'krypt.audioclip';
 const zLabel = z.string().max(80).optional().describe("Short description of this change for the user's AI-history panel.");
 
-/** A channel name that marks a reference ("Reference: Song", "Ref - Song", "reference"). */
 export function isReferenceName(name: string): boolean {
   return REFERENCE_NAME.test(name);
 }
 
-/** "Reference: Song" → "Song". */
 export function referenceTitle(name: string): string {
   return name.replace(/^\s*ref(?:erence)?\b\s*[:\-–—]?\s*/i, '').trim() || name.trim() || 'Reference';
 }
@@ -43,15 +30,10 @@ function audioClipsOf(p: Project, channelId: string) {
 
 export interface ReferenceTrack {
   channel: Channel;
-  /** Its first audio clip on the Playlist (null: the channel holds the song but isn't placed). */
   clipId: string | null;
   title: string;
 }
 
-/**
- * The reference song of the project: `arg` = a clip id or channel name / id ("none" / "off" = no reference);
- * default = the last audio channel named "Reference …" that plays a sample. null when there is none.
- */
 export function findReference(p: Project, arg?: string | null): ReferenceTrack | null {
   const a = arg?.trim();
   if (a && /^(none|off|no|false)$/i.test(a)) return null;
@@ -71,14 +53,12 @@ export function findReference(p: Project, arg?: string | null): ReferenceTrack |
   return { channel: ch, clipId: clips[0]?.id ?? null, title: referenceTitle(ch.name) };
 }
 
-/** Clips of the reference that would play in a render (not muted by clip, track, channel or solo). */
 export function audibleReferenceClips(p: Project, ch: Channel): number {
   if (ch.mute) return 0;
   const solo = p.playlist.trackOrder.filter((t) => p.playlist.tracks[t]?.solo);
   return audioClipsOf(p, ch.id).filter((c) => !c.mute && !p.playlist.tracks[c.trackId]?.mute && (!solo.length || solo.includes(c.trackId))).length;
 }
 
-/** A sharper drum grid from the reference library's deep pass (drum stem), when it has one for this file. */
 async function libraryDrums(deps: MainDeps, abs: string): Promise<DrumGrid | null> {
   const lib = deps.library;
   if (!lib) return null;
@@ -103,17 +83,10 @@ export interface StudiedReference {
   track: ReferenceTrack;
   analysis: AudioAnalysis;
   brief: ReferenceBrief;
-  /** The drums came from the drum stem (a stem model is installed): which model, and whether the stems were cached. */
   stems: { model: string; cached: boolean; seconds: number } | null;
-  /** Why the drum stem wasn't used, when a stem model is installed but it failed. */
   stemProblem?: string;
 }
 
-/**
- * Analyse the reference (cached per file) and build its brief, laid out for `genre` (else its best guess). `stems`:
- * 'run' separates the song for its drum stem when a stem model is installed (cached), 'cached' uses the drum stem
- * only when it is already cached (get_playbook / review_song never start a separation), 'off' never.
- */
 export async function studyReference(deps: MainDeps, track: ReferenceTrack, genre: GenreId | null, ctx: Pick<RunCtx, 'progress' | 'signal'>, stems: 'run' | 'cached' | 'off' = 'cached'): Promise<StudiedReference> {
   if (!deps.analyzer) fail("Audio analysis isn't available in this session (the analyzer didn't start; see the Krypt Studio log), so the reference can't be read.");
   const target = { channelId: track.channel.id };
@@ -139,10 +112,6 @@ export async function studyReference(deps: MainDeps, track: ReferenceTrack, genr
   return { track, analysis, brief, stems: stemInfo, ...(stemProblem ? { stemProblem } : {}) };
 }
 
-/**
- * The project's reference for get_playbook / review_song: null when there is none (or `arg` is "none"); a warning
- * instead of a failure when it can't be read, so the recipe / review still work without it.
- */
 export async function projectReference(deps: MainDeps, arg: string | undefined, genre: GenreId | null, ctx: Pick<RunCtx, 'progress' | 'signal'>, warnings: string[]): Promise<StudiedReference | null> {
   let track: ReferenceTrack | null;
   try {
@@ -165,7 +134,6 @@ export async function projectReference(deps: MainDeps, arg: string | undefined, 
   }
 }
 
-/** The genre a user named ("make it house", "uk drill") or null. */
 function genreArg(g: string | undefined): { id: GenreId | null; unknown: string | null } {
   const t = g?.trim();
   if (!t) return { id: null, unknown: null };
@@ -173,7 +141,6 @@ function genreArg(g: string | undefined): { id: GenreId | null; unknown: string 
   return id ? { id, unknown: null } : { id: null, unknown: t.slice(0, 40) };
 }
 
-/** Put the deep analysis of the References collection in motion when a stem model is installed (originality check). */
 async function libraryNote(deps: MainDeps, abs: string): Promise<string> {
   const lib = deps.library;
   if (!lib) return 'The reference library is not available in this session, so check_originality has nothing to compare with.';
@@ -202,7 +169,6 @@ async function libraryNote(deps: MainDeps, abs: string): Promise<string> {
   }
 }
 
-/** Mute what the reference plays through: its tracks when it has them to itself, else the channel. */
 function muteReference(ctx: RunCtx, p: Project, ch: Channel): boolean {
   if (audibleReferenceClips(p, ch) === 0) return false;
   const clips = audioClipsOf(p, ch.id);

@@ -1,5 +1,3 @@
-// Guide icon keys (GuideIcon in ./articles.ts) → lucide icons. test/guides.test.ts checks every article's icon is here.
-
 import {
   AudioWaveform,
   BookOpen,

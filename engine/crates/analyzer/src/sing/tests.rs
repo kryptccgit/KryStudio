@@ -4,7 +4,6 @@ use crate::protocol::SingSegment;
 
 const SR: f64 = 24_000.0;
 
-/// A steady "voice": 180 Hz with 8 harmonics (a vowel-ish buzz).
 fn tone(secs: f64, f0: f64) -> Vec<f32> {
     (0..(secs * SR) as usize)
         .map(|i| {
@@ -32,7 +31,6 @@ fn cents(f: f64, target: f64) -> f64 {
     1200.0 * (f / target).log2()
 }
 
-/// 2 ms RMS envelope.
 fn envelope(y: &[f32]) -> Vec<f32> {
     y.chunks(48).map(|c| (c.iter().map(|v| v * v).sum::<f32>() / c.len() as f32).sqrt()).collect()
 }
@@ -59,10 +57,8 @@ fn pitches_and_places_each_note() {
         let f0 = f64::from(s.f0_hz.expect("voiced"));
         assert!(cents(f0, 180.0).abs() < 10.0, "measured {f0}");
         assert!((f64::from(s.shift_st) - 12.0 * (midi_hz(m) / f0).log2()).abs() < 1e-3);
-        // Pitch: the middle of the note sits on the key.
         let got = note_f0(&y, o + 0.05, o + d - 0.05);
         assert!(cents(got, midi_hz(m)).abs() < 20.0, "note {m}: {got:.2} Hz vs {:.2} Hz", midi_hz(m));
-        // Timing: the −6 dB points of the envelope at the note start / end (2 ms frames).
         let (fa, fb) = ((o * 500.0) as usize, ((o + d) * 500.0) as usize);
         let level = median(&env[fa + 10..fb - 10]);
         let from = fa.saturating_sub(25);
@@ -71,10 +67,8 @@ fn pitches_and_places_each_note() {
         assert!((on - o).abs() <= 0.005, "note {m}: onset {on:.4} vs {o:.4}");
         assert!((off - (o + d)).abs() <= 0.005, "note {m}: offset {off:.4} vs {:.4}", o + d);
     }
-    // Rests stay silent.
     let rest = &y[(0.75 * SR) as usize..(0.85 * SR) as usize];
     assert!(rest.iter().all(|v| v.abs() < 1e-3));
-    // Peak at −1 dBFS.
     let peak = y.iter().fold(0f32, |m, v| m.max(v.abs()));
     assert!((peak - 0.891).abs() < 0.01, "{peak}");
 }
@@ -88,7 +82,6 @@ fn unvoiced_segments_pass_through_unpitched() {
     assert_eq!(r[0].f0_hz, None);
     assert_eq!(r[0].shift_st, 0.0);
     assert!(r[1].f0_hz.is_some());
-    // The noise is stretched to the note length, still noise (no pitch), and still there.
     let part = &y[(0.02 * SR) as usize..(0.43 * SR) as usize];
     let rms = (part.iter().map(|v| v * v).sum::<f32>() / part.len() as f32).sqrt();
     assert!(rms > 0.05, "{rms}");
@@ -109,14 +102,12 @@ fn vibrato_and_glide_move_the_pitch() {
     let x = tone(1.2, 180.0);
     let segs = [seg((0.0, 0.4), 0.0, 0.5, 60.0), seg((0.4, 1.0), 0.5, 1.5, 64.0)];
     let (y, _) = render(&x, SR, &segs, 1.0, 0.08, &JobCtx::detached()).unwrap();
-    // Late in the long note: vibrato around the key, ±~50 cents.
     let part = &y[(1.4 * SR) as usize..(1.95 * SR) as usize];
     let f: Vec<f64> = voicing_track(part, SR as f32, 0.005).iter().filter_map(|v| v.f0).map(|f| cents(f64::from(f), midi_hz(64.0))).collect();
     let (lo, hi) = f.iter().fold((f64::MAX, f64::MIN), |(a, b), &c| (a.min(c), b.max(c)));
     assert!(hi > 30.0 && lo < -30.0 && hi < 80.0 && lo > -80.0, "vibrato range {lo:.0}..{hi:.0} cents");
     let mean = f.iter().sum::<f64>() / f.len() as f64;
     assert!(mean.abs() < 20.0, "mean {mean}");
-    // Glide: the first ~30 ms of note 2 start below its key (coming from 4 semitones under).
     let start = note_f0(&y, 0.505, 0.54);
     assert!(cents(start, midi_hz(64.0)) < -100.0, "glide start {start:.1} Hz");
 }
@@ -126,7 +117,6 @@ fn touching_notes_join_without_clicks() {
     let x = tone(1.2, 180.0);
     let segs = [seg((0.0, 0.3), 0.0, 0.4, 62.0), seg((0.3, 0.6), 0.4, 0.4, 62.0), seg((0.6, 0.9), 0.8, 0.4, 65.0)];
     let (y, _) = render(&x, SR, &segs, 0.0, 0.0, &JobCtx::detached()).unwrap();
-    // No dropout at the joins (0.4 s, 0.8 s): 6 ms RMS (longer than a period) stays above half the note level.
     let rms6 = |c: f64| {
         let w = &y[((c - 0.003) * SR) as usize..((c + 0.003) * SR) as usize];
         (w.iter().map(|v| v * v).sum::<f32>() / w.len() as f32).sqrt()
@@ -142,17 +132,14 @@ fn touching_notes_join_without_clicks() {
 
 #[test]
 fn knots_keep_consonants_natural() {
-    // 1000-frame syllable, voiced 300..800, stretched to 3000 frames.
     let (k, tail) = knots_for(1000, 100, 3000, Some((300, 800)));
     assert_eq!(k[0], (0.0, 0.0));
-    assert_eq!(k[1], (300.0, 300.0)); // consonant at its own speed
-    assert!((k[2].0 - 800.0).abs() < 1e-9 && (k[2].1 - 2800.0).abs() < 1e-9); // the vowel takes the stretch
+    assert_eq!(k[1], (300.0, 300.0));
+    assert!((k[2].0 - 800.0).abs() < 1e-9 && (k[2].1 - 2800.0).abs() < 1e-9);
     assert_eq!(k[3], (1000.0, 3000.0));
     assert_eq!(tail, 1.0);
-    // Shortening: uniform.
     let (k, _) = knots_for(1000, 0, 500, Some((300, 800)));
     assert_eq!(k, vec![(0.0, 0.0), (1000.0, 500.0)]);
-    // A tiny vowel stretched hugely: capped at 8×, consonants stretch too.
     let (k, tail) = knots_for(1000, 0, 20_000, Some((450, 550)));
     assert!(tail > 1.0);
     assert!(((k[2].1 - k[1].1) / (k[2].0 - k[1].0) - MAX_VOWEL_RATIO).abs() < 1e-9);
@@ -191,7 +178,6 @@ fn writes_a_wav_at_the_source_rate() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Speed figure (prints only).
 #[test]
 fn speed_per_second_of_output() {
     let x = tone(4.0, 180.0);

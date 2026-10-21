@@ -1,8 +1,3 @@
-//! krypt.kick808 — tuned 808: sine body with exponential pitch sweep, click,
-//! peak-preserving tanh drive and a tone low pass. Key-tracked at TRUE pitch:
-//! MIDI 36 (C2) = 65.4 Hz, so the piano roll and agents write real notes. New
-//! 808 channels step-sequence at C2 (channel rootKey 36). Mono + glide = slides.
-
 use super::sampler::sanitize_sr;
 use super::{instrument_process, NoteStart, OutStage, Voice, VoiceManager, CHOKE_MS};
 use crate::blocks::filters::{Svf, SvfMode};
@@ -10,7 +5,6 @@ use crate::blocks::{db_to_gain, midi_to_hz, pan_gains, tanh_fast, vel_gain, Glid
 use crate::params::{param_table, ParamBank};
 use crate::{Instrument, NoteExtras, PluginDescriptor, PluginKind, ProcessContext};
 
-/// 0 = true pitch (MIDI 36 sounds C2 = 65.4 Hz).
 pub const PITCH_OFFSET: f32 = 0.0;
 
 param_table! {
@@ -185,7 +179,6 @@ impl Voice for Voice808 {
             if self.ph >= 1.0 {
                 self.ph -= 1.0;
             }
-            // falls to -60 dB at `decay`, offset so it lands exactly on zero (no end click)
             let amp = ((-6.9 * (0.3 * u + 0.7 * u * u)).exp() - 0.001 * u) * (1.0 / 0.999);
             let mut x = body * amp;
             if sh.click > 0.0 && t < 0.02 {
@@ -278,7 +271,6 @@ impl Kick808 {
         self.out.gain.set(db_to_gain(p.get(P::Gain as usize)));
     }
 
-    /// Render one 808 hit offline (factory kit).
     pub fn render_note(sr: f32, pitch: f32, params: &[(usize, f32)], seconds: f32) -> Vec<f32> {
         let mut k = Kick808::new(sr, 512);
         for &(i, v) in params {

@@ -3,7 +3,6 @@ import { CheckCircle2, AlertTriangle, XCircle, Info, X } from 'lucide-react';
 
 type Level = 'info' | 'success' | 'warn' | 'error';
 
-/** A button inside the toast (e.g. "Open Model Manager"). Clicking it runs `run` and dismisses the toast. */
 export interface ToastAction {
   label: string;
   run: () => void;
@@ -11,7 +10,6 @@ export interface ToastAction {
 
 export interface ToastOpts {
   action?: ToastAction;
-  /** Auto-dismiss after this many ms (default 4500, 9000 with an action). */
   durationMs?: number;
 }
 

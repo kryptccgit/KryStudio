@@ -1,6 +1,3 @@
-// Running in the background (electron/system/background.ts): the --hidden startup flag, when the audio engine may
-// pause, the Start with Windows setting (default on, kept through a merge), the installer adding and removing the
-// startup entry under the same value name the app uses, close-to-tray in main and File ▸ Exit really quitting.
 import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -14,7 +11,6 @@ function repoRoot(): string {
     try {
       if (statSync(path.join(dir, 'package.json')).isFile()) return dir;
     } catch {
-      /* keep climbing */
     }
     dir = path.dirname(dir);
   }
@@ -42,7 +38,6 @@ test('Start with Windows defaults on, survives a merge, and turning it off stick
   assert.equal(mergeSettings(DEFAULT_SETTINGS, { ui: { scale: 1, showHints: true } }).ui.startWithWindows, true, 'older settings files');
   assert.equal(mergeSettings(DEFAULT_SETTINGS, { ui: { ...DEFAULT_SETTINGS.ui, startWithWindows: false } }).ui.startWithWindows, false);
   assert.equal(mergeSettings(DEFAULT_SETTINGS, {}).ui.trayNoticeShown, false);
-  // Outside a packaged Windows build the startup entry is left alone (and nothing throws).
   assert.deepEqual(syncStartWithWindows(true, 'Krypt Studio'), { ok: true });
 });
 

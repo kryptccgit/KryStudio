@@ -1,7 +1,3 @@
-// Clip launcher runtime in main (electron/session/controller.ts) against a fake
-// engine: launch requests, scene tempo as a doc edit, launch recording →
-// session.capture + the record-state broadcast, grid-controller map pushes;
-// and the MCP tools build_session / launch / get_project.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER, actorKey } from '@shared/doc/DocHost';
@@ -80,7 +76,6 @@ function rig(opts: { running?: boolean } = {}) {
   return { doc, ctl, ex, requests, sent, broadcasts, logs, setStatus, emit, flush, refuse: (cmd: string | null) => (refuse = cmd) };
 }
 
-/** Two scenes; the second has a tempo; a clip on track 1 in each. */
 function grid(r: ReturnType<typeof rig>) {
   const p = r.doc.project;
   const pat = p.transport.activePatternId!;
@@ -129,7 +124,6 @@ test('launchScene sets the scene tempo through transport.set as the user (undoab
   const last = r.doc.getHistory().at(-1)!;
   assert.equal(last.actorKey, 'user');
   assert.match(last.label, /Scene "Drop" tempo 128/);
-  // already at the scene tempo: no second edit
   const v1 = r.doc.version;
   await r.ctl.launchScene(g.s2);
   assert.equal(r.doc.version, v1);
@@ -167,7 +161,6 @@ test('launch recording: on/off with "No change", launchRecorded → session.capt
   r.doc.undo(USER);
   assert.equal(Object.keys(r.doc.project.playlist.clips).length, 0);
 
-  // an empty recording does nothing; one whose clips were deleted reports it (and stays visible)
   const n = r.broadcasts.length;
   r.emit({ event: 'launchRecorded', entries: [] });
   assert.equal(r.broadcasts.length, n);
@@ -194,7 +187,6 @@ test('engine restart: the record switch and the grid map are sent again', async 
   assert.equal(r.sent('setLaunchRecord').filter((x) => x.on).length, 2);
   assert.equal(r.sent('setLaunchGrid').length, 2);
   assert.equal(Object.keys(r.sent('setLaunchGrid').at(-1).notes).length > 0, true);
-  // the restarted engine refuses recording → switched off, said in the log
   r.refuse('setLaunchRecord');
   r.setStatus('restarting');
   r.setStatus('running');
@@ -217,19 +209,17 @@ test('grid map: pushed when enabled, when the launcher layout or the settings ch
   let last = r.sent('setLaunchGrid').at(-1);
   assert.equal(last.device, 'LPX');
   assert.deepEqual(last.notes['81'], { clipId: g.c1 });
-  // a new launch clip moves the map
   const c3 = r.ex<{ id: string }>('session.setClip', { trackId: g.t[1], sceneId: g.s1, patternId: g.pat }).id;
   await r.flush();
   last = r.sent('setLaunchGrid').at(-1);
   assert.deepEqual(last.notes['82'], { clipId: c3 });
   const count = r.sent('setLaunchGrid').length;
-  // unrelated edits (notes, tempo) and identical maps are not re-sent
   r.ex('notes.add', { patternId: g.pat, channelId: r.doc.project.channelOrder[0], notes: [{ tick: 0, key: 36 }] });
   r.ex('transport.set', { bpm: 100 });
-  r.ex('session.setScene', { id: g.s1, name: 'Renamed' }); // touches the session, same map
+  r.ex('session.setScene', { id: g.s1, name: 'Renamed' });
   await r.flush();
   assert.equal(r.sent('setLaunchGrid').length, count);
-  r.ex('playlist.addTrack', { index: 0 }); // shifts the columns
+  r.ex('playlist.addTrack', { index: 0 });
   await r.flush();
   assert.equal(r.sent('setLaunchGrid').length, count + 1);
   r.ctl.setGridSettings({ enabled: false });
@@ -237,8 +227,6 @@ test('grid map: pushed when enabled, when the launcher layout or the settings ch
   assert.deepEqual(r.sent('setLaunchGrid').at(-1).notes, {});
   assert.equal(r.ctl.setGridSettings(null).ok, false);
 });
-
-// ── MCP tools ─────────────────────────────────────────────────────────
 
 function mcpRig() {
   const r = rig();
@@ -306,11 +294,9 @@ test('build_session: scenes with clips by name (new track names become tracks), 
   const hist = m.doc.getHistory().slice(before);
   assert.equal(hist.length, 1);
   assert.equal(hist[0].actorKey, 'agent:live-agent');
-  // editing an existing scene with the same values changes nothing
   const again = await m.call('build_session', { quantize: '2bars', scenes: [{ scene: 'Drop', tempo: 128, clips: [{ track: 1, pattern: 'Pattern 1', length_bars: 2, launch_mode: 'gate', follow: { action: 'next', after_bars: 4, chance: 0.75, other_action: 'stop' } }] }] });
   assert.equal(again.ok, false);
   assert.match(again.message, /^No change:/);
-  // remove a slot, refuse an instrument channel as audio, refuse an empty call
   const rm = await m.call('build_session', { scenes: [{ scene: 1, clips: [{ track: 'Vocals', remove: true }] }] });
   assert.equal(rm.ok, true, rm.message);
   assert.equal(Object.values(m.doc.project.session!.clips).some((c) => c.kind === 'audio'), false);

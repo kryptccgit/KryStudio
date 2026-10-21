@@ -1,12 +1,3 @@
-//! Engine integration tests with test-only plugins (independent of the
-//! real krypt-studio-dsp implementations).
-//!
-//! - `test.sine` / stock instrument ids → a tiny polyphonic sine.
-//! - `test.dc` / `krypt.audioclip` → outputs 0.25 per held note and records
-//!   every event with its absolute frame (sample-accurate timing checks).
-//! - effects: gain (pass-through), `test.latency` (64-sample delay, reports
-//!   latency), `test.sc` (outputs its sidechain input).
-
 use crate::compile::{SampleMode, Session};
 use crate::core::{Cmd, Core, Garbage, Shared};
 use crate::model::{Model, Warnings};
@@ -19,8 +10,6 @@ use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-
-// ── Test plugins ─────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
@@ -69,7 +58,6 @@ impl Instrument for Sine {
     }
     fn set_param(&mut self, index: usize, value: f32) {
         if index == 1 {
-            // Recording allocates; only used by tests that don't check allocation.
             let _ = CUTOFFS.try_with(|c| {
                 if let Ok(mut c) = c.try_borrow_mut() {
                     if c.capacity() > c.len() {
@@ -150,12 +138,11 @@ impl Instrument for Sine {
     }
 }
 
-/// Outputs 0.25 per held note; logs every event at its absolute frame.
 struct Dc {
     id: u32,
     frames: u64,
     held: [u16; 128],
-    pending: Vec<(usize, i32, u8)>, // (offset, +1 on / -1 off / 0 choke, key)
+    pending: Vec<(usize, i32, u8)>,
 }
 
 impl Dc {
@@ -224,7 +211,6 @@ struct Gain {
 }
 
 thread_local! {
-    /// Gain::process calls on this thread (offline renders run on the test thread).
     static GAIN_CALLS: Cell<usize> = const { Cell::new(0) };
 }
 
@@ -276,7 +262,6 @@ impl Effect for Latency {
     }
 }
 
-/// Replaces its input with the sidechain signal.
 struct ScCopy;
 
 impl Effect for ScCopy {
@@ -368,8 +353,6 @@ fn test_create_effect(id: &str, _sr: f32, _max: usize) -> Option<Box<dyn Effect>
 pub fn test_host() -> PluginHost {
     PluginHost { create_instrument: test_create_instrument, create_effect: test_create_effect, descriptors: test_descriptors }
 }
-
-// ── Project builders ─────────────────────────────────────────────────────
 
 fn insert(id: &str, master: bool, routes: Value) -> Value {
     json!({ "id": id, "name": id, "color": "#ffffff", "volume": 1, "pan": 0, "stereoSep": 0, "mute": false, "solo": false,
@@ -483,10 +466,7 @@ fn near(a: f32, b: f32, tol: f32) -> bool {
     (a - b).abs() <= tol
 }
 
-/// DC level of one held note through a default channel (vol 0.78, centre pan).
 const DC1: f32 = 0.25 * 0.78;
-
-// ── Tests ────────────────────────────────────────────────────────────────
 
 #[test]
 fn note_timing_is_sample_accurate() {
@@ -495,7 +475,6 @@ fn note_timing_is_sample_accurate() {
     add_channel(&mut p, "c1", "test.dc", "i1");
     add_note(&mut p, "pa", "c1", "n1", 960.0, 480.0, 60);
     let o = render_p(&p, PATTERN, 0.0);
-    // One 4/4 bar at 120 bpm / 48 kHz = 96000 frames; tick 960 = frame 24000.
     assert_eq!(o.l.len(), 96000);
     assert_eq!(o.l[23999], 0.0);
     assert!(near(o.l[24000], DC1, 1e-5), "onset level {}", o.l[24000]);
@@ -509,14 +488,12 @@ fn note_timing_is_sample_accurate() {
 
 #[test]
 fn muted_notes_are_never_scheduled() {
-    // Wave 2 (piano-roll mute tool): `mute: true` notes are skipped in compile.rs,
-    // but still count towards the auto pattern length (like patternLength() in TS).
     let mut p = base(120.0, "pattern");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     add_channel(&mut p, "c1", "test.dc", "i1");
     add_note(&mut p, "pa", "c1", "a", 0.0, 240.0, 60);
     add_note(&mut p, "pa", "c1", "b", 960.0, 240.0, 62);
-    add_note(&mut p, "pa", "c1", "c", 3840.0, 240.0, 64); // bar 2
+    add_note(&mut p, "pa", "c1", "c", 3840.0, 240.0, 64);
     p["patterns"]["pa"]["notes"]["c1"]["b"]["mute"] = json!(true);
     p["patterns"]["pa"]["notes"]["c1"]["c"]["mute"] = json!(true);
     let o = render_p(&p, PATTERN, 0.0);
@@ -529,22 +506,19 @@ fn swing_delays_odd_sixteenths() {
     let mut p = base(120.0, "pattern");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     add_channel(&mut p, "c1", "test.dc", "i1");
-    add_note(&mut p, "pa", "c1", "a", 240.0, 60.0, 61); // odd step
-    add_note(&mut p, "pa", "c1", "b", 480.0, 60.0, 62); // even step
+    add_note(&mut p, "pa", "c1", "a", 240.0, 60.0, 61);
+    add_note(&mut p, "pa", "c1", "b", 480.0, 60.0, 62);
     p["transport"]["swing"] = json!(1.0);
     render_p(&p, PATTERN, 0.0);
-    // 240 + 1*1*240*0.5 = 360 ticks → 9000 frames; even step unchanged.
     assert_eq!(ons(&log_take()), vec![(61, 9000), (62, 12000)]);
     p["transport"]["swing"] = json!(0.5);
     p["channels"]["c1"]["swing"] = json!(0.5);
     render_p(&p, PATTERN, 0.0);
-    // 240 + 0.5*0.5*120 = 270 ticks → 6750 frames.
     assert_eq!(ons(&log_take()), vec![(61, 6750), (62, 12000)]);
 }
 
 #[test]
 fn pattern_clips_loop_offset_and_cut() {
-    // (a) A 2-bar clip of a 1-bar pattern loops its source.
     let mut p = base(120.0, "song");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     add_channel(&mut p, "c1", "test.dc", "i1");
@@ -553,13 +527,11 @@ fn pattern_clips_loop_offset_and_cut() {
     render_p(&p, RenderScope::Song, 0.0);
     assert_eq!(ons(&log_take()), vec![(60, 0), (60, 96000)]);
 
-    // (b) Trimmed start (offset 960): the source note at 0 plays only on the next loop.
     p["playlist"]["clips"]["k1"]["length"] = json!(3840.0);
     p["playlist"]["clips"]["k1"]["offset"] = json!(960.0);
     render_p(&p, RenderScope::Song, 0.0);
     assert_eq!(ons(&log_take()), vec![(60, 72000)]);
 
-    // (c) Notes are cut at the clip end.
     p["playlist"]["clips"]["k1"]["offset"] = json!(0.0);
     p["playlist"]["clips"]["k1"]["length"] = json!(1000.0);
     p["patterns"]["pa"]["notes"]["c1"]["n"]["dur"] = json!(3000.0);
@@ -576,12 +548,11 @@ fn tempo_automation_changes_timing() {
     add_channel(&mut p, "c1", "test.dc", "i1");
     add_note(&mut p, "pa", "c1", "n", 960.0, 240.0, 60);
     add_clip(&mut p, "k1", "pattern", 0.0, 3840.0, json!({ "patternId": "pa" }));
-    let v = (120.0 - 10.0) / 989.0; // normalized for 120 bpm
+    let v = (120.0 - 10.0) / 989.0;
     p["automations"]["a1"] = json!({ "id": "a1", "name": "Tempo", "color": "#fff", "target": "transport/bpm",
         "points": { "p1": { "id": "p1", "tick": 0, "value": v, "tension": 0 }, "p2": { "id": "p2", "tick": 3840, "value": v, "tension": 0 } } });
     add_clip(&mut p, "k2", "automation", 0.0, 3840.0, json!({ "automationId": "a1" }));
     let o = render_p(&p, RenderScope::Song, 0.0);
-    // At the document tempo (60) the note would start at 48000; automated to 120 → 24000.
     assert_eq!(ons(&log_take()), vec![(60, 24000)]);
     assert!((o.l.len() as i64 - 96000).abs() <= 1, "len {}", o.l.len());
 }
@@ -601,14 +572,11 @@ fn param_automation_follows_curve_and_holds() {
     });
     render_p(&p, RenderScope::Song, 0.0);
     let vals = CUTOFFS.with(|c| c.borrow().clone());
-    // [0] = document default at creation, then one value per 32-frame sub-block.
     assert_eq!(vals[0], 8000.0);
     assert!((vals[1] - 20.0).abs() < 1e-3);
-    // Sub-block 750 starts at tick 960 → normalized 0.5 → 20 * 1000^0.5 Hz.
     let mid = 20.0 * 1000f32.sqrt();
     assert!((vals[751] - mid).abs() / mid < 0.01, "mid {}", vals[751]);
     assert!(vals[1..].windows(2).all(|w| w[1] >= w[0]));
-    // After the clip ends its last value holds (no reset to 8000).
     assert_eq!(*vals.last().unwrap(), 20000.0);
 }
 
@@ -644,7 +612,6 @@ fn equal_power_channel_pan() {
     let sq = std::f32::consts::SQRT_2;
     assert!(near(o.l[100], DC1 * th.cos() * sq, 1e-5));
     assert!(near(o.r[100], DC1 * th.sin() * sq, 1e-5));
-    // Power is preserved: L² + R² = 2 · centre².
     assert!(near(o.l[100].powi(2) + o.r[100].powi(2), 2.0 * DC1 * DC1, 1e-5));
 }
 
@@ -661,18 +628,15 @@ fn mixer_solo_mute_and_bus_rules() {
     add_note(&mut p, "pa", "c2", "b", 0.0, 3840.0, 60);
     let o = render_p(&p, PATTERN, 0.0);
     assert!(near(o.l[100], DC1, 1e-5) && near(o.r[100], DC1, 1e-5));
-    // Solo i2 → i1 muted.
     p["mixer"]["inserts"]["i2"]["solo"] = json!(true);
     let o = render_p(&p, PATTERN, 0.0);
     assert_eq!(o.l[100], 0.0);
     assert!(near(o.r[100], DC1, 1e-5));
-    // Mute instead.
     p["mixer"]["inserts"]["i2"]["solo"] = json!(false);
     p["mixer"]["inserts"]["i2"]["mute"] = json!(true);
     let o = render_p(&p, PATTERN, 0.0);
     assert!(near(o.l[100], DC1, 1e-5));
     assert_eq!(o.r[100], 0.0);
-    // Soloing an insert that reaches the master through a bus keeps the bus open.
     p["mixer"]["inserts"]["i2"]["mute"] = json!(false);
     add_insert(&mut p, "bus", json!({ "m": 1 }));
     p["mixer"]["inserts"]["i1"]["routes"] = json!({ "bus": 1 });
@@ -691,7 +655,6 @@ fn routing_cycles_are_ignored_with_a_warning() {
     add_note(&mut p, "pa", "c1", "a", 0.0, 3840.0, 60);
     let o = render_p(&p, PATTERN, 0.0);
     assert!(o.warnings.iter().any(|w| w.contains("feedback loop")), "{:?}", o.warnings);
-    // i1→m plus i1→i2→m (i2→i1 dropped).
     assert!(near(o.l[100], 2.0 * DC1, 1e-5), "{}", o.l[100]);
 }
 
@@ -706,7 +669,6 @@ fn plugin_delay_compensation_aligns_parallel_paths() {
     add_note(&mut p, "pa", "c1", "a", 960.0, 480.0, 60);
     add_note(&mut p, "pa", "c2", "b", 960.0, 480.0, 60);
     let o = render_p(&p, PATTERN, 0.0);
-    // Without PDC frame 24000 would already carry the undelayed path.
     assert_eq!(o.l[24000 + LAT - 1], 0.0);
     assert!(near(o.l[24000 + LAT], 2.0 * DC1, 1e-5), "{}", o.l[24000 + LAT]);
 }
@@ -714,7 +676,6 @@ fn plugin_delay_compensation_aligns_parallel_paths() {
 #[test]
 fn sidechain_input_is_routed_in_topological_order() {
     let mut p = base(120.0, "pattern");
-    // i2 listed before i1, but i2's sidechain needs i1 first.
     add_insert(&mut p, "i2", json!({ "m": 1 }));
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     add_slot(&mut p, "i2", "s1", "test.sc", Some("i1"));
@@ -724,9 +685,6 @@ fn sidechain_input_is_routed_in_topological_order() {
     assert!(near(o.l[24000], 2.0 * DC1, 1e-5), "{}", o.l[24000]);
 }
 
-/// A silent insert's chain of stock effects sleeps once its output has been
-/// silent for quiet_frames (no work for idle parts) and wakes on the first
-/// input sample; chains with an echo delay or a third-party effect never sleep.
 #[test]
 fn silent_inserts_let_stock_fx_sleep_and_wake_on_input() {
     let gap = |fx: &str| {
@@ -734,8 +692,8 @@ fn silent_inserts_let_stock_fx_sleep_and_wake_on_input() {
         add_insert(&mut p, "i1", json!({ "m": 1 }));
         add_slot(&mut p, "i1", "s1", fx, None);
         add_channel(&mut p, "c1", "test.dc", "i1");
-        add_note(&mut p, "pa", "c1", "a", 0.0, 480.0, 60); // the first half beat
-        add_note(&mut p, "pa", "c1", "b", 7680.0, 480.0, 60); // bar 3 (4 s at 120 bpm)
+        add_note(&mut p, "pa", "c1", "a", 0.0, 480.0, 60);
+        add_note(&mut p, "pa", "c1", "b", 7680.0, 480.0, 60);
         GAIN_CALLS.with(|c| c.set(0));
         let o = render_p(&p, PATTERN, 0.0);
         (o, GAIN_CALLS.with(|c| c.get()))
@@ -775,17 +733,14 @@ fn audio_clips_start_mid_sample_with_gain_and_fades() {
     p["channels"]["ca"]["generator"]["sampleId"] = json!("s1");
     add_clip(&mut p, "k1", "audio", 0.0, 7680.0, json!({ "channelId": "ca", "gain": 0.5, "fadeIn": 960, "fadeOut": 0 }));
     p["playlist"]["clips"]["k1"]["offset"] = json!(480.0);
-    // Start in the middle of the clip: the engine chases it.
     let o = render_p(&p, RenderScope::Range { start_tick: 1920.0, end_tick: 3840.0 }, 0.0);
     let log = log_take();
     let on = log.iter().find(|r| r.kind == "on").expect("chased note-on");
     assert_eq!(on.frame, 0);
-    // (1920 - 0 + 480) ticks at 120 bpm = 2.5 beats = 1.25 s.
     assert!((on.sample_start - 1.25).abs() < 1e-9, "sample_start {}", on.sample_start);
     assert!((on.pitch - 60.0).abs() < 1e-6);
     assert!(near(o.l[1000], DC1 * 0.5, 1e-4), "{}", o.l[1000]);
     assert!(o.warnings.iter().any(|w| w.contains("does-not-exist")));
-    // From the clip start: offset → 0.25 s, and the fade-in at tick 480 is half way.
     let o = render_p(&p, RenderScope::Range { start_tick: 0.0, end_tick: 1920.0 }, 0.0);
     let on = log_take().into_iter().find(|r| r.kind == "on").unwrap();
     assert!((on.sample_start - 0.25).abs() < 1e-9);
@@ -807,7 +762,6 @@ fn metronome_clicks_on_beats() {
 fn beat_fixture_renders_non_silent_with_test_sine() {
     let p = beat_json();
     let o = render_p(&p, RenderScope::Song, 1.0);
-    // 8 bars at 140 bpm = 30720 ticks = 13.714 s, + 1 s tail.
     let expect = (30720.0 / 960.0 * 60.0 / 140.0 * 48000.0f64).round() as i64 + 48000;
     assert!((o.l.len() as i64 - expect).abs() <= 1, "len {} vs {expect}", o.l.len());
     assert!(o.l.iter().chain(o.r.iter()).all(|x| x.is_finite()));
@@ -821,7 +775,6 @@ fn beat_fixture_renders_non_silent_with_test_sine() {
         let e: f64 = o.l[b * bar..(b + 1) * bar].iter().map(|x| (*x as f64).powi(2)).sum::<f64>() / bar as f64;
         assert!(e.sqrt() > 0.001, "bar {b} is silent");
     }
-    // The tail decays.
     let tail_pk = o.l[o.l.len() - 4800..].iter().fold(0f32, |m, x| m.max(x.abs()));
     assert!(tail_pk < peak);
 }
@@ -867,7 +820,6 @@ fn run_render_writes_wav_and_result() {
         assert_eq!(rd.spec().bits_per_sample, bits);
         assert_eq!(rd.spec().channels, 2);
         assert_eq!(rd.spec().sample_rate, 44100);
-        // One bar at 140 bpm @ 44.1 kHz.
         let expect = (60.0 / 140.0 * 4.0 * 44100.0f64).round() as u32;
         assert!((rd.duration() as i64 - expect as i64).abs() <= 1, "{} vs {expect}", rd.duration());
         assert!((r.duration_sec - rd.duration() as f64 / 44100.0).abs() < 1e-6);
@@ -930,9 +882,6 @@ fn run_render_normalize_hits_minus_0_1_dbfs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ── MP3 export ───────────────────────────────────────────────────────────
-
-/// A held A4 (the 440 Hz test sine) for one 120 bpm bar: 2 s.
 fn sine_project() -> Value {
     let mut p = base(120.0, "pattern");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
@@ -941,7 +890,6 @@ fn sine_project() -> Value {
     p
 }
 
-/// Windows' MP3 encoder is here, or the test is skipped with a note.
 fn mp3_encoder() -> bool {
     match krypt_studio_dsp::mp3::check_encoder() {
         Ok(()) => true,
@@ -1000,11 +948,6 @@ fn zc_hz(x: &[f32], sr: f64) -> f64 {
     x.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count() as f64 * sr / x.len() as f64
 }
 
-/// Decode an MP3 export (Windows' decoder and symphonia), line it up with
-/// the float render using the reported encoder delay and compare. Symphonia
-/// keeps the standard 529-sample decoder delay; Windows' decoder removes 528
-/// of it (measured: its output is 1 sample later than the delay says).
-/// MP3 export uses Windows' encoder, so these checks run on Windows only.
 #[cfg(windows)]
 fn check_mp3_against(path: &std::path::Path, m: &crate::protocol::Mp3RenderInfo, reference: &[Vec<f32>], what: &str) {
     let bytes = std::fs::read(path).unwrap();
@@ -1022,8 +965,6 @@ fn check_mp3_against(path: &std::path::Path, m: &crate::protocol::Mp3RenderInfo,
             assert!((a - b).abs() < 0.5, "{what} ch{c}: rms {a:.2} dB vs float {b:.2} dB");
             let hz = zc_hz(mid(dec), m.sample_rate as f64);
             assert!((hz - 440.0).abs() < 2.0, "{what} ch{c}: {hz} Hz");
-            // Aligned by the reported delay, the decode matches the waveform
-            // (one sample off would cap this at ~24 dB for 440 Hz).
             let err: Vec<f32> = mid(dec).iter().zip(mid(refc)).map(|(x, y)| x - y).collect();
             let snr = b - rms_db(&err);
             if c == 0 {
@@ -1057,7 +998,6 @@ fn run_render_writes_mp3_at_every_bitrate() {
             let r = run_job(&model, &render_job(&path, "mp3", sr as f64, kbps)).expect("mp3 render");
             let what = format!("{sr} Hz / {kbps:?} kbps");
             eprintln!("{what}: {:.0} ms, {:?}", t0.elapsed().as_secs_f64() * 1000.0, r.mp3);
-            // The numbers describe the float audio, exactly as the WAV render's.
             assert_eq!((r.path.as_str(), r.files.clone()), (path.to_str().unwrap(), vec![path.display().to_string()]));
             assert_eq!((r.duration_sec, r.peak_db, r.lufs_integrated), (r_wav.duration_sec, r_wav.peak_db, r_wav.lufs_integrated), "{what}");
             assert_eq!(r.analysis, r_wav.analysis, "{what}");
@@ -1088,8 +1028,6 @@ fn mp3_render_resamples_rates_the_encoder_cannot_take() {
         let m = r.mp3.as_ref().unwrap();
         assert_eq!(m.sample_rate, want);
         assert!((r.duration_sec - 2.0).abs() < 1e-9, "duration of the float render");
-        // Reference: the same project rendered at the MP3 rate (a pure tone,
-        // so the two renders agree up to the resampler's passband error).
         let wav = dir.join(format!("ref-{want}.wav"));
         run_job(&model, &render_job(&wav, "wav32f", want as f64, None)).unwrap();
         let mut rd = hound::WavReader::open(&wav).unwrap();
@@ -1114,7 +1052,6 @@ fn mp3_jobs_validate_before_rendering() {
     assert_eq!(run_job(&model, &render_job(&path, "mp3", 48_000.0, Some(100.0))).unwrap_err(), "MP3 bitrate 100 kbps is not supported: use 128, 192, 256 or 320");
     assert!(!dir.exists(), "nothing was written");
     assert_eq!(validate_request(&render_job(&path, "ogg", 48_000.0, None)).unwrap_err(), "Unknown render format 'ogg' (use wav16, wav24, wav32f or mp3)");
-    // The protocol shapes: `mp3Kbps` in (here), `mp3` out (below).
     let job: RenderRequest = serde_json::from_value(json!({ "path": "C:/x.mp3", "scope": { "kind": "song" }, "format": "mp3", "mp3Kbps": 192 })).unwrap();
     assert_eq!((job.format.as_str(), job.mp3_kbps), ("mp3", Some(192.0)));
     let job: RenderRequest = serde_json::from_value(json!({ "path": "C:/x.mp3", "format": "mp3" })).unwrap();
@@ -1136,8 +1073,6 @@ fn mp3_jobs_validate_before_rendering() {
     assert!(serde_json::to_value(wav).unwrap().get("mp3").is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
-
-// ── Live core (command queue) tests ──────────────────────────────────────
 
 struct Live {
     core: Core,
@@ -1214,9 +1149,7 @@ fn song_loop_region_wraps_with_events_on_the_boundary() {
     let mut live = Live::new(&p);
     live.send(Cmd::Play);
     live.run(80_000);
-    // 0 → 1920 (48000 frames), then [960, 1920) every 24000 frames.
     assert_eq!(ons(&log_take()), vec![(60, 24000), (60, 48000), (60, 72000)]);
-    // Without a loop region the whole song (1 bar) loops.
     p["transport"]["loop"]["enabled"] = json!(false);
     let mut live = Live::new(&p);
     live.send(Cmd::Play);
@@ -1277,29 +1210,24 @@ fn edits_update_params_without_recreating_instances() {
     assert_eq!(b1.instruments.len(), 1);
     assert_eq!(b1.effects.len(), 1);
     let slot = b1.instruments[0].0;
-    // Param edit → set_param only.
     s.model.channels.get_mut("c1").unwrap().generator.params.insert("cutoff".into(), 1000.0);
     s.model.inserts.get_mut("i1").unwrap().slots.get_mut("s1").unwrap().params.insert("gain".into(), -6.0);
     let b2 = s.build(false);
     assert!(b2.instruments.is_empty() && b2.effects.is_empty());
     assert_eq!(b2.inst_params, vec![(slot, 1, 1000.0)]);
     assert_eq!(b2.fx_params.len(), 1);
-    // Out-of-range values are clamped to the spec.
     s.model.channels.get_mut("c1").unwrap().generator.params.insert("cutoff".into(), 1e9);
     let b3 = s.build(false);
     assert_eq!(b3.inst_params, vec![(slot, 1, 20000.0)]);
-    // Voice mode change → set_voice_mode only.
     s.model.channels.get_mut("c1").unwrap().poly.mono = true;
     s.model.channels.get_mut("c1").unwrap().poly.glide_ms = 60.0;
     let b4 = s.build(false);
     assert!(b4.instruments.is_empty());
     assert_eq!(b4.voice, vec![(slot, true, 60.0)]);
-    // Generator type change → re-create.
     s.model.channels.get_mut("c1").unwrap().generator.type_id = "test.dc".into();
     let b5 = s.build(false);
     assert_eq!(b5.instruments.len(), 1);
     assert!(b5.instruments[0].1.is_some());
-    // Delete → removal.
     s.model.delete_entity("channel", "c1", &mut w);
     let b6 = s.build(false);
     assert_eq!(b6.instruments.len(), 1);
@@ -1312,7 +1240,6 @@ fn edits_update_params_without_recreating_instances() {
 fn audio_path_does_not_allocate() {
     let mut p = beat_json();
     p["transport"]["metronome"] = json!(true);
-    // First channel of the fixture (ids are regenerated with the fixture, never hard-code them).
     let first_channel = p["channelOrder"][0].as_str().expect("fixture has channels").to_string();
     let mut live = Live::new(&p);
     let before = assert_no_alloc::violation_count();
@@ -1321,7 +1248,6 @@ fn audio_path_does_not_allocate() {
     for _ in 0..600 {
         crate::rt::no_alloc(|| live.core.process_interleaved(&mut buf, 2));
     }
-    // Apply an edit, locate, audition, pattern mode, stop — all on the "audio thread".
     live.session.model.transport.bpm = 150.0;
     live.session.model.transport.mode = "pattern".into();
     live.session.version = 2;
@@ -1354,7 +1280,6 @@ fn panicking_plugin_constructor_is_contained() {
     assert!(o.warnings.iter().any(|w| w.contains("crashed while loading")), "{:?}", o.warnings);
 }
 
-/// Proves the guard behind `audio_path_does_not_allocate` is live.
 #[cfg(debug_assertions)]
 #[test]
 fn alloc_guard_detects_allocations() {
@@ -1364,8 +1289,6 @@ fn alloc_guard_detects_allocations() {
     });
     assert!(assert_no_alloc::violation_count() > before);
 }
-
-// ── Live MIDI input + recording (record.rs / record_hooks.rs) ────────────
 
 use crate::record::{LiveCtlEnds, RecMsg};
 use std::sync::atomic::Ordering::Relaxed as LiveRelaxed;
@@ -1379,7 +1302,6 @@ fn attach_live(live: &mut Live) -> LiveCtlEnds {
     ctl
 }
 
-/// Deliver MIDI bytes as if they arrived at `t_ns` (engine clock).
 fn midi_at(ctl: &LiveCtlEnds, t_ns: u64, bytes: &[u8]) {
     let dev: Arc<str> = Arc::from("test");
     let mut rs = 0;
@@ -1407,7 +1329,6 @@ fn live_midi_plays_the_target_channel_sample_accurately() {
     live.core.shared.live.target_slot.store(s1, LiveRelaxed);
     live.run(480);
     log_take();
-    // 5 ms and 6 ms after the previous block started → frames 240 / 288 of the next block.
     let t = live.core.live.block_t_ns;
     midi_at(&ctl, t + 5 * MS, &[0x90, 64, 100]);
     midi_at(&ctl, t + 6 * MS, &[0x80, 64, 0]);
@@ -1417,7 +1338,6 @@ fn live_midi_plays_the_target_channel_sample_accurately() {
     assert!(near(out[2 * 250], DC1, 1e-5), "sounds while held");
     assert_eq!(out[2 * 230], 0.0);
     assert_eq!(out[2 * 300], 0.0);
-    // Retarget while a key is held: the note-off still reaches the first channel.
     let t = live.core.live.block_t_ns;
     midi_at(&ctl, t + MS, &[0x90, 67, 90]);
     live.run(480);
@@ -1429,7 +1349,6 @@ fn live_midi_plays_the_target_channel_sample_accurately() {
     let first = log.iter().find(|r| r.kind == "on" && r.key == 67).unwrap().inst;
     assert!(log.iter().any(|r| r.kind == "off" && r.key == 67 && r.inst == first));
     assert!(log.iter().any(|r| r.kind == "on" && r.key == 69 && r.inst != first), "new notes follow the new target");
-    // No target → nothing plays.
     live.core.shared.live.target_slot.store(crate::program::NONE, LiveRelaxed);
     let t = live.core.live.block_t_ns;
     midi_at(&ctl, t + MS, &[0x90, 65, 100]);
@@ -1448,13 +1367,13 @@ fn sustain_pedal_defers_note_offs() {
     live.run(480);
     log_take();
     let t = live.core.live.block_t_ns;
-    midi_at(&ctl, t + MS, &[0xB0, 64, 127]); // pedal down
+    midi_at(&ctl, t + MS, &[0xB0, 64, 127]);
     midi_at(&ctl, t + 2 * MS, &[0x90, 60, 100]);
-    midi_at(&ctl, t + 3 * MS, &[0x80, 60, 0]); // held by the pedal
+    midi_at(&ctl, t + 3 * MS, &[0x80, 60, 0]);
     live.run(480);
     assert!(!log_take().iter().any(|r| r.kind == "off"));
     let t = live.core.live.block_t_ns;
-    midi_at(&ctl, t + 5 * MS, &[0xB0, 64, 0]); // pedal up → release at frame 240
+    midi_at(&ctl, t + 5 * MS, &[0xB0, 64, 0]);
     live.run(480);
     let offs: Vec<u64> = log_take().iter().filter(|r| r.kind == "off").map(|r| r.frame).collect();
     assert_eq!(offs, vec![960 + 240]);
@@ -1474,24 +1393,20 @@ fn records_pattern_notes_with_latency_compensation_and_loop_reports() {
     live.send(Cmd::Play);
     live.run(4800);
     assert_eq!(l.state.load(LiveRelaxed), crate::record::STATE_RECORDING);
-    // 120 bpm @ 48 kHz = 0.04 ticks/frame. Latency = one 480-frame block (+0 output
-    // latency in tests) = 19.2 ticks. Note-on at frame 5040 (tick 201.6) → 182.4.
     let t = live.core.live.block_t_ns;
     midi_at(&ctl, t + 5 * MS, &[0x90, 60, 127]);
     live.run(480);
     let t = live.core.live.block_t_ns;
-    midi_at(&ctl, t + 5 * MS, &[0x80, 60, 0]); // frame 5520 → 19.2 ticks long
+    midi_at(&ctl, t + 5 * MS, &[0x80, 60, 0]);
     live.run(480);
-    // Run up to the loop end (1 bar = 96000 frames). A note right on the downbeat of
-    // pass 2 was heard (compensated) 19.2 ticks before the end of pass 1.
     live.run(96000 - 5760);
     let t = live.core.live.block_t_ns;
-    midi_at(&ctl, t, &[0x90, 61, 64]); // offset 0 of the next block = frame 96000
+    midi_at(&ctl, t, &[0x90, 61, 64]);
     live.run(480);
     let t = live.core.live.block_t_ns;
-    midi_at(&ctl, t + 2_500_000, &[0x80, 61, 0, 0x90, 62, 127]); // frame 96600 (tick 24.0 → 4.8)
+    midi_at(&ctl, t + 2_500_000, &[0x80, 61, 0, 0x90, 62, 127]);
     live.run(480);
-    live.send(Cmd::Stop); // processed at frame 96960: 62 is still held
+    live.send(Cmd::Stop);
     live.run(480);
     let msgs = rec_msgs(&mut ctl);
     let near64 = |a: f64, b: f64| (a - b).abs() < 1e-6;
@@ -1521,7 +1436,6 @@ fn records_pattern_notes_with_latency_compensation_and_loop_reports() {
     assert!(wrap_at < n61_at, "pass 1 is reported before the notes of pass 2");
     assert!(matches!(msgs.last(), Some(RecMsg::End { take: 1, .. })));
     assert_eq!(l.state.load(LiveRelaxed), crate::record::STATE_IDLE);
-    // Disarmed: playing doesn't record.
     l.armed.store(false, LiveRelaxed);
     live.send(Cmd::Play);
     live.run(4800);
@@ -1552,7 +1466,6 @@ fn count_in_clicks_then_starts_the_take() {
     assert!(live.core.is_playing());
     assert!((live.tick() - 19.2).abs() < 1e-9, "starts exactly at the end of the count-in: {}", live.tick());
     assert!(matches!(rec_msgs(&mut ctl).first(), Some(RecMsg::Start { start_tick, .. }) if *start_tick == 0.0));
-    // Stop during a count-in cancels it.
     live.send(Cmd::Stop);
     live.run(480);
     live.send(Cmd::Play);
@@ -1586,8 +1499,6 @@ fn armed_song_mode_plays_past_the_song_end() {
     assert!(live.tick() < 3840.0);
 }
 
-/// Takes (docs/ENGINE_PROTOCOL.md §13): song-mode loop recording reports each
-/// pass boundary (loop region + heard seconds) and tags every note with its pass.
 #[test]
 fn song_loop_recording_reports_passes() {
     let mut p = base(120.0, "song");
@@ -1601,14 +1512,12 @@ fn song_loop_recording_reports_passes() {
     l.armed.store(true, LiveRelaxed);
     live.send(Cmd::Play);
     live.run(4800);
-    // Pass 0: a note at ~frame 5000.
     let t = live.core.live.block_t_ns;
     midi_at(&ctl, t + MS, &[0x90, 60, 100]);
     live.run(480);
     let t = live.core.live.block_t_ns;
     midi_at(&ctl, t + MS, &[0x80, 60, 0]);
     live.run(480);
-    // Into pass 1 (the loop is 96000 frames), then a note there.
     live.run(96000);
     let t = live.core.live.block_t_ns;
     midi_at(&ctl, t + MS, &[0x90, 64, 100]);
@@ -1616,7 +1525,6 @@ fn song_loop_recording_reports_passes() {
     let t = live.core.live.block_t_ns;
     midi_at(&ctl, t + MS, &[0x80, 64, 0]);
     live.run(480);
-    // Into pass 2, then stop.
     live.run(96000);
     live.send(Cmd::Stop);
     live.run(480);
@@ -1624,7 +1532,6 @@ fn song_loop_recording_reports_passes() {
     let wraps: Vec<(f64, f64, f64)> = msgs.iter().filter_map(|m| match m { RecMsg::Wrap { sec, lo, hi, .. } => Some((*sec, *lo, *hi)), _ => None }).collect();
     assert_eq!(wraps.len(), 2, "{msgs:?}");
     assert!(wraps.iter().all(|w| w.1 == 0.0 && w.2 == 3840.0));
-    // `sec` is heard (wall-clock) time; tests run blocks faster than real time, so only its sign is checked here.
     assert!(wraps.iter().all(|w| w.0.is_finite() && w.0 >= 0.0), "{wraps:?}");
     let passes: Vec<(u8, u32)> = msgs.iter().filter_map(|m| match m { RecMsg::Note { key, pass, .. } => Some((*key, *pass)), _ => None }).collect();
     assert_eq!(passes, vec![(60, 0), (64, 1)]);
@@ -1634,8 +1541,6 @@ fn song_loop_recording_reports_passes() {
     }
 }
 
-/// Input monitoring: what the input thread pushes reaches the output, transport stopped, and
-/// stops when monitoring is turned off.
 #[test]
 fn live_monitor_reaches_the_output_while_stopped() {
     let mut p = base(120.0, "pattern");
@@ -1647,7 +1552,6 @@ fn live_monitor_reaches_the_output_while_stopped() {
     let mut loudest = |live: &mut Live, ctl: &mut LiveCtlEnds, on: bool| -> f32 {
         l.monitor.store(on, LiveRelaxed);
         let mut peak = 0f32;
-        // ~0.5 s: the input thread delivers 480-frame packets (10 ms), the output pulls 256-frame blocks.
         let mut queued = 0usize;
         for _ in 0..94 {
             while queued < 256 * 3 {
@@ -1713,30 +1617,23 @@ fn live_input_path_does_not_allocate() {
     }
 }
 
-// Audio-clip time-stretch / pitch-shift through the whole engine (variants.rs).
 #[path = "tests_stretch.rs"]
 mod stretch;
 
-// Stem export: one pass, post-fader taps per insert plus Master (render.rs).
 #[path = "tests_stems.rs"]
 mod stems;
 
-// Racks and macros: zones, chokes, FX-rack sums, macro maps, edits (rack.rs).
 #[path = "tests_rack.rs"]
 mod rack;
 
-// Wave 12.2b rack-plus: automation of inner rack params, macro vs automation, instrument PDC.
 #[path = "tests_rack_plus.rs"]
 mod rack_plus;
 
-// Clip launcher: quantize, follow actions, modes, override, launch recording, grid (launcher.rs).
 #[path = "tests_launcher.rs"]
 mod launcher_tests;
 
-// Wave 12.2b meters: gain reduction, watched-slot taps, render GR stats (meters.rs).
 #[path = "tests_meters.rs"]
 mod meters_tests;
 
-// MIDI clock out + external sync through the live core (clock.rs, clock_hooks.rs).
 #[path = "tests_clock.rs"]
 mod clock_tests;

@@ -1,4 +1,3 @@
-// Start here (step by step) · 2: the windows, their keys, and how to get them back.
 import type { GuideArticle } from '../articles';
 
 export const WINDOWS: GuideArticle = {

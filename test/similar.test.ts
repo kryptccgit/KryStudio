@@ -1,8 +1,3 @@
-// "More like this" (research/13 §12.1): the pure ranking on the REAL factory fingerprint index (a kick's
-// neighbours are kicks, bright hats rank near bright hats, short why lines, kinds, exclusion, inference), source
-// resolution in main (presets, factory / pack samples, user files under the Browser rule, user presets), the
-// lazy pack-sample path with progress / pending / cancel against a fake analyzer, the missing-index message,
-// the IPC surface (channel, preload, handler, mock) and find_samples / find_presets {like}.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -41,8 +36,6 @@ const samplesOf = (k: SampleKind) => E.filter((e): e is FingerprintEntry & { sou
 const entry = (key: string) => E.find((e) => (e.source.kind === 'sample' ? e.source.path : e.source.id) === key)!;
 const isKickish = (s: FingerprintEntry['source']) => (s.kind === 'sample' ? s.sampleKind === 'kick' : s.role === 'kick');
 const fpOf = (p: string) => (E.find((e) => e.source.kind === 'sample' && e.source.path === p) as FingerprintEntry).fp;
-
-// ── Pure ranking on the real index ────────────────────────────────────
 
 test('real index: a kick finds kicks (same kind: only kicks; any kind: kicks fill the top 3 for most)', () => {
   const kicks = samplesOf('kick');
@@ -94,19 +87,15 @@ test('why: "darker, shorter tail" / "nearly identical"; relations and kinds; inf
   assert.match(why, /darker/);
   const same = compareFingerprints(kick.fp, kick.fp, PROFILES.kick, { drum: true });
   assert.equal(shortWhy(kick.fp, same.deltas, PROFILES.kick, same.similarity, 'kick'), 'nearly identical');
-  // kinds: a riser's family has sweeps and swells; a kick sample also finds kick presets; kits never
   assert.deepEqual(similarKinds({ kind: 'sample', sampleKind: 'riser' }).kinds.slice(0, 2), ['riser', 'sweep-up']);
   const kickPreset = E.find((e) => e.source.kind === 'preset' && e.source.role === 'kick')!;
   assert.equal(relationOf(kickPreset, { kind: 'sample', sampleKind: 'kick' }), 'exact');
   assert.equal(relationOf(samplesOf('snare')[0], { kind: 'sample', sampleKind: 'kick' }), 'other');
-  // an unknown kind: every kind, and the nearest neighbours tell it's a kick
   const unknown = rankSimilar(kick.fp, { kind: 'sample', sampleKind: null }, E, { scope: 'same', limit: 5, exclude: kick.source });
   assert.equal(unknown.length, 5);
   assert.equal(inferSampleKind(kick.fp, E.filter((e) => e !== kick))?.kind, 'kick');
   assert.equal(inferSampleKind(samplesOf('hat')[0].fp, E.filter((e) => e !== samplesOf('hat')[0]))?.kind, 'hat');
 });
-
-// ── Main: source resolution + lazy pack samples ───────────────────────
 
 const PACK_DIR = path.join(TMP, 'packs', 'testpack');
 const USER_DIR = path.join(TMP, 'My Samples');
@@ -129,7 +118,6 @@ fs.writeFileSync(OUTSIDE, 'RIFF');
 
 const resolveSample = (p: string) => (p.startsWith('pack:testpack/') ? path.join(PACK_DIR, ...p.slice('pack:testpack/'.length).split('/')) : p.startsWith('factory:') ? path.join(FACTORY, ...p.slice(8).split('/')) : p);
 
-/** Fake analyzer: pack files sound like the factory sample they were made from; user files like a kick / a hat. */
 function fakeAnalyzer(calls: string[], opts: { fail?: RegExp } = {}) {
   return async (abs: string): Promise<ActionResult<FingerprintResult>> => {
     calls.push(path.basename(abs));
@@ -178,7 +166,6 @@ test('findSimilar: a factory preset and a factory sample resolve from the index 
   assert.equal(s.data.source.name, SAMPLES.find((x) => x.path === kick)!.name);
   assert.ok(s.data.items.every((i) => i.type === 'sample' && i.kind === 'kick' && i.path !== kick && i.sameKind), JSON.stringify(s.data.items.slice(0, 3)));
   assert.equal(s.data.pending, 5, 'five pack kicks not measured (0 allowed per call)');
-  // no analyzer: the pack samples can't be measured, said in a note
   const notes = await findSimilar(d, { kind: 'sample', path: kick }, { want: 'samples' });
   assert.ok(notes.ok && notes.data!.notes.some((n) => /no audio analyzer/.test(n)), JSON.stringify(notes.data?.notes));
 });
@@ -195,24 +182,20 @@ test('findSimilar: pack samples are measured lazily (progress, pending, next cal
   assert.deepEqual(progress, ['1/2', '2/2']);
   assert.ok(calls.every((c) => /^k\d\.wav$/.test(c)), `only pack kicks are measured for a kick (${calls})`);
   assert.equal(first.data.items.filter((i) => i.type === 'sample' && i.origin === 'pack').length, 2);
-  // a pack kick made from the source sounds identical to it: it ranks first
   const second = await findSimilar(d, { kind: 'sample', path: kick }, { want: 'samples', limit: 40 }, { maxNewPackSamples: 24 });
   assert.equal(second.data!.pending, 0);
   assert.equal(second.data!.measured, 3);
   const top = second.data!.items[0];
   assert.ok(top.type === 'sample' && top.path === 'pack:testpack/kicks/k0.wav' && top.origin === 'pack' && top.name === 'Pack k0', JSON.stringify(top));
-  // cached: a new service reads the cache from disk, nothing is measured again
   const n = calls.length;
   const again = await findSimilar(simDeps({ fingerprint: fakeAnalyzer(calls), userData: path.dirname(path.dirname(path.join((d.svc as unknown as { packFile: string }).packFile))) }), { kind: 'sample', path: kick }, { want: 'samples' });
   assert.equal(again.data!.pending, 0);
   assert.equal(calls.length, n);
-  // cancelled before measuring: nothing measured, the rest stays pending
   const ac = new AbortController();
   ac.abort();
   const cancelled = await findSimilar(simDeps({ fingerprint: fakeAnalyzer(calls) }), { kind: 'preset', id: 'factory:808/boom' }, {}, { signal: ac.signal });
   assert.equal(cancelled.ok, false);
   assert.match(cancelled.message!, /cancelled/);
-  // a pack sample as the source: measured on first use (any scope: the hats are measured too)
   const hatSrc = await findSimilar(simDeps({ fingerprint: fakeAnalyzer(calls) }), { kind: 'sample', path: 'pack:testpack/hats/h1.wav' }, { want: 'samples', scope: 'any' });
   assert.ok(hatSrc.ok && hatSrc.data, hatSrc.message);
   assert.equal(hatSrc.data.source.kind, 'hat');
@@ -233,18 +216,15 @@ test('findSimilar: user files only inside the Browser folders; the kind from the
   assert.match(notAudio.message!, /isn't an audio file/);
   const unc = await findSimilar(d, { kind: 'sample', path: '\\\\server\\share\\kick.wav' });
   assert.equal(unc.ok, false);
-  // "thing 01.wav": no telling name → judged by its sound (a kick)
   const guessed = await findSimilar(d, { kind: 'sample', path: USER_KICK }, { limit: 10 }, { maxNewPackSamples: 0 });
   assert.ok(guessed.ok && guessed.data, guessed.message);
   assert.deepEqual(guessed.data.source, { name: 'thing 01', kind: 'kick', inferred: true });
   assert.ok(guessed.data.items.every((i) => (i.type === 'sample' ? i.kind === 'kick' : i.role === 'kick')));
   assert.equal(sourceKindText(guessed.data), 'Sounds like a kick (judged by its sound)');
-  // "Hats/bright one.wav": the folder says hat
   const named = await findSimilar(d, { kind: 'sample', path: USER_HAT_NAMED }, { want: 'samples', limit: 5 }, { maxNewPackSamples: 0 });
   assert.ok(named.ok && named.data);
   assert.deepEqual(named.data.source, { name: 'bright one', kind: 'hat', inferred: false });
   assert.ok(named.data.items.every((i) => i.type === 'sample' && ['hat', 'shaker'].includes(i.kind)));
-  // the analyzer refusing a file: a sentence
   const broken = await findSimilar(simDeps({ fingerprint: fakeAnalyzer([], { fail: /thing/ }) }), { kind: 'sample', path: USER_KICK });
   assert.equal(broken.ok, false);
   assert.match(broken.message!, /Couldn't measure "thing 01": Unsupported/);
@@ -274,8 +254,6 @@ test('findSimilar: a missing index says how to get it (npm run fingerprints; ins
   assert.match(r.message!, /reinstall/);
 });
 
-// ── IPC surface ───────────────────────────────────────────────────────
-
 test('IPC: sounds.similar has a channel, a preload binding, a validated handler and a browser mock', () => {
   assert.equal(INVOKE.soundsSimilar, 'sounds:similar');
   assert.match(read('shared/types.ts'), /similar\(source: SimilarSource, query\?: SimilarQuery\): Promise<ActionResult<SimilarResult>>;/);
@@ -284,7 +262,6 @@ test('IPC: sounds.similar has a channel, a preload binding, a validated handler 
   assert.match(ipc, /handle\(INVOKE\.soundsSimilar,/);
   assert.match(ipc, /browserFileAccess\(\(\) => browserRoots\(d\.browser\)/, 'user files follow the Browser folder rule');
   assert.match(read('src/dev/mockSounds.ts'), /\n {4}similar: async \(source, q = \{\}\) =>/);
-  // the renderer never imports the index or electron
   for (const f of ['src/panels/browser/SimilarList.tsx', 'src/sounds/similar.ts', 'src/sounds/similarLogic.ts']) {
     const src = read(f);
     assert.doesNotMatch(src, /fingerprints\.json|from ['"](\.\.\/)+electron|@shared\/sound-match/, f);
@@ -313,8 +290,6 @@ test('renderer logic: kind names, when to ask main again', () => {
   assert.equal(shouldMeasureMore({ pending: 0, measured: 2 }, 1), false);
 });
 
-// ── MCP: find_samples / find_presets {like} ───────────────────────────
-
 function mcpDeps(): MainDeps {
   const doc = new DocHost(createDefaultProject('Similar'), CATALOG, { strict: true });
   const calls: string[] = [];
@@ -330,7 +305,6 @@ function mcpDeps(): MainDeps {
       renderDir: () => path.join(TMP, 'renders'),
       allowedRoots: () => [USER_DIR],
     },
-    // File access "browser": user files only from the Browser folders (USER_DIR).
     getSettings: () => ({ ...DEFAULT_SETTINGS, mcp: { ...DEFAULT_SETTINGS.mcp, fileAccess: 'browser' } }),
     updateSettings: () => DEFAULT_SETTINGS,
     broadcast: () => {},
@@ -362,28 +336,22 @@ test('MCP find_samples {like}: closest samples by timbre, same kind first, kind 
   assert.ok(data.samples.length === 6 && data.samples.every((s) => s.kind === 'kick' && s.path !== kick && s.similarity > 0 && s.why), JSON.stringify(data.samples));
   assert.match(r.text!, /% · /);
   assert.match(r.message, /closest first/);
-  // the pack kicks (5) were measured within this call (48 per call)
   assert.equal(data.pending, 0);
-  // kind: another kind
   const hats = await call({ like: kick, kind: 'hat', limit: 3 });
   assert.ok(hats.ok && (hats.data as typeof data).samples.every((s) => s.kind === 'hat'));
-  // a preset as the source
   const fromPreset = await call({ like: 'factory:808/boom', limit: 3 });
   assert.ok(fromPreset.ok && (fromPreset.data as typeof data).samples.every((s) => s.kind === '808' || s.kind === 'bass-oneshot'), fromPreset.message);
-  // a user file in an allowed folder; one outside is refused (File access "browser")
   const user = await call({ like: USER_KICK, limit: 3 });
   assert.ok(user.ok, user.message);
   assert.match(user.message, /sounds like a kick/);
   const outside = await call({ like: OUTSIDE });
   assert.equal(outside.ok, false, outside.message);
-  // the tool declares the path for consent; factory paths and preset ids aren't user files
   const def = TOOLS.find((t) => t.name === 'find_samples')!;
   assert.deepEqual(def.paths!({ like: USER_KICK } as never), [{ value: USER_KICK, kind: 'audio' }]);
   assert.deepEqual(def.paths!({ like: 'user:my-lead' } as never), []);
   const bad = await call({ like: 'not a thing' });
   assert.equal(bad.ok, false);
   assert.match(bad.message, /isn't a sample path or a preset/);
-  // the old search still works without like
   const plain = await call({ kind: 'kick', genre: 'any', limit: 2 });
   assert.ok(plain.ok && (plain.data as { samples: unknown[] }).samples.length === 2);
 });

@@ -1,7 +1,3 @@
-//! krypt-engine "hello sine" sidecar.
-//! Protocol: one JSON object per line on stdin -> one JSON reply per line on stdout.
-//! stdin EOF (parent died or closed the pipe) => clean exit.
-
 use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
@@ -23,12 +19,11 @@ enum Cmd {
 
 struct Shared {
     playing: AtomicBool,
-    freq: AtomicU32, // f32 bits
-    gain: AtomicU32, // f32 bits
+    freq: AtomicU32,
+    gain: AtomicU32,
 }
 
 fn reply(out: &mut impl Write, v: serde_json::Value) {
-    // Ignore write errors: if stdout is gone, stdin EOF will end us shortly.
     let _ = writeln!(out, "{v}");
     let _ = out.flush();
 }
@@ -48,7 +43,7 @@ fn run(out: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         gain: AtomicU32::new(0.2f32.to_bits()),
     });
 
-    let host = cpal::default_host(); // WASAPI shared mode on Windows
+    let host = cpal::default_host();
     let device = host.default_output_device().ok_or("no default output device")?;
     let supported = device.default_output_config()?;
     if supported.sample_format() != SampleFormat::F32 {
@@ -63,7 +58,6 @@ fn run(out: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     let stream = device.build_output_stream(
         config,
         move |data: &mut [f32], _: &OutputCallbackInfo| {
-            // Real-time thread: no allocation, no locks, no I/O.
             let playing = s.playing.load(Relaxed);
             let inc = f32::from_bits(s.freq.load(Relaxed)) / sr;
             let gain = f32::from_bits(s.gain.load(Relaxed));
@@ -76,7 +70,7 @@ fn run(out: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 frame.fill(v);
             }
         },
-        |err| eprintln!("stream error: {err}"), // stderr is logged by Electron main
+        |err| eprintln!("stream error: {err}"),
         None,
     )?;
     stream.play()?;
@@ -115,5 +109,5 @@ fn run(out: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         }
         reply(out, json!({ "id": id, "ok": true }));
     }
-    Ok(()) // stdin closed: parent is gone
+    Ok(())
 }

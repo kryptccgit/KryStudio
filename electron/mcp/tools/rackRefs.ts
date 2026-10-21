@@ -1,7 +1,3 @@
-// Knobs INSIDE racks for set_params / add_automation (Wave 12.2b): resolve {chain, device?, param} on a rack
-// channel or an effect-rack slot to its inner ParamRef (shared/schema/params.ts `<host>/rack/<chain>/…`).
-// Chains match by id, name or 1-based number; devices by id, plugin id / name ("delay", "Krypt Delay") or number.
-
 import type { Project } from '@shared/schema/project';
 import type { PluginCatalog, ParamSpec } from '@shared/plugins/types';
 import type { MacroTarget, RackChain, RackDef } from '@shared/schema/rack';
@@ -11,7 +7,6 @@ import { safeName } from './util';
 
 export type RackPick = string | number;
 
-/** The rack held by a channel generator or a mixer slot, with its host for refs (fails with a human message). */
 export function rackAt(p: Project, host: RackParamHost, where: string): RackDef {
   const rack = host.kind === 'channel' ? p.channels[host.channelId]?.generator.rack : p.mixer.inserts[host.insertId]?.slots[host.slotId]?.rack;
   if (!rack) fail(`${where} doesn't hold a rack, so it has no chains. Drop "chain" to set the device's own params, or build one with build_rack.`);
@@ -46,10 +41,6 @@ export function pickDevice(catalog: PluginCatalog, c: RackChain, device: RackPic
   return hit;
 }
 
-/**
- * ParamRef + spec of one knob inside a rack: chain volume / pan (no device), the chain instrument's param
- * (no device), or a device's param / "mix". Param ids or names match case-insensitively.
- */
 export function rackInnerRef(
   p: Project,
   catalog: PluginCatalog,

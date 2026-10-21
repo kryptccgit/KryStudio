@@ -1,9 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Non-React access to toasts and modals, so commands, keymaps and stores
-// can give feedback too (house rule: nothing fails silently). The bridge
-// component registers the provider APIs once at startup.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect } from 'react';
 import { useToast, type ToastOpts } from '../state/ToastProvider';
 import { useModal } from '../state/ModalProvider';
@@ -17,7 +11,6 @@ let modalApi: ModalFns | null = null;
 const recent = new Map<string, number>();
 
 function push(level: keyof ToastFns, message: string, opts?: ToastOpts): void {
-  // Coalesce identical messages fired in a burst (e.g. a drag hitting the same error).
   const key = `${level}:${message}`;
   const now = Date.now();
   const last = recent.get(key) ?? 0;
@@ -28,7 +21,6 @@ function push(level: keyof ToastFns, message: string, opts?: ToastOpts): void {
   else (level === 'error' ? console.error : console.info)(`[toast:${level}] ${message}`);
 }
 
-/** Toasts from anywhere. `opts.action` adds a button (e.g. "Open Model Manager"). */
 export const toast = {
   info: (m: string, opts?: ToastOpts) => push('info', m, opts),
   success: (m: string, opts?: ToastOpts) => push('success', m, opts),
@@ -41,11 +33,9 @@ export type { ToastOpts };
 export const modal = {
   confirm: (opts: Parameters<ModalFns['confirm']>[0]): Promise<boolean> => (modalApi ? modalApi.confirm(opts) : Promise.resolve(false)),
   prompt: (opts: Parameters<ModalFns['prompt']>[0]): Promise<string | null> => (modalApi ? modalApi.prompt(opts) : Promise.resolve(null)),
-  /** Several answers (Save / Don't save / Cancel): the chosen id, or null when cancelled. */
   choose: (opts: Parameters<ModalFns['choose']>[0]): Promise<string | null> => (modalApi ? modalApi.choose(opts) : Promise.resolve(null)),
 };
 
-/** Toast a failed ActionResult (and optionally a success message). Returns r.ok. */
 export function report(r: ActionResult | { ok: boolean; message?: string } | undefined | null, success?: string): boolean {
   if (!r) {
     toast.error('No response');
@@ -59,7 +49,6 @@ export function report(r: ActionResult | { ok: boolean; message?: string } | und
   return true;
 }
 
-/** Wrap any async call: exceptions become an error toast instead of an unhandled rejection. */
 export async function attempt<T>(fn: () => Promise<T>, what: string): Promise<T | undefined> {
   try {
     return await fn();

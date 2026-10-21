@@ -1,9 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// App command registry: the same ids drive the keymap, the menu bar and
-// hint labels (research/06 §6.1). Document mutations inside a command still
-// go through dispatch() — these are UI verbs, not doc commands.
-// ──────────────────────────────────────────────────────────────────────
-
 import { toast } from '../app/notify';
 
 export interface AppCommand {
@@ -27,7 +21,6 @@ export function listAppCommands(): AppCommand[] {
   return [...registry.values()];
 }
 
-/** Run a command; failures become toasts, never silent. Returns false if unknown/disabled. */
 export function runCommand(id: string): boolean {
   const c = registry.get(id);
   if (!c) {

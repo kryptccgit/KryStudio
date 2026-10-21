@@ -1,15 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Master an album (research/23 §2), the same numbered, linear flow as
-// Master a song (research/22: one action per step): ① Your songs (pick /
-// drop, reorder, remove), ② Pick a style, ③ Sound like a song you love
-// (optional, folded; never one of the album's own songs), More options
-// (prompt, targets, "Keep the album's dynamics"), then a big Master my
-// album button that says why it is disabled. The working view ticks
-// through the real stages. The result: a one-line headline, three numbered
-// next steps (▶ a song + Before / After, Keep, Export all), and the song
-// table / tone chart under Details. Pure view logic: ./albumLogic.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useState } from 'react';
 import { ArrowDown, ArrowRight, ArrowUp, AudioLines, Ban, Check, ChevronDown, ChevronRight, CircleX, DiscAlbum, Download, FolderOpen, Headphones, History, Loader2, Play, Plus, TriangleAlert, Undo2, X } from 'lucide-react';
 import { ALBUM_MAX_SONGS } from '@shared/automix/album';
@@ -88,8 +76,6 @@ function AlbumView({ close }: { close: () => void }) {
   if (phase !== 'idle') return <ProgressView close={close} />;
   return <FormView close={close} />;
 }
-
-// ── The form ──────────────────────────────────────────────────────────
 
 function SongList() {
   const songs = useAlbum((s) => s.form.songs);
@@ -282,8 +268,6 @@ function FormView({ close }: { close: () => void }) {
   );
 }
 
-// ── Progress ──────────────────────────────────────────────────────────
-
 function ProgressView({ close }: { close: () => void }) {
   const job = useAlbum();
   const running = job.phase === 'running' || job.phase === 'cancelling';
@@ -360,8 +344,6 @@ function ProgressView({ close }: { close: () => void }) {
     </div>
   );
 }
-
-// ── Done ──────────────────────────────────────────────────────────────
 
 function SongTable() {
   const o = useAlbum((s) => s.outcome);

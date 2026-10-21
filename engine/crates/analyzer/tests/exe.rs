@@ -1,5 +1,3 @@
-//! End to end: spawn the built krypt-studio-analyzer exe and speak NDJSON.
-
 mod common;
 
 use std::io::{BufRead, BufReader, Write};
@@ -115,7 +113,6 @@ fn exe_speaks_the_protocol() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Krypt Voice commands over the wire: `syllables`, `sing`, and `tts` without a model.
 #[test]
 fn exe_voice_commands() {
     let dir = temp_dir("exe-voice");

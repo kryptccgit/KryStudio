@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The article view shared by the Home guides screen (GuidesView) and the
-// docked Guides panel (GuidesPanel): the rendered markup (./markup.ts), the
-// generated blocks (live keymap, plugin catalog, genre playbook cards, the
-// sample kinds table), "Show me" and article links, Related and
-// Previous / Next, and the search results list. Links go through the
-// GuideNav context, so each host decides where an article opens.
-// ──────────────────────────────────────────────────────────────────────
-
 import { Fragment, createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, BookOpen, Clapperboard, CornerDownRight, Lightbulb, Loader2, MousePointerClick, Play, TriangleAlert } from 'lucide-react';
 import { VIDEO_CREDIT, fmtVideoDuration, videoUrls, type GuideVideo, type ReadyGuideVideo } from '@shared/guides/videos';
@@ -33,11 +24,8 @@ import { GuideImage } from './GuideImage';
 import { videoBlockView, videoIndex } from './videos';
 import type { GuidesVariant } from './store';
 
-// ── Navigation context ────────────────────────────────────────────────
-
 export interface GuideNav {
   variant: GuidesVariant;
-  /** Show an article (optionally scrolled to one of its ## headings). */
   open(id: string, heading?: string): void;
 }
 
@@ -56,8 +44,6 @@ function openArticle(nav: GuideNav, id: string, heading?: string): void {
   if (articleById(id)) nav.open(id, heading);
   else toast.error(`This guide links to an article that doesn't exist ("${id}")`);
 }
-
-// ── Inline + block rendering ──────────────────────────────────────────
 
 const LINK = 'rounded font-semibold underline underline-offset-2 hover:text-white';
 
@@ -190,8 +176,6 @@ function CatalogBlock({ kind }: { kind: 'effect' | 'instrument' }) {
   return <Table head={['Name', 'Kind', 'What it does']} rows={list.map((p) => [p.name, p.category, PLUGIN_NOTES[p.id] ?? catalogLine(p.description)])} />;
 }
 
-// ── Live facts (lazy: the playbooks are big) ──────────────────────────
-
 type Facts = typeof import('./facts');
 let factsPromise: Promise<Facts> | null = null;
 
@@ -203,7 +187,7 @@ function useFacts(): { facts: Facts | null; error: string | null } {
     factsPromise.then(
       (facts) => live && setState({ facts, error: null }),
       (err: unknown) => {
-        factsPromise = null; // try again next time
+        factsPromise = null;
         if (live) setState({ facts: null, error: (err as Error)?.message ?? String(err) });
       },
     );
@@ -369,9 +353,6 @@ function KindsBlock() {
   );
 }
 
-// ── Tutorial videos ───────────────────────────────────────────────────
-
-/** {{video:<id>}}: a player once the video ships; nothing before (never a broken player). */
 function VideoBlock({ id }: { id: string }) {
   const view = videoBlockView(id);
   if (view.kind === 'unknown') return <Problem>This guide points to a video that doesn't exist ("{id}").</Problem>;
@@ -438,7 +419,6 @@ function SoonCard({ v }: { v: GuideVideo }) {
   );
 }
 
-/** {{videos}}: the Videos index. The picked video plays at the top, the cards follow, the credit line ends it. */
 function VideosBlock() {
   const nav = useContext(NavContext);
   const { ready, soon } = useMemo(() => videoIndex(), []);
@@ -605,8 +585,6 @@ function Block({ b }: { b: GuideBlock }) {
   }
 }
 
-// ── The article ───────────────────────────────────────────────────────
-
 function NavCard({ a, label, align }: { a: GuideArticle; label: string; align: 'left' | 'right' }) {
   const nav = useContext(NavContext);
   return (
@@ -621,7 +599,6 @@ function NavCard({ a, label, align }: { a: GuideArticle; label: string; align: '
   );
 }
 
-/** One article: header, body, Related, Previous / Next. */
 export function GuideArticleView({ article, compact = false }: { article: GuideArticle; compact?: boolean }) {
   const nav = useContext(NavContext);
   const ordered = useMemo(() => orderedArticles(), []);
@@ -680,8 +657,6 @@ export function GuideArticleView({ article, compact = false }: { article: GuideA
   );
 }
 
-// ── Search results ────────────────────────────────────────────────────
-
 export function SearchResults({ query, hits, onPick, compact = false }: { query: string; hits: SearchHit[]; onPick: (id: string) => void; compact?: boolean }) {
   return (
     <div className={cls('mx-auto w-full max-w-[760px] pb-16', compact ? 'px-3 pt-3' : 'px-4 pt-6 sm:px-8')}>
@@ -733,7 +708,6 @@ export function SearchResults({ query, hits, onPick, compact = false }: { query:
   );
 }
 
-/** Scroll a ## heading of the shown article into view inside a scroll pane. True when found. */
 export function scrollToHeading(pane: HTMLElement | null, anchor: string): boolean {
   if (!pane) return false;
   const el = Array.from(pane.querySelectorAll<HTMLElement>('[data-heading]')).find((h) => h.dataset.heading === anchor);

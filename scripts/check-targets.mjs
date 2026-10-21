@@ -1,12 +1,3 @@
-// Type-check the engine workspace for macOS and Linux from any OS, so a Windows-only API or a missing
-// `cfg(windows)` gate shows up before CI. `cargo check` never links, and KRYPT_CHECK_ONLY=1 makes
-// engine/crates/stretch/build.rs skip its C++ compile (the host can't build C++ for another OS).
-//
-//   node scripts/check-targets.mjs          (npm run engine:check-targets)
-//
-// Needs the targets once: rustup target add aarch64-apple-darwin x86_64-unknown-linux-gnu
-// Linux: the `engine` crate needs ALSA headers (alsa-sys), which only a Linux host has, so elsewhere it is
-// skipped for that target and every other crate is checked.
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 

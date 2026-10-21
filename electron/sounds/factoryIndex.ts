@@ -1,9 +1,3 @@
-// The factory sample index (resources/factory/index.json, written by the
-// engine's --gen-factory). Read leniently: a bad entry is skipped (counted),
-// a bad file is null. Cached by mtime so a regenerated kit shows up without a
-// restart. Node-only, no Electron import (the MCP tools use it when the sounds
-// service isn't wired, e.g. in tests).
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
@@ -30,7 +24,6 @@ const zSample = z.object({
 
 const zIndex = z.object({ version: z.literal(1), generator: z.string().max(200), samples: z.array(z.unknown()) });
 
-/** Validate a parsed index.json. `skipped` = sample entries that didn't fit the contract. */
 export function parseFactoryIndex(raw: unknown): { index: FactoryIndex | null; skipped: number; error?: string } {
   const top = zIndex.safeParse(raw);
   if (!top.success) {
@@ -54,11 +47,9 @@ export function parseFactoryIndex(raw: unknown): { index: FactoryIndex | null; s
 }
 
 export interface IndexReader {
-  /** The index, or null when the file is missing / unreadable / not an index. */
   read(): FactoryIndex | null;
 }
 
-/** A cached reader for `<factoryDir>/index.json` (re-read when the file's mtime or size changes). */
 export function factoryIndexReader(factoryDir: string, log?: (level: 'info' | 'warn', m: string) => void): IndexReader {
   const file = path.join(factoryDir, 'index.json');
   let key = '';

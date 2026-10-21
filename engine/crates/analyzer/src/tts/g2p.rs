@@ -1,30 +1,12 @@
-//! English (US) text → Kokoro phonemes, without GPL code (no eSpeak).
-//!
-//! 1. Text normalisation: sentences, words and punctuation; numbers, years,
-//!    ordinals, money, percentages and common abbreviations → words.
-//! 2. Per word: a small table of unstressed function words, then the CMU
-//!    Pronouncing Dictionary (BSD-style licence; embedded compressed, built by
-//!    scripts/models/cmudict.mjs), then suffix / compound fallbacks against the
-//!    dictionary, spelled-out acronyms, and finally letter-to-sound rules
-//!    (lts.rs) for unknown words.
-//! 3. ARPAbet → the phoneme alphabet Kokoro was trained on (hexgrad/misaki's
-//!    US set: diphthongs as single letters A I O W Y, ɜɹ / əɹ for ER, the US
-//!    flap ɾ, stress marks ˈ ˌ before the vowel).
-//!
-//! Krypt-original implementation.
-
 use std::sync::OnceLock;
 
 use super::lts;
 use super::numbers;
 
-// ── CMU Pronouncing Dictionary ────────────────────────────────────────
-
 static CMUDICT_DEFLATE: &[u8] = include_bytes!("../../data/cmudict.txt.deflate");
 
 struct Dict {
     text: String,
-    /// Byte offset of every line start (lines are sorted bytewise by word).
     lines: Vec<u32>,
 }
 
@@ -71,17 +53,13 @@ impl Dict {
     }
 }
 
-/// CMUdict ARPAbet for a lowercase word (first pronunciation), if listed.
 pub fn cmu(word: &str) -> Option<&'static str> {
     dict().ok()?.get(word)
 }
 
-/// Loads the dictionary now (errors surface as a job failure, not a panic).
 pub fn ensure_dict() -> Result<(), String> {
     dict().map(|_| ())
 }
-
-// ── ARPAbet → Kokoro phonemes ─────────────────────────────────────────
 
 fn vowel_symbol(base: &str, stress: u8) -> Option<&'static str> {
     Some(match base {
@@ -153,7 +131,6 @@ fn split_stress(p: &str) -> (&str, Option<u8>) {
     }
 }
 
-/// ARPAbet phones (CMUdict style, stress digits on vowels) → Kokoro phonemes.
 pub fn arpabet_to_kokoro<S: AsRef<str>>(phones: &[S]) -> String {
     let ph: Vec<(&str, Option<u8>)> = phones.iter().map(|p| split_stress(p.as_ref())).collect();
     let is_v = |i: usize| ph.get(i).is_some_and(|p| p.1.is_some());
@@ -170,8 +147,6 @@ pub fn arpabet_to_kokoro<S: AsRef<str>>(phones: &[S]) -> String {
             }
             continue;
         }
-        // US flap: T between a vowel (or vowel + R) and an unstressed vowel ("water", "party"),
-        // but not in "-tten"/"-tton" endings ("kitten", "button").
         if base == "T" && i > 0 {
             let after_vowel = is_v(i - 1) || (ph[i - 1].0 == "R" && i >= 2 && is_v(i - 2));
             let next_unstressed = ph.get(i + 1).is_some_and(|p| p.1 == Some(0));
@@ -188,10 +163,6 @@ pub fn arpabet_to_kokoro<S: AsRef<str>>(phones: &[S]) -> String {
     out
 }
 
-// ── Words ─────────────────────────────────────────────────────────────
-
-/// Function words in their usual unstressed (weak) forms, plus a few
-/// common words whose first CMUdict entry is the less useful reading.
 fn function_word(w: &str) -> Option<&'static str> {
     Some(match w {
         "a" => "ə",
@@ -247,7 +218,6 @@ fn function_word(w: &str) -> Option<&'static str> {
         "so" => "sO",
         "up" => "ʌp",
         "into" => "ɪntu",
-        // Present-tense readings (CMUdict lists the past / adjective first).
         "read" => "ɹˈid",
         "live" => "lˈɪv",
         "lead" => "lˈid",
@@ -261,7 +231,6 @@ const LETTERS: [&str; 26] = [
     "AA1 R", "EH1 S", "T IY1", "Y UW1", "V IY1", "D AH1 B AH0 L Y UW0", "EH1 K S", "W AY1", "Z IY1",
 ];
 
-/// Letter names, primary stress on the last letter ("DJ" → dˌiʤˈA).
 fn spell(word: &str) -> Vec<String> {
     let letters: Vec<u8> = word.bytes().filter(u8::is_ascii_alphabetic).map(|c| c.to_ascii_lowercase()).collect();
     let mut out = Vec::new();
@@ -282,7 +251,6 @@ fn last_base(phones: &[String]) -> &str {
     phones.last().map_or("", |p| split_stress(p).0)
 }
 
-/// Plural / possessive / 3rd-person -s after `stem`.
 fn add_s(mut stem: Vec<String>) -> Vec<String> {
     match last_base(&stem) {
         "S" | "Z" | "SH" | "ZH" | "CH" | "JH" => {
@@ -295,7 +263,6 @@ fn add_s(mut stem: Vec<String>) -> Vec<String> {
     stem
 }
 
-/// Past tense -ed after `stem`.
 fn add_ed(mut stem: Vec<String>) -> Vec<String> {
     match last_base(&stem) {
         "T" | "D" => {
@@ -308,9 +275,6 @@ fn add_ed(mut stem: Vec<String>) -> Vec<String> {
     stem
 }
 
-/// Stems to try for a suffixed word: as is, with a restored final e, undoubled.
-/// A base ending consonant-vowel-consonant before a vowel suffix tries the
-/// e-form first ("vibing" → vibe, not vib: vib + ing would be spelled "vibbing").
 fn stems(base: &str, vowel_suffix: bool) -> Vec<String> {
     let b = base.as_bytes();
     let v_ = |c: u8| matches!(c, b'a' | b'e' | b'i' | b'o' | b'u');
@@ -332,13 +296,11 @@ fn dict_stem(base: &str, vowel_suffix: bool) -> Option<Vec<String>> {
     stems(base, vowel_suffix).iter().find_map(|s| cmu(s).map(arpa))
 }
 
-/// Suffix rules against the dictionary ("beatmakers", "vibing", "flexed").
 fn morphology(w: &str) -> Option<Vec<String>> {
     if let Some(b) = w.strip_suffix("'s").or_else(|| w.strip_suffix("s'")) {
         return lookup_arpa(b, 1).map(add_s);
     }
     if let Some(b) = w.strip_suffix("in'") {
-        // Dropped g: "nothin'" → nothing with a final N.
         return lookup_arpa(&format!("{b}ing"), 1).map(|mut p| {
             if last_base(&p) == "NG" {
                 p.pop();
@@ -405,8 +367,6 @@ fn morphology(w: &str) -> Option<Vec<String>> {
     None
 }
 
-/// Two dictionary words glued together ("beatmaker", "lovesick"); the
-/// second part's primary stress becomes secondary.
 fn compound(w: &str) -> Option<Vec<String>> {
     let n = w.len();
     if n < 6 || !w.is_ascii() {
@@ -428,8 +388,6 @@ fn compound(w: &str) -> Option<Vec<String>> {
     best.map(|b| b.1)
 }
 
-/// ARPAbet for one lowercase word: dictionary, then suffix / compound fallbacks
-/// (`depth` bounds the recursion), else None.
 fn lookup_arpa(w: &str, depth: u8) -> Option<Vec<String>> {
     if let Some(p) = cmu(w) {
         return Some(arpa(p));
@@ -440,7 +398,6 @@ fn lookup_arpa(w: &str, depth: u8) -> Option<Vec<String>> {
     morphology(w).or_else(|| compound(w))
 }
 
-/// How a word was resolved (tests and diagnostics).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     Function,
@@ -450,10 +407,8 @@ pub enum Source {
     Rules,
 }
 
-/// Kokoro phonemes for one word as written (case matters for acronyms).
 pub fn word(original: &str) -> (String, Source) {
     let mut w: String = original.to_lowercase().trim_start_matches('\'').to_string();
-    // A trailing apostrophe stays only where it means something ("vibin'", "dogs'").
     while w.ends_with('\'') && !(w.ends_with("in'") || w.ends_with("s'")) {
         w.pop();
     }
@@ -466,7 +421,6 @@ pub fn word(original: &str) -> (String, Source) {
     let letters: Vec<char> = original.chars().filter(|c| c.is_alphabetic()).collect();
     let all_caps = letters.len() >= 2 && letters.iter().all(|c| c.is_uppercase());
     let has_vowel = w.chars().any(|c| "aeiouy".contains(c));
-    // Short all-caps words the dictionary doesn't know, or without vowels: spell them ("DJ", "MC", "TV").
     if all_caps && letters.len() <= 5 && (!has_vowel || cmu(&w).is_none()) {
         return (arpabet_to_kokoro(&spell(&w)), Source::Spelled);
     }
@@ -486,13 +440,9 @@ pub fn word(original: &str) -> (String, Source) {
     (arpabet_to_kokoro(&lts::word_to_arpabet(&ascii)), Source::Rules)
 }
 
-// ── Text → tokens ─────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, PartialEq)]
 enum Tok {
-    /// display text, spoken words
     Word(String, Vec<String>),
-    /// punctuation Kokoro knows
     Punct(char),
 }
 
@@ -536,8 +486,6 @@ fn normalize_chars(text: &str) -> String {
     s.replace("--", " — ").replace("...", "…")
 }
 
-/// Splits text into sentences (on . ! ? … and line breaks; not after
-/// abbreviations or initials).
 pub fn sentences(text: &str) -> Vec<String> {
     let text = normalize_chars(text);
     let mut out = Vec::new();
@@ -552,10 +500,8 @@ pub fn sentences(text: &str) -> Vec<String> {
                     j += 1;
                 }
                 let at_break = j >= chars.len() || chars[j].is_whitespace();
-                // The word before the period.
                 let word: String = chars[start..i].iter().rev().take_while(|c| c.is_alphanumeric()).collect::<Vec<_>>().into_iter().rev().collect();
                 let abbrev = chars[i] == '.' && (abbreviation(&word).is_some() || (word.chars().count() == 1 && word.chars().all(char::is_uppercase)));
-                // "3.5": a period between digits is a decimal point.
                 let decimal = chars[i] == '.' && i > 0 && chars[i - 1].is_ascii_digit() && chars.get(i + 1).is_some_and(|c| c.is_ascii_digit());
                 if at_break && !abbrev && !decimal {
                     let s: String = chars[start..j].iter().collect();
@@ -596,7 +542,6 @@ fn spoken_core(core: &str, out: &mut Vec<Tok>) {
         "#" => return push_words(core, "number".into(), out),
         _ => {}
     }
-    // Money: $5, $1.50, $2k
     if let Some(num) = core.strip_prefix('$') {
         let (num, mult) = match num.strip_suffix(['k', 'K']) {
             Some(n) => (n, " thousand"),
@@ -622,14 +567,12 @@ fn spoken_core(core: &str, out: &mut Vec<Tok>) {
     if let Some(words) = numbers::spell_token(core) {
         return push_words(core, words, out);
     }
-    // Hyphens and slashes join words: say each part.
     if core.contains(['-', '/', '_']) {
         for part in core.split(['-', '/', '_']) {
             spoken_core(part, out);
         }
         return;
     }
-    // Letter/digit mixes ("4ever", "mp3"): split into runs.
     let has_digit = core.chars().any(|c| c.is_ascii_digit());
     let has_alpha = core.chars().any(|c| c.is_alphabetic());
     if has_digit && has_alpha && numbers::spell_token(core).is_none() {
@@ -674,7 +617,6 @@ fn tokenize(sentence: &str) -> Vec<Tok> {
         }
         let mut trailing = Vec::new();
         while b > a && matches!(chars[b - 1], ',' | '.' | '!' | '?' | ';' | ':' | '…' | '"' | ')' | ']' | '}' | '*' | '\'') {
-            // Keep a trailing apostrophe that belongs to the word ("nothin'", "dogs'").
             if chars[b - 1] == '\'' && b - 1 > a && (chars[b - 2] == 'n' || chars[b - 2] == 's') {
                 break;
             }
@@ -682,7 +624,6 @@ fn tokenize(sentence: &str) -> Vec<Tok> {
             b -= 1;
         }
         let core: String = chars[a..b].iter().collect();
-        // An abbreviation swallows its own period ("Dr." → doctor, no sentence pause).
         let mut trailing: Vec<char> = trailing.into_iter().rev().collect();
         if trailing.first() == Some(&'.') && abbreviation(&core).is_some() && (k + 1 < words.len()) {
             let w = abbreviation(&core).unwrap_or_default();
@@ -702,13 +643,9 @@ fn tokenize(sentence: &str) -> Vec<Tok> {
     out
 }
 
-// ── Sentence → phonemes ───────────────────────────────────────────────
-
-/// One word of the input and the phoneme characters it produced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WordSpan {
     pub text: String,
-    /// Character range in `Phonemized::phonemes` (each char is one Kokoro token).
     pub start: usize,
     pub end: usize,
 }
@@ -725,10 +662,8 @@ fn starts_with_vowel(ph: &str) -> bool {
     ph.chars().find(|c| !matches!(c, 'ˈ' | 'ˌ')).is_some_and(|c| VOWEL_PHONEMES.contains(c))
 }
 
-/// Phonemes for one sentence, with word spans.
 pub fn phonemize(sentence: &str) -> Phonemized {
     let toks = tokenize(sentence);
-    // Phonemes per word token (spoken pieces joined by spaces).
     let mut word_ph: Vec<Option<String>> = toks
         .iter()
         .map(|t| match t {
@@ -736,7 +671,6 @@ pub fn phonemize(sentence: &str) -> Phonemized {
             Tok::Punct(_) => None,
         })
         .collect();
-    // "the" before a vowel sound → ði; "a"/"to" stay weak.
     for i in 0..toks.len() {
         if let Tok::Word(_, ws) = &toks[i] {
             if ws.len() == 1 && ws[0].eq_ignore_ascii_case("the") {
@@ -748,7 +682,7 @@ pub fn phonemize(sentence: &str) -> Phonemized {
         }
     }
     let mut out = Phonemized::default();
-    let mut len = 0usize; // in chars
+    let mut len = 0usize;
     let mut open_quote = false;
     let push = |out: &mut Phonemized, len: &mut usize, s: &str| {
         out.phonemes.push_str(s);
@@ -794,7 +728,6 @@ pub fn phonemize(sentence: &str) -> Phonemized {
                     push(&mut out, &mut len, "—");
                 }
                 c => {
-                    // No punctuation at the very start (Kokoro reads it as a pause).
                     if !out.phonemes.is_empty() {
                         let mut b = [0u8; 4];
                         push(&mut out, &mut len, c.encode_utf8(&mut b));
@@ -806,9 +739,6 @@ pub fn phonemize(sentence: &str) -> Phonemized {
     out
 }
 
-/// Splits a phonemized sentence into pieces of at most `max` tokens, at the
-/// last punctuation (else space) before the limit. Word spans move with
-/// their text.
 pub fn split_long(p: Phonemized, max: usize) -> Vec<Phonemized> {
     let chars: Vec<char> = p.phonemes.chars().collect();
     if chars.len() <= max {

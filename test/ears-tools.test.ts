@@ -1,7 +1,3 @@
-// The "Ears" MCP tools (electron/mcp/tools/ears.ts) through callTool(), with
-// a real DocHost + AnalyzerService + the fake analyzer: registry, failure
-// messages without models / without the service, one undo group per call
-// under the agent actor, analysis text, stems, transcription, stretch.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -38,7 +34,6 @@ const SETTINGS: Settings = {
   browserRoots: [],
   recent: [],
   autosaveSec: 60,
-  // The refusal below is the 'browser' File access mode (the default 'anywhere' would open the file).
   mcp: { enabled: true, httpEnabled: false, httpPort: 47800, requireConsentForDestructive: false, fileAccess: 'browser' },
   agent: { model: 'claude-opus-5-5', hasApiKey: false },
   discordRpc: false,
@@ -87,7 +82,6 @@ async function rig(opts: { stems?: boolean; basicPitch?: boolean; catalog?: Plug
   };
   const caller: ToolCaller = { actor: { kind: 'agent', clientId: 'ears-agent', name: 'Ears Agent' }, session: newSession(), via: 'test' };
   const call = (name: string, args: unknown = {}) => callTool(deps, caller, name, args, { quiet: true });
-  // An audio clip "Breakbeat" on track 1 (as a drag from the Browser makes it).
   const r = doc.exec<{ clipId: string; channelId: string }>(
     'playlist.addAudio',
     { path: path.join(USER_ROOT, 'Breakbeat.wav'), trackId: doc.project.playlist.trackOrder[0], start: 0, frames: 352800, sampleRate: 44100, channels: 2 },

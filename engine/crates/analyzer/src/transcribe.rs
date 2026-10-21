@@ -1,13 +1,9 @@
-//! `transcribe`: audio → notes (Basic Pitch polyphonic, pYIN-style
-//! monophonic) or drum hits (band-split onsets).
-
 use std::path::PathBuf;
 
 use crate::audio::{self, ANALYSIS_SR};
 use crate::protocol::{TranscribeArgs, TranscribeMode, TranscriptionResult};
 use crate::{basic_pitch, drums, lowline, pitch, JobCtx, JobError};
 
-/// Defaults per mode (0..1, higher = fewer notes).
 pub const POLY_ONSET_THRESHOLD: f32 = 0.5;
 pub const POLY_FRAME_THRESHOLD: f32 = 0.3;
 pub const MONO_ONSET_THRESHOLD: f32 = 0.5;
@@ -51,7 +47,6 @@ pub fn run(args: &TranscribeArgs, ctx: &JobCtx) -> Result<TranscriptionResult, J
     transcribe_signal(&x, args, ctx)
 }
 
-/// Transcribe mono audio already at 22 050 Hz.
 pub fn transcribe_signal(x: &[f32], args: &TranscribeArgs, ctx: &JobCtx) -> Result<TranscriptionResult, JobError> {
     let (min_key, max_key) = validate(args)?;
     let sr = ANALYSIS_SR as f32;
@@ -75,9 +70,6 @@ pub fn transcribe_signal(x: &[f32], args: &TranscribeArgs, ctx: &JobCtx) -> Resu
             TranscriptionResult { mode: TranscribeMode::Poly, notes: basic_pitch::notes(&act, &params), hits: Vec::new(), source: "basic-pitch".into() }
         }
         TranscribeMode::Mono => {
-            // Search G#0 (26 Hz, so 808s down to A0 are found)..C7 (or wider
-            // if asked) and filter by key afterwards: narrowing the search
-            // would fold out-of-range notes an octave.
             let hz = |k: f32| 440.0 * 2f32.powf((k - 69.0) / 12.0);
             let fmin = hz((min_key.min(21) as f32 - 1.0).max(20.0));
             let fmax = hz((max_key.max(96) as f32 + 1.0).min(109.0)).min(sr * 0.25);
@@ -93,7 +85,6 @@ pub fn transcribe_signal(x: &[f32], args: &TranscribeArgs, ctx: &JobCtx) -> Resu
                 max_key,
             };
             let mut notes = pitch::segment(&tr, &params);
-            // Low lines (bass, 808): the fast-segmenting reader (lowline.rs) covers the notes pYIN leaves holes in.
             if lowline::is_low(&notes) {
                 let low = lowline::segment(x, sr, &tr, &params, ctx)?;
                 if !low.is_empty() {

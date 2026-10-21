@@ -1,8 +1,3 @@
-// Wave 12.2b (rack-plus): knobs INSIDE racks are first-class ParamRefs (shared/schema/params.ts
-// `<host>/rack/<chainId>/volume|pan|inst/<p>|dev/<deviceId>/<p|mix>`): parse/format round trip, spec / get / set for
-// every scope, params.set and automation.create on inner params with undo, rack commands keeping automation targets
-// honest (wrap moves them inside, removing a chain / device / instrument unassigns them), and the MCP tools
-// (set_params / add_automation with chain + device). Strict DocHost, fixture rack catalog (test/rack-fixtures.ts).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { installRackFixtures } from './rack-fixtures';
@@ -32,7 +27,6 @@ function host() {
   return { doc, ok, sound };
 }
 
-/** A "Keys" channel holding an instrument rack: chain 1 = TriOsc + Krypt Delay; plus an FX rack on its insert (chain "Wet" + reverb). */
 function racks() {
   const h = host();
   const ch = h.ok<{ id: string }>('channels.add', { type: 'krypt.triosc', name: 'Rack Keys', params: { cutoff: 1200 } }).id;
@@ -98,7 +92,6 @@ test('spec / get / set for every scope inside instrument and effect racks', () =
   const p = structuredClone(doc.project) as Project;
   const at = (h: typeof chHost | typeof fxHost, target: Parameters<typeof rackParamRef>[1]) => rackParamRef(h, target);
   const cases: Array<[string, string, number, number, number]> = [
-    // ref, spec name, current value, value to set, expected after (clamped)
     [at(chHost, { chainId, kind: 'chain', param: 'volume' }), 'Chain volume', 1, 3, 2],
     [at(chHost, { chainId, kind: 'chain', param: 'pan' }), 'Chain pan', 0, -0.25, -0.25],
     [at(chHost, { chainId, kind: 'instrument', param: 'cutoff' }), 'Cutoff', 1200, 50000, 20000],
@@ -122,13 +115,12 @@ test('spec / get / set for every scope inside instrument and effect racks', () =
   assert.equal(chain.devices[deviceId].mix, 0.9);
   assert.equal(paramLabel(p, CATALOG, at(chHost, { chainId, kind: 'instrument', param: 'cutoff' })), `${chain.name} · Cutoff`);
   assert.equal(paramLabel(p, CATALOG, `channel/${ch}/volume`), 'Volume');
-  // Things that aren't there.
   const none = [
     at(chHost, { chainId: 'nope', kind: 'chain', param: 'volume' }),
     at(chHost, { chainId, kind: 'instrument', param: 'nope' }),
     at(chHost, { chainId, kind: 'device', deviceId: 'nope', param: 'mix' }),
     at(chHost, { chainId, kind: 'device', deviceId, param: 'nope' }),
-    at(fxHost, { chainId: fxChain, kind: 'instrument', param: 'cutoff' }), // effect racks have no instruments
+    at(fxHost, { chainId: fxChain, kind: 'instrument', param: 'cutoff' }),
     at({ kind: 'channel', channelId: 'nope' }, { chainId, kind: 'chain', param: 'pan' }),
     at({ kind: 'slot', insertId: fxHost.insertId, slotId: 'nope' }, { chainId: fxChain, kind: 'chain', param: 'pan' }),
   ];
@@ -137,7 +129,6 @@ test('spec / get / set for every scope inside instrument and effect racks', () =
     assert.equal(getParamValue(p, CATALOG, ref), null, ref);
     assert.match(setParamValue(p, CATALOG, ref, 1) ?? '', /does not exist/, ref);
   }
-  // A channel that isn't a rack (its generator may still carry stale rack data): no inner params.
   const q = structuredClone(p) as Project;
   q.channels[ch].generator.type = 'krypt.triosc';
   assert.equal(paramSpecFor(q, CATALOG, at(chHost, { chainId, kind: 'chain', param: 'pan' })), null);
@@ -160,7 +151,6 @@ test('params.set and automation.create on inner params, each one undo step', () 
   assert.equal(bad.ok, false);
   assert.match(bad.message ?? '', /does not exist/);
 
-  // Automation: a flat line at the current value, named after the chain + knob, on a playlist track.
   const trackId = doc.project.playlist.trackOrder[0];
   const a = ok<{ automationId: string; clipId: string }>('automation.create', { target: cutoff, trackId, start: 0 });
   const aut = doc.project.automations[a.automationId];
@@ -204,14 +194,12 @@ test('wrapping in a rack moves automation inside; removing chains / devices / in
   for (const id of [a1, a2, a3]) assert.ok(paramSpecFor(h.doc.project, CATALOG, aut(id)!), `${aut(id)} resolves`);
   h.sound();
 
-  // Change the instrument: params the new one lacks lose their automation; shared ids keep it.
   const keep = h.ok<{ automationId: string }>('automation.create', { target: `channel/${ch}/rack/${w1.chainId}/pan` }).automationId;
   const r = h.ok<{ clearedAutomation: number }>('rack.setInstrument', { channelId: ch, chainId: w1.chainId, type: 'krypt.kick808' });
   const kickHasCutoff = CATALOG.plugins.find((d) => d.id === 'krypt.kick808')!.params.some((s) => s.id === 'cutoff');
   assert.equal(r.clearedAutomation, kickHasCutoff ? 0 : 1);
   assert.equal(aut(a1), kickHasCutoff ? `channel/${ch}/rack/${w1.chainId}/inst/cutoff` : null);
   assert.equal(aut(keep), `channel/${ch}/rack/${w1.chainId}/pan`);
-  // Remove the device: its automation goes; remove the chain: everything inside goes.
   const rd = h.ok<{ clearedAutomation: number }>('rack.removeDevice', { insertId, slotId: sid, chainId: w2.chainId, deviceId: dev });
   assert.equal(rd.clearedAutomation, 2);
   assert.equal(aut(a2), null);
@@ -219,15 +207,12 @@ test('wrapping in a rack moves automation inside; removing chains / devices / in
   assert.equal(rc.clearedAutomation, 1);
   assert.equal(aut(keep), null);
   h.sound();
-  // Replacing the rack device itself (a new rack via rack.build) unassigns what pointed inside the old one.
   const k2 = h.ok<{ chainId: string }>('rack.addChain', { channelId: ch, name: 'B', instrument: { type: 'krypt.triosc' } }).chainId;
   const inner = h.ok<{ automationId: string }>('automation.create', { target: `channel/${ch}/rack/${k2}/volume` }).automationId;
   h.ok('rack.build', { channelId: ch, spec: { kind: 'instrument', chains: [{ name: 'New', instrument: { plugin: 'krypt.triosc', params: {} } }] } });
   assert.equal(aut(inner), null);
   h.sound();
 });
-
-// ── MCP ───────────────────────────────────────────────────────────────
 
 function rig() {
   const r = racks();
@@ -268,7 +253,6 @@ test('MCP set_params and add_automation reach knobs inside racks (chain + device
   r = await call('set_params', { insert: insertId, effect: 1, chain: 'Wet', device: 1, params: { mix: '20%' } });
   assert.equal(r.ok, true, r.message);
   assert.equal(doc.project.mixer.inserts[insertId].slots[slotId].rack!.chains[fxChain].devices[fxDev].mix, 0.2);
-  // Helpful failures.
   r = await call('set_params', { channel: 'Rack Keys', chain: 'Nope', params: { cutoff: 100 } });
   assert.equal(r.ok, false);
   assert.match(r.message ?? '', /no chain "Nope".*1\./);

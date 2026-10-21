@@ -1,7 +1,3 @@
-// Piano Roll panel. React renders the chrome ONCE; the canvas surfaces are
-// driven imperatively by PianoRollController (no re-render during gestures).
-// Edits (activePatternId, selected channel from src/editors/selection.ts).
-
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Blend, Braces, ChevronDown, Ghost, Grid3x3, Layers, LocateFixed, Magnet, MicVocal, Music, Piano, Spline, WandSparkles, Wrench, type LucideIcon } from 'lucide-react';
 import { CHORD_QUALITIES, NOTE_NAMES_SHARP, SCALES } from '@shared/music/theory';
@@ -81,7 +77,7 @@ export function PianoRoll() {
 
   useEffect(() => {
     const req = <T,>(x: { current: T | null }) => x.current as T;
-    if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__kryptPianoRoll = ctl; // devtools / scripted UI checks
+    if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__kryptPianoRoll = ctl;
     return ctl.attach({
       root: req(r.root),
       body: req(r.body),
@@ -102,7 +98,6 @@ export function PianoRoll() {
       vTrack: req(r.vTrack),
       vThumb: req(r.vThumb),
     });
-    // refs are stable; attach once per controller
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctl]);
 
@@ -119,7 +114,6 @@ export function PianoRoll() {
         className="relative grid min-h-0 flex-1 select-none"
         style={{ gridTemplateColumns: `${PR.keyW}px minmax(0,1fr) ${PR.sb}px`, gridTemplateRows: prRows(laneH) }}
       >
-        {/* row 1: corner · ruler · corner */}
         <div className="border-b border-r border-white/10 bg-krypt-panel" />
         <div ref={r.rulerHost} className="relative overflow-hidden cursor-pointer" title="Click to set the play position">
           <canvas ref={r.ruler} className="absolute left-0 top-0" />
@@ -129,7 +123,6 @@ export function PianoRoll() {
         </div>
         <div className="border-b border-white/10 bg-krypt-panel" />
 
-        {/* row 2: keyboard · grid · vscroll */}
         <div ref={r.keysHost} className="relative overflow-hidden">
           <canvas ref={r.keys} className="absolute left-0 top-0 cursor-pointer" />
         </div>
@@ -146,10 +139,8 @@ export function PianoRoll() {
         </div>
         <ScrollTrack axis="y" trackRef={r.vTrack} thumbRef={r.vThumb} />
 
-        {/* row 3: splitter */}
         <div ref={r.splitter} className="col-span-3 cursor-row-resize border-y border-white/10 bg-krypt-panel hover:bg-krypt-purple/30" title="Drag to resize the note-property lane" />
 
-        {/* row 4: lane */}
         <div className="flex flex-col gap-1 overflow-hidden border-r border-white/10 bg-krypt-panel p-1">
           <select
             value={lane}
@@ -174,7 +165,6 @@ export function PianoRoll() {
         </div>
         <div className="bg-krypt-panel" />
 
-        {/* row 5: hscroll */}
         <div className="border-r border-t border-white/10 bg-krypt-panel" />
         <ScrollTrack axis="x" trackRef={r.hTrack} thumbRef={r.hThumb} />
         <div className="border-t border-white/10 bg-krypt-panel" />
@@ -183,7 +173,6 @@ export function PianoRoll() {
   );
 }
 
-/** Toolbar dropdown (Tools menu, colour groups); keyboard focus returns to the roll afterwards. */
 function MenuButton({ ctl, title, items, icon: Icon, label, children }: { ctl: PianoRollController; title: string; items: () => MenuItem[]; icon?: LucideIcon; label?: string; children?: ReactNode }) {
   const ref = useRef<HTMLButtonElement>(null);
   return (
@@ -192,7 +181,7 @@ function MenuButton({ ctl, title, items, icon: Icon, label, children }: { ctl: P
       type="button"
       title={title}
       aria-label={title}
-      onPointerDown={(e) => e.preventDefault() /* keep keyboard focus on the editor */}
+      onPointerDown={(e) => e.preventDefault()}
       onClick={() => ref.current && toggleMenuAt(ref.current, items, { minWidth: 230, onClose: () => ctl.focus() })}
       className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 text-white/65 transition hover:bg-white/5 hover:text-white"
     >
@@ -208,7 +197,6 @@ function PianoRollToolbar({ ctl }: { ctl: PianoRollController }) {
   const v = usePianoRollView();
   const selectedChannel = useEditorSelection((s) => s.channelId);
   const setChannel = useEditorSelection((s) => s.setChannel);
-  // primitive selectors → re-render only when names/colors change
   const patKey = useDocStore((s) => (s.project ? s.project.patternOrder.map((id) => `${id}\u0001${s.project!.patterns[id]?.name ?? ''}`).join('\u0002') : ''));
   const chKey = useDocStore((s) =>
     s.project

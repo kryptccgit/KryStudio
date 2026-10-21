@@ -1,11 +1,4 @@
-//! FROZEN COPY of krypt.sampler as it shipped before Wave 12.2 (test only).
-//! `sampler::tests` renders it next to the sampler with the new `end` param
-//! at its default to prove existing playback is unchanged. Never edit this file.
 #![allow(dead_code)]
-
-//! krypt.sampler — polyphonic sample player: windowed-sinc resampling
-//! (anti-aliased when pitching up), AHDSR, TPT SVF filter, pitch envelope,
-//! one-shot / loop / reverse, sample start, glide and slides.
 
 use std::sync::Arc;
 
@@ -52,14 +45,12 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
-/// Resonance 0..1 → SVF damping k (Q 0.707 … ~25).
 #[inline]
 pub(crate) fn reso_to_k(r: f32) -> f64 {
     let q = std::f64::consts::FRAC_1_SQRT_2 * (2f64).powf(r.clamp(0.0, 1.0) as f64 * 5.1);
     1.0 / q
 }
 
-/// Apply the filter type tap to an SVF tick (0 LP, 1 HP, 2 BP, 3 Notch).
 #[inline]
 pub(crate) fn svf_typed(f: &mut Svf, ftype: usize, x: f64) -> f64 {
     let (lp, bp, hp) = f.tick3(x);
@@ -262,7 +253,6 @@ impl Voice for SamplerVoice {
                 let semis = if sh.key_track { p - self.root } else { 0.0 } + sh.penv_amt * pe;
                 step = self.ratio_base * ((semis as f64) / 12.0).exp2();
             }
-            // read
             let (mut a, mut b);
             let fr = self.pos - self.pos.floor();
             if fr == 0.0 && step == 1.0 && self.pos >= 0.0 && (self.pos as usize) < len {
@@ -277,7 +267,6 @@ impl Voice for SamplerVoice {
                     None => a,
                 };
             }
-            // advance
             self.pos += self.dir * step;
             let mut finished = false;
             if sh.looping {
@@ -287,12 +276,10 @@ impl Voice for SamplerVoice {
             } else if self.pos >= len as f64 || self.pos < -1.0 {
                 finished = true;
             }
-            // envelope
             let e = self.env.next(&sh.env);
             if self.env.idle() {
                 finished = true;
             }
-            // filter
             if filter_on {
                 if self.coef_count == 0 {
                     let c = self.cut_s.advance(16);

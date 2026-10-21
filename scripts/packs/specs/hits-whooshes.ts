@@ -1,13 +1,3 @@
-// Hits & Whooshes: recorded impacts and transition ear candy for drops and section changes: orchestral crashes and
-// cymbal crescendos, gongs, concert bass drum booms and rolls, anvil strikes, chime runs, a bowed cymbal, swishes,
-// punches, sub booms, sci-fi blasts and lasers.
-//   vcsl     Versilian Community Sample Library, CC0 1.0 (LICENSE at the pinned commit). GitHub + jsDelivr.
-//   scifi    Kenney "Sci-Fi Sounds" (CC0; kenney.nl/assets/sci-fi-sounds + License.txt in the ZIP).
-//   impact   Kenney "Impact Sounds" (CC0; kenney.nl/assets/impact-sounds + License.txt in the ZIP).
-//   swishes  "Swishes Sound Pack" by artisticdude (CC0, opengameart.org/content/swishes-sound-pack).
-//   boom     "Muffled Distant Explosion" by NenadSimic (CC0, opengameart.org/content/muffled-distant-explosion).
-// Note: the cymbal and bass-drum crescendos peak about a third of the way in and then ring out (they are not
-// end-aligned swells), so they are filed as crashes / fills, not `swell`.
 import type { GenreId } from '@shared/sounds/genres';
 import { sample, type SampleDef, type SamplePackSpec } from '../lib';
 import { VCSL_SOURCE } from './perc-extras';
@@ -36,7 +26,6 @@ export const HITS_WHOOSHES: SamplePackSpec = {
     boom: { type: 'url', url: `${OGA}NenadSimic%20-%20Muffled%20Distant%20Explosion.wav` },
   },
   samples: [
-    // ── cymbals (VCSL)
     ...set('cymbals', 'vcsl', `${SI}Clash Cymbals 1/`, ['cymbal_crash1_ff2.wav', 'cymbal_crash1_ff3.wav'], 'Orchestral Crash Loud', 'crash', ['big', 'bright', 'long', 'organic']),
     ...set('cymbals', 'vcsl', `${SI}Clash Cymbals 1/`, ['cymbal_crash1_mf1.wav', 'cymbal_crash1_mf2.wav'], 'Orchestral Crash', 'crash', ['bright', 'long', 'organic']),
     ...set('cymbals', 'vcsl', `${SI}Clash Cymbals 1/`, ['cymbal_crash1_short1.wav', 'cymbal_crash1_short2.wav'], 'Crash Choke', 'crash', ['short', 'bright', 'organic']),
@@ -47,7 +36,6 @@ export const HITS_WHOOSHES: SamplePackSpec = {
     ...set('cymbals', 'vcsl', `${SI}Suspended Cymbal 1/`, ['susCymb1_roll_ff2_nloop.wav'], 'Cymbal Roll', 'texture', ['roll', 'build', 'long', 'organic']),
     ...set('cymbals', 'vcsl', `${SI}Suspended Cymbal 1/`, ['susCymb1_bow_20.wav', 'susCymb1_bow_13.wav'], 'Bowed Cymbal', 'texture', ['eerie', 'metallic', 'long', 'organic'], DARK),
     ...set('cymbals', 'vcsl', `${SI}Suspended Cymbal 1/`, ['susCymb1_scrape_1.wav'], 'Cymbal Scrape', 'texture', ['metallic', 'eerie', 'organic'], DARK),
-    // ── gongs, bass drums, anvil (VCSL)
     ...set('gongs', 'vcsl', `${SI}Gong 1/`, ['gong_fff.wav', 'gong_f.wav', 'gong_2_f.wav'], 'Gong Hit', 'impact', ['big', 'long', 'metallic', 'organic']),
     ...set('gongs', 'vcsl', `${SI}Gong 1/`, ['gong_scrape_mf.wav'], 'Gong Scrape', 'texture', ['metallic', 'eerie', 'organic'], DARK),
     ...set('drums', 'vcsl', `${SM}Bass Drum 2/`, ['bassdrum_hit_ff.wav', 'bassdrum_hit_f.wav'], 'Concert Bass Drum Boom', 'impact', ['deep', 'big', 'organic']),
@@ -55,14 +43,12 @@ export const HITS_WHOOSHES: SamplePackSpec = {
     ...set('drums', 'vcsl', `${SM}Bass Drum 2/`, ['bassdrum_cresc_short.wav', 'bassdrum_cresc_med.wav'], 'Bass Drum Crescendo', 'fill', ['crescendo', 'build', 'deep', 'organic']),
     ...set('drums', 'vcsl', `${SM}Bass Drum 2/`, ['bassdrum_roll_ff.wav'], 'Bass Drum Rumble', 'fill', ['roll', 'deep', 'organic']),
     ...set('metal', 'vcsl', `${SI}Anvil/`, ['Anvil_Hit3_v3_rr1_Mid.wav', 'Anvil_Hit2_v3_rr1_Mid.wav', 'Anvil_Hit1_v3_rr1_Mid.wav'], 'Anvil Strike', 'impact', ['metallic', 'hard', 'organic'], [...DARK, 'house']),
-    // ── chimes and whistles (VCSL)
     ...set('chimes', 'vcsl', `${SI}Mark Trees/Legacy/`, ['windchimes_asc1.wav', 'windchimes_slowAsc1.wav'], 'Chime Run Up', 'perc', ['chimes', 'bright', 'transition', 'organic'], ['pop', 'rnb', 'lofi', 'future-bass', 'edm']),
     ...set('chimes', 'vcsl', `${SI}Mark Trees/Legacy/`, ['windchimes_desc1.wav', 'windchimes_slowDesc1.wav'], 'Chime Run Down', 'perc', ['chimes', 'bright', 'transition', 'organic'], ['pop', 'rnb', 'lofi', 'future-bass', 'edm']),
     ...set('chimes', 'vcsl', `${SI}Bell Tree/Stroke/`, ['BellTree_Stroke_6_Mid.wav'], 'Bell Tree Sweep', 'perc', ['chimes', 'bright', 'transition', 'organic'], ['pop', 'rnb', 'lofi', 'future-bass']),
     ...set('chimes', 'vcsl', 'Idiophones/Friction Idiophones/Wine Glasses/Sustains/Slow/', ['glass3_A#4_Slow_1_Main.wav'], 'Singing Glass', 'texture', ['glass', 'dreamy', 'long', 'organic'], ['lofi', 'rnb', 'deep-house', 'future-bass']),
     ...set('whistles', 'vcsl', 'Aerophones/Free Aerophones/Siren/', ['Main_SirenWhistle-010.wav', 'Main_SirenWhistle-002.wav', 'Main_SirenWhistle-005.wav'], 'Siren Whistle', 'perc', ['whistle', 'siren'], ['reggaeton', 'dnb', 'dubstep', 'edm', 'afrobeats']),
 
-    // ── Kenney Sci-Fi Sounds
     ...set('sci-fi', 'scifi', 'Audio/', range(0, 4).map((n) => `explosionCrunch_${pad3(n)}.ogg`), 'Crunch Blast', 'impact', ['explosion', 'gritty', 'distorted'], DARK),
     ...set('sci-fi', 'scifi', 'Audio/', ['lowFrequency_explosion_000.ogg', 'lowFrequency_explosion_001.ogg'], 'Sub Boom', 'impact', ['sub', 'deep', 'big'], [...DARK, 'edm', 'future-bass']),
     ...set('sci-fi', 'scifi', 'Audio/', range(0, 4).map((n) => `laserLarge_${pad3(n)}.ogg`), 'Big Laser', 'zap', ['laser', 'big'], [...DARK, 'synthwave']),
@@ -74,12 +60,10 @@ export const HITS_WHOOSHES: SamplePackSpec = {
     ...set('sci-fi', 'scifi', 'Audio/', ['computerNoise_000.ogg', 'computerNoise_001.ogg'], 'Computer Chatter', 'texture', ['sci-fi', 'blips'], ['synthwave', 'techno', 'dnb', 'phonk']),
     ...set('sci-fi', 'scifi', 'Audio/', ['spaceEngineLarge_000.ogg'], 'Engine Drone', 'texture', ['drone', 'dark'], DARK),
 
-    // ── Kenney Impact Sounds: punches and low thuds
     ...set('punches', 'impact', 'Audio/', [0, 2, 3].map((n) => `impactPunch_heavy_${pad3(n)}.ogg`), 'Heavy Punch', 'impact', ['punchy', 'short'], DARK),
     ...set('punches', 'impact', 'Audio/', range(0, 3).map((n) => `impactPunch_medium_${pad3(n)}.ogg`), 'Body Punch', 'impact', ['punchy', 'short'], DARK),
     ...set('punches', 'impact', 'Audio/', [0, 1, 3, 4].map((n) => `impactSoft_heavy_${pad3(n)}.ogg`), 'Low Thud', 'impact', ['deep', 'soft', 'short'], DARK),
 
-    // ── OpenGameArt: swishes and a distant boom
     ...set('swishes', 'swishes', 'swishes/', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13].map((n) => `swish-${n}.wav`), 'Swish', 'whoosh', ['short', 'airy'], [...BIG, 'phonk', 'lofi']),
     sample('booms', 'boom', undefined, 'Distant Boom', 'impact', ['deep', 'dark', 'long'], [...DARK, 'edm'], { ext: '.wav' }),
   ],

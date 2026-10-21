@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// TemplateStore: the user's project templates on disk (Wave 12.2b).
-//   userData/templates/templates.json     the index (shared/templates.ts)
-//   userData/templates/<id>.kstudio       one project container each
-// Every write is atomic (tmp + rename) and serialized; ids are validated
-// before they touch a path (they come from the renderer and agents).
-// Saving under an existing name replaces that template.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { promises as fsp } from 'node:fs';
@@ -42,14 +33,12 @@ export class TemplateStore {
     await writeFileAtomic(this.indexPath, JSON.stringify({ version: 1, templates: ix.templates }, null, 2));
   }
 
-  /** One write at a time: two quick saves never lose an index entry. */
   private serialize<T>(job: () => Promise<T>): Promise<T> {
     const run = this.chain.then(job, job);
     this.chain = run.catch(() => {});
     return run;
   }
 
-  /** The templates whose file is still there, sorted by name. */
   list(): ProjectTemplate[] {
     return sortTemplates(this.readIndex().templates.filter((t) => isFile(this.fileOf(t.id))));
   }
@@ -59,7 +48,6 @@ export class TemplateStore {
     return this.list().find((t) => t.id === id) ?? null;
   }
 
-  /** Store a project container as a template; an existing template with the same name is replaced. */
   save(name: string, bytes: Uint8Array, facts: TemplateFacts): Promise<{ template: ProjectTemplate; replaced: boolean }> {
     return this.serialize(async () => {
       const clean = cleanTemplateName(name);

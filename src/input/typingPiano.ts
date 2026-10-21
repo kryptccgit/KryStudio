@@ -1,10 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Typing keyboard → piano (research/06 §6.2). Two rows by physical key
-// (KeyboardEvent.code): Z-row = base octave, Q-row = one octave up. Notes go
-// straight to the engine (engine.audition), never through the document.
-// L is left out of the map: it toggles pattern/song mode.
-// ──────────────────────────────────────────────────────────────────────
-
 import { noteName as theoryNoteName } from '@shared/music/theory';
 import { effectiveChannelId, getUi } from '../state/ui';
 import { flashHint } from '../app/hints';
@@ -21,7 +14,6 @@ const UPPER: Array<[string, number]> = [
 
 export const PIANO_MAP: ReadonlyMap<string, number> = new Map([...LOWER, ...UPPER]);
 
-/** MIDI → name with 60 = C4, the same naming as the Piano Roll (shared/music/theory). */
 export function noteName(key: number): string {
   return theoryNoteName(key);
 }
@@ -44,7 +36,6 @@ function changed(): void {
   for (const fn of listeners) fn();
 }
 
-/** Returns true if the event was consumed as a note. */
 export function pianoKeyDown(e: KeyboardEvent): boolean {
   const ui = getUi();
   if (!ui.typingPiano || e.ctrlKey || e.altKey || e.metaKey) return false;
@@ -63,7 +54,6 @@ export function pianoKeyDown(e: KeyboardEvent): boolean {
   try {
     window.krypt.engine.audition(channelId, key, vel, true);
   } catch {
-    /* fire-and-forget */
   }
   flashHint(`Note ${noteName(key)}  ·  vel ${Math.round(vel * 100)}%`, 'info', 900);
   changed();
@@ -77,27 +67,23 @@ export function pianoKeyUp(e: KeyboardEvent): boolean {
   try {
     window.krypt.engine.audition(h.channelId, h.key, 0, false);
   } catch {
-    /* ignore */
   }
   changed();
   return true;
 }
 
-/** All notes off (window blur, visibility change, panic). */
 export function pianoAllOff(): void {
   if (held.size === 0) return;
   for (const h of held.values()) {
     try {
       window.krypt.engine.audition(h.channelId, h.key, 0, false);
     } catch {
-      /* ignore */
     }
   }
   held.clear();
   try {
     window.krypt.engine.auditionOff();
   } catch {
-    /* ignore */
   }
   changed();
 }

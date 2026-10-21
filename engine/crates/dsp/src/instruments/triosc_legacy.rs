@@ -1,11 +1,4 @@
-//! FROZEN COPY of krypt.triosc as it shipped before Wave 12.2b (test only).
-//! `triosc::tests` renders it next to TriOsc with the new LFO params at their
-//! defaults to prove existing patches sound bit-identical. Never edit this file.
 #![allow(dead_code)]
-
-//! krypt.triosc — three band-limited oscillators (PolyBLEP/PolyBLAMP), each
-//! doubled into a detuned stereo pair by "Detune spread", analog drift,
-//! AHDSR amp envelope and a TPT SVF with its own ADSR + key tracking.
 
 use super::sampler::{reso_to_k, sanitize_sr, svf_typed};
 use super::{instrument_process, NoteStart, OutStage, Voice, VoiceManager, CHOKE_MS};
@@ -76,10 +69,8 @@ pub fn descriptor() -> PluginDescriptor {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct OscCfg {
     shape: Shape,
-    /// frequency ratios of the two unison copies
     ratio: [f64; 2],
     level: f32,
-    /// (l, r) gains for the two copies (pan + unison gain folded in)
     gl: [f32; 2],
     gr: [f32; 2],
     phase: [f64; 2],
@@ -170,7 +161,6 @@ impl TriVoice {
 
     fn update_drift(&mut self, amount: f32) {
         for o in 0..3 {
-            // called every 32 samples: new target every ~0.5 s, ~0.3 s glide
             if self.rng.unit() < 0.0015 {
                 self.drift_tgt[o] = self.rng.bipolar();
             }
@@ -288,7 +278,6 @@ impl Voice for TriVoice {
                     sr += v * cfg.gr[u];
                 }
             }
-            // filter
             let fe = self.fenv.next(&sh.fenv);
             if self.coef_count == 0 {
                 let base = self.cut_s.advance(8);
@@ -375,7 +364,6 @@ impl TriOsc {
         let pan_off = spread * 0.8;
         let base = [P::Osc1Shape as usize, P::Osc2Shape as usize, P::Osc3Shape as usize];
         for (o, &b) in base.iter().enumerate() {
-            // per-osc block: shape, coarse, fine, level, pan, phase
             let shape = Shape::from_index(p.idx(b));
             let semis = p.get(b + 1) as f64 + p.get(b + 2) as f64 / 100.0;
             let level = p.get(b + 3);

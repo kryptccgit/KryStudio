@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Piano roll ▸ Sing my notes (research/21 §sing): typed lyrics sung on the
-// melody of the current channel in the current pattern. Opens beside the
-// roll (like Generate) so the live syllable → note preview, drawn as
-// labels above the notes, stays visible. Voice, octave, vibrato, glide,
-// Krypt Tune (Hard by default: the tuned sound), Preview / Add to song.
-// After a render the returned mapping replaces the guess on the roll.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useMemo } from 'react';
 import { AudioLines, Check as CheckIcon, Cloud, Loader2, MicVocal, Play, Plus, RotateCcw, Square, TriangleAlert } from 'lucide-react';
 import { noteName } from '@shared/music/theory';
@@ -22,7 +13,6 @@ import { clearJob, setSing, useVoice } from './store';
 import { cancelJob, ensureVoiceState, replayPreview, runSing, stopPreview } from './actions';
 import { CloudBadge, JobProgress, LocalBadge, NeedKey, NeedModel, Note, SectionTitle, VoiceSelect, btn, primary, small } from './parts';
 
-/** Piano roll toolbar ▸ Sing my notes, its Tools menu, and the pianoRoll.sing command. */
 export function openSingDialog(ctl: PianoRollController): void {
   if (!ctl.getTarget()) {
     flashHint('Select a pattern and a channel with a melody first', 'warn');
@@ -37,7 +27,7 @@ export function openSingDialog(ctl: PianoRollController): void {
     icon: MicVocal,
     width: 520,
     doc: ctl.rootDocument(),
-    near: ctl.rootRect() ?? undefined, // beside the roll: the syllable labels stay visible
+    near: ctl.rootRect() ?? undefined,
     render: (close) => <SingBody ctl={ctl} close={close} />,
     onClose: () => {
       ctl.showSyllables(null);
@@ -47,7 +37,6 @@ export function openSingDialog(ctl: PianoRollController): void {
   });
 }
 
-/** The pattern + channel the roll edits, and that channel's notes (re-renders only when they change). */
 function useTarget() {
   const selected = useEditorSelection((s) => s.channelId);
   const patternId = useDocStore((s) => s.project?.transport.activePatternId ?? null);
@@ -73,11 +62,9 @@ function SingBody({ ctl, close }: { ctl: PianoRollController; close: () => void 
   const mapping = useMemo(() => mapSyllables(tokens, melody), [tokens, melody]);
   const rendered = useMemo(() => (lastMapping?.length ? labelsFromOutcome(lastMapping, melody) : null), [lastMapping, melody]);
 
-  // The roll shows the returned mapping after a render, else the live guess.
   useEffect(() => {
     ctl.showSyllables(rendered ?? mapping.labels);
   }, [ctl, rendered, mapping]);
-  // Lyrics or target changed after a render: back to the live guess.
   useEffect(() => {
     if (useVoice.getState().lastMapping) useVoice.setState({ lastMapping: null });
   }, [form.lyrics, t.patternId, t.channelId, form.bars]);

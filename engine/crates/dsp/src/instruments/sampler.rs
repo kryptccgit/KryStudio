@@ -1,13 +1,3 @@
-//! krypt.sampler — polyphonic sample player: windowed-sinc resampling
-//! (anti-aliased when pitching up), AHDSR, TPT SVF filter, pitch envelope,
-//! one-shot / loop / reverse, sample start and end, glide and slides.
-//!
-//! Start / End mark the region that plays (End ≤ Start = silent). Forward
-//! playback runs Start → End, reverse runs End → Start; a region edge that is
-//! not the sample's own edge stops with the short choke fade. With Loop on,
-//! the loop runs over the whole sample at End = 100% (the original
-//! behaviour) and between Start and End below it.
-
 use std::sync::Arc;
 
 use super::{instrument_process, usable_frames, OutStage, Voice, VoiceManager, CHOKE_MS};
@@ -35,7 +25,6 @@ param_table! {
     Reso => lin("reso", "Resonance", 0.0, 1.0, 0.0, "%", "Filter"),
     PitchEnvAmount => lin("pitchEnvAmount", "Amount", -48.0, 48.0, 0.0, "st", "Pitch envelope"),
     PitchEnvDecay => logp("pitchEnvDecay", "Decay", 1.0, 5000.0, 100.0, "ms", "Pitch envelope"),
-    // wave 12.2 (appended): region end, so slices can stop
     End => lin("end", "End", 0.0, 1.0, 1.0, "%", "Playback"),
 }
 
@@ -56,14 +45,12 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
-/// Resonance 0..1 → SVF damping k (Q 0.707 … ~25).
 #[inline]
 pub(crate) fn reso_to_k(r: f32) -> f64 {
     let q = std::f64::consts::FRAC_1_SQRT_2 * (2f64).powf(r.clamp(0.0, 1.0) as f64 * 5.1);
     1.0 / q
 }
 
-/// Apply the filter type tap to an SVF tick (0 LP, 1 HP, 2 BP, 3 Notch).
 #[inline]
 pub(crate) fn svf_typed(f: &mut Svf, ftype: usize, x: f64) -> f64 {
     let (lp, bp, hp) = f.tick3(x);
@@ -93,15 +80,12 @@ pub(crate) struct SamplerShared {
     pub penv_ms: f32,
 }
 
-/// The playing region in frames: (loop start, region start, region end).
-/// At End = 100% the region ends at the sample's end and a loop wraps over the whole sample (the original behaviour).
 #[inline]
 fn region(sh: &SamplerShared, len: usize) -> (f64, f64, f64) {
     let lo = sh.start as f64 * len as f64;
     if sh.end >= 1.0 {
         (0.0, lo, len as f64)
     } else {
-        // whole frames, so End lands exactly where a slice says (0.6 as f32 is not 0.6)
         let hi = (sh.end as f64 * len as f64).round().min(len as f64);
         (lo.floor(), lo, hi)
     }
@@ -186,14 +170,11 @@ impl Voice for SamplerVoice {
         }
         let (ll, lo, hi) = region(sh, len);
         if hi <= lo {
-            // End at or before Start: nothing to play
             self.active = false;
             return;
         }
         let extra = n.extras.sample_start.max(0.0) * s.sample_rate as f64;
-        // `offset` = how far into the region playback enters (a mid-sample entry fades in)
         let offset = if sh.reverse {
-            // reverse runs End → Start; sample_start moves the entry point back from End
             let back = if sh.looping { extra % (hi - ll) } else { extra };
             let pos = hi - 1.0 - back;
             if pos <= lo - 1.0 && !sh.looping {
@@ -286,13 +267,11 @@ impl Voice for SamplerVoice {
         };
         let len = usable_frames(s);
         let (ll, lo, hi) = region(sh, len);
-        // a loop that ends before the sample does reads only up to its end (the kernel wraps there)
         let data_len = if sh.looping { (hi.ceil() as usize).clamp(1, len) } else { len };
         let ch0 = &s.channels[0][..data_len];
         let ch1 = if s.channels.len() > 1 { Some(&s.channels[1][..data_len]) } else { None };
         let mut w = [0.0f32; MAX_TAPS];
         let wrap = if sh.looping { Some((ll as i64, data_len as i64)) } else { None };
-        // a region edge inside the sample stops with the choke fade instead of a click
         let edge_fade = !sh.looping && if sh.reverse { lo > 0.0 } else { hi < len as f64 };
         let fade_len = (CHOKE_MS * 0.001 * self.sr) as f64;
         let (ct, rt) = self.filter_targets(sh);
@@ -312,7 +291,6 @@ impl Voice for SamplerVoice {
                 let semis = if sh.key_track { p - self.root } else { 0.0 } + sh.penv_amt * pe;
                 step = self.ratio_base * ((semis as f64) / 12.0).exp2();
             }
-            // read
             let (mut a, mut b);
             let fr = self.pos - self.pos.floor();
             if fr == 0.0 && step == 1.0 && self.pos >= 0.0 && (self.pos as usize) < data_len {
@@ -333,7 +311,6 @@ impl Voice for SamplerVoice {
             } else {
                 1.0
             };
-            // advance
             self.pos += self.dir * step;
             let mut finished = false;
             if sh.looping {
@@ -343,12 +320,10 @@ impl Voice for SamplerVoice {
             } else if self.pos >= hi || self.pos < lo - 1.0 {
                 finished = true;
             }
-            // envelope
             let e = self.env.next(&sh.env);
             if self.env.idle() {
                 finished = true;
             }
-            // filter
             if filter_on {
                 if self.coef_count == 0 {
                     let c = self.cut_s.advance(16);
@@ -528,7 +503,6 @@ mod tests {
 
     const SR: f32 = 48000.0;
 
-    /// A ramp (0 → 1 over the sample) on the left, a decaying tone on the right.
     fn sample(frames: usize) -> Arc<SampleData> {
         let l = (0..frames).map(|i| i as f32 / frames as f32).collect();
         let r = (0..frames).map(|i| (i as f32 * 0.05).sin() * (-(i as f32) / 20000.0).exp()).collect();
@@ -600,10 +574,8 @@ mod tests {
     #[test]
     fn end_stops_playback_with_a_short_fade() {
         let out = one_note(&[("end", 0.5)], 24000);
-        // plays the first half, then stops: nothing after frame 12000
         assert!(out[11000].abs() > 0.3, "{}", out[11000]);
         assert!(out[12000..].iter().all(|v| *v == 0.0), "played past End");
-        // the last ~2 ms fade down instead of cutting at full level
         let last = out[11999].abs();
         assert!(last < 0.05, "no fade at End: {last}");
         assert!(out[11850].abs() > 0.3);
@@ -620,12 +592,10 @@ mod tests {
     #[test]
     fn reverse_plays_from_end_to_start() {
         let out = one_note(&[("start", 0.2), ("end", 0.6), ("reverse", 1.0)], 24000);
-        // the ramp: value = position / length; entry ≈ 0.6, last sound ≈ 0.2, region = 9600 frames
         let g = out[200] / ((14400 - 1 - 200) as f32 / 24000.0);
         assert!((out[300] / g - (14400 - 1 - 300) as f32 / 24000.0).abs() < 1e-3);
         assert!(out[9600..].iter().all(|v| *v == 0.0), "played past Start");
         assert!(out[9500].abs() > 0.1 * g, "region cut short");
-        // forward with the same region: entry ≈ 0.2, stops after 9600 frames
         let fwd = one_note(&[("start", 0.2), ("end", 0.6)], 24000);
         assert!((fwd[300] / g - (4800 + 300) as f32 / 24000.0).abs() < 1e-3, "{} vs {}", fwd[300] / g, (4800 + 300) as f32 / 24000.0);
         assert!(fwd[9600..].iter().all(|v| *v == 0.0));
@@ -634,7 +604,6 @@ mod tests {
     #[test]
     fn looping_below_end_wraps_between_start_and_end() {
         let out = one_note(&[("start", 0.5), ("end", 0.75), ("loop", 1.0), ("oneShot", 0.0)], 20000);
-        // the ramp stays inside 0.5 .. 0.75 of full scale, and is still sounding long after one pass
         let g = out[100] / ((12000 + 100) as f32 / 24000.0);
         for i in (200..20000).step_by(37) {
             let v = out[i] / g;

@@ -1,30 +1,20 @@
-// Recursive folder walk for the reference library import (electron/library).
-// Async and incremental: one readdir per folder, stats in small batches, so
-// a 10,000-file music folder never blocks the main process. Hidden/system
-// entries and symlinked folders are skipped (no cycles); unreadable folders
-// are counted, never fatal.
-
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 export interface WalkedFile {
   path: string;
   size: number;
-  /** Whole milliseconds (stable across stat calls). */
   mtime: number;
 }
 
 export interface WalkResult {
   files: WalkedFile[];
-  /** Folders that couldn't be read (permissions, vanished mid-walk). */
   unreadable: number;
-  /** Stopped at maxFiles. */
   truncated: boolean;
 }
 
 const SKIP = /^(\.|\$|desktop\.ini$|thumbs\.db$|system volume information$)/i;
 
-/** Every file under `root` whose name passes `accept`. */
 export async function walkFiles(root: string, accept: (name: string) => boolean, opts: { maxFiles?: number; signal?: AbortSignal } = {}): Promise<WalkResult> {
   const max = opts.maxFiles ?? 100_000;
   const out: WalkedFile[] = [];
@@ -59,7 +49,6 @@ export async function walkFiles(root: string, accept: (name: string) => boolean,
   return { files: out, unreadable, truncated: false };
 }
 
-/** Stat one file: size + whole-ms mtime, or null when it is gone / not a file. */
 export async function statSource(p: string): Promise<{ size: number; mtime: number } | null> {
   try {
     const s = await fsp.stat(p);

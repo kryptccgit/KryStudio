@@ -1,7 +1,3 @@
-//! Sample-rate conversion to and from the model's fixed rate, with rubato's
-//! synchronous FFT resampler (MIT). Both directions are delay-compensated so
-//! stems line up sample-exactly with the source.
-
 use audioadapter_buffers::direct::SequentialSliceOfVecs;
 use rubato::{Fft, FixedSync, Indexing, Resampler};
 
@@ -12,9 +8,6 @@ fn new_fft(from: u32, to: u32, channels: usize) -> Result<Fft<f32>, String> {
         .map_err(|e| format!("Cannot resample {from} Hz → {to} Hz: {e}"))
 }
 
-/// Converts whole planar buffers; output length is `ceil(len × to / from)`.
-/// (Not rubato's `process_all_into_buffer`: it leaves the resampler delay in
-/// place when the input is shorter than one chunk.)
 pub fn resample_all(input: &[Vec<f32>], from: u32, to: u32) -> Result<Vec<Vec<f32>>, String> {
     let channels = input.len();
     let len = input.first().map_or(0, Vec::len);
@@ -27,7 +20,6 @@ pub fn resample_all(input: &[Vec<f32>], from: u32, to: u32) -> Result<Vec<Vec<f3
         }
         Ok(())
     };
-    // Fed in blocks so the resampler never holds a second full copy.
     const BLOCK: usize = 1 << 16;
     for start in (0..len).step_by(BLOCK) {
         let end = (start + BLOCK).min(len);
@@ -42,8 +34,6 @@ pub fn resample_all(input: &[Vec<f32>], from: u32, to: u32) -> Result<Vec<Vec<f3
     Ok(out)
 }
 
-/// Streaming conversion: push planar blocks of any size, get converted
-/// blocks back through a callback (resampler delay already removed).
 pub struct StreamResampler {
     rs: Fft<f32>,
     pending: Vec<Vec<f32>>,
@@ -78,8 +68,6 @@ impl StreamResampler {
         Ok(())
     }
 
-    /// Converts what is left (zero-padded) and keeps pumping silence until at
-    /// least `min_total` frames were emitted over the stream's whole life.
     pub fn finish(&mut self, min_total: usize, emit: &mut Emit<'_>) -> Result<(), String> {
         let need = self.rs.input_frames_next();
         let mut guard = 0;
@@ -132,7 +120,6 @@ mod tests {
         let src = vec![tone(48_000, 48_000.0, 440.0)];
         let out = resample_all(&src, 48_000, 44_100).unwrap();
         assert_eq!(out[0].len(), 44_100);
-        // Delay-compensated: the 44.1 kHz copy matches an ideal 440 Hz tone.
         let ideal = tone(44_100, 44_100.0, 440.0);
         let err = out[0][2000..42_000].iter().zip(&ideal[2000..42_000]).map(|(a, b)| (a - b).abs()).fold(0f32, f32::max);
         assert!(err < 1e-3, "error {err}");
@@ -140,7 +127,6 @@ mod tests {
 
     #[test]
     fn short_input_is_not_swallowed_by_the_delay() {
-        // 100 samples at 22.05 kHz → 200 at 44.1 kHz, carrying the signal.
         let src = vec![tone(100, 22_050.0, 500.0)];
         let out = resample_all(&src, 22_050, 44_100).unwrap();
         assert_eq!(out[0].len(), 200);
@@ -156,7 +142,6 @@ mod tests {
         let mid = resample_all(std::slice::from_ref(&src), 48_000, 44_100).unwrap();
         let mut rs = StreamResampler::new(44_100, 48_000, 1).unwrap();
         let mut back = Vec::new();
-        // Odd block sizes on purpose.
         for block in mid[0].chunks(7_777) {
             rs.push(&[block], &mut |b: &[&[f32]]| {
                 back.extend_from_slice(b[0]);

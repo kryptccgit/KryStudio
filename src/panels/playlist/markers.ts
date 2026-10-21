@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Playlist ruler markers (Wave 12.2b): hit-testing a marker's flag + name,
-// dragging it along the ruler, renaming it in place (double-click), and its
-// right-click menu (rename, loop this section, jump, delete). Every change
-// is a command (playlist.renameMarker / moveMarker / removeMarker,
-// transport.set loop). The hit maths is pure and tested.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { Marker } from '@shared/schema/project';
 import { cleanMarkerName, markerSection, MARKER_NAME_MAX } from '@shared/commands/markers';
 import { MARKER_BAND_H } from './markerHits';
@@ -19,7 +11,6 @@ import { Flag, Pencil, Repeat, Trash2 } from 'lucide-react';
 export { MARKER_BAND_H, hitMarker, markersWithDrag, type MarkerDrag } from './markerHits';
 
 let measureCtx: CanvasRenderingContext2D | null = null;
-/** Width of a marker label in the ruler font (cached canvas; 6 px per character without one). */
 export function markerLabelWidth(name: string): number {
   try {
     measureCtx ??= document.createElement('canvas').getContext('2d');
@@ -38,7 +29,7 @@ export async function moveMarker(m: Marker, tick: number, ts: TimeSig): Promise<
 
 export async function renameMarker(m: Marker, name: string): Promise<boolean> {
   const clean = cleanMarkerName(name);
-  if (clean === m.name) return true; // unchanged: nothing to do
+  if (clean === m.name) return true;
   const r = await dispatch('playlist.renameMarker', { id: m.id, name });
   if (r.ok) flashHint(`Renamed to "${clean}"`, 'ok');
   return r.ok;
@@ -56,10 +47,6 @@ export async function loopMarkerSection(markers: Record<string, Marker>, m: Mark
   if (r.ok) flashHint(`Looping "${m.name}"`, 'ok');
 }
 
-/**
- * Rename in place: an input over the marker's label in the ruler host. Enter / blur saves, Esc cancels.
- * Returns a function that closes it without saving.
- */
 export function editMarkerInline(host: HTMLElement, m: Marker, x: number): () => void {
   const doc = host.ownerDocument;
   host.querySelector('input[data-marker-edit]')?.remove();
@@ -80,7 +67,7 @@ export function editMarkerInline(host: HTMLElement, m: Marker, x: number): () =>
     if (save) void renameMarker(m, v);
   };
   input.addEventListener('keydown', (e) => {
-    e.stopPropagation(); // keep the Playlist's keys (Delete, tools) out of the text field
+    e.stopPropagation();
     if (e.key === 'Enter') close(true);
     else if (e.key === 'Escape') close(false);
   });

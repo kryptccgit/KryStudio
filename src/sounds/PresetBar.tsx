@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The preset bar in a channel's plugin editor: ‹ [preset name • ▾] › Save.
-// The name is generator.preset; the pink dot means the params or sample
-// moved away from that preset. The arrows step through presets of the same
-// instrument; the name opens the preset browser. Drop a preset from the
-// Browser onto the bar to load it. Stock instruments only: VST3 / CLAP
-// presets live in the plugin's own window.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Save, SwatchBook } from 'lucide-react';
 import { isExternalPluginId, pluginById } from '@shared/plugins/catalog';
@@ -19,7 +10,6 @@ import { toggleChannelPresetPopover } from './pickers';
 import { openSavePresetDialog } from './SavePresetDialog';
 import { toast } from '../app/notify';
 
-/** Instruments that get the bar: stock ones (not third-party, not the playlist's audio clip). */
 export function hasPresetBar(type: string): boolean {
   return !isExternalPluginId(type) && type !== 'krypt.audioclip';
 }

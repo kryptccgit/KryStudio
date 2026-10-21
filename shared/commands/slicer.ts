@@ -1,20 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Loop slicer commands (research/13-roadmap.md §8.5; the contract is
-// shared/schema/slicer.ts). Slice markers live on a 'krypt.slicer'
-// channel's generator next to its sample. Pure: no I/O. main finds the
-// hits (analyzer onsets) or the grid and passes slice times to
-// slicer.slice (electron/racks/slice.ts, shared with slice_to_pads).
-//
-// Invariant kept by every command: `isValidSlices` (sec strictly
-// increasing, unique ids), at most MAX_SLICER_SLICES, `sec` inside the file
-// when its length is known (SampleRef frames / rate).
-//
-// Ordering rule (as for warp markers): an add or a move that would cross or
-// land on a neighbouring slice is REFUSED with a message naming it, never
-// clamped; the waveform UI clamps its drag between the neighbours before it
-// dispatches, so a drag never fails.
-// ──────────────────────────────────────────────────────────────────────
-
 import { z } from 'zod';
 import { defineCommand, must, plural, CommandError, type CommandContext, type CommandDef } from './types';
 import { defaultNote, type Channel, type Project } from '../schema/project';
@@ -27,20 +10,17 @@ const AUDIOCLIP = 'krypt.audioclip';
 
 const fmtSec = (s: number): string => `${Math.round(s * 1000) / 1000} s`;
 
-/** The slicer channel (anything else is refused with a human message). */
 function slicerChannel(d: Project, channelId: string): Channel {
   const ch = must(d.channels[channelId], `Channel ${channelId} not found (was it deleted?)`);
   if (ch.generator.type !== SLICER_PLUGIN) throw new CommandError(`"${ch.name}" is not a Slicer channel; switch its instrument to Krypt Slicer first (or use slicer.slice)`);
   return ch;
 }
 
-/** The channel's sample length in seconds when the sample pool knows it. */
 function lengthOf(d: Project, ch: Channel): number | null {
   const s = ch.generator.sampleId ? d.samples[ch.generator.sampleId] : undefined;
   return s?.frames && s.sampleRate ? s.frames / s.sampleRate : null;
 }
 
-/** First key of a slicer channel (its baseKey param, else the default). */
 export function slicerBaseKey(ch: Channel): number {
   const k = ch.generator.params.baseKey;
   return typeof k === 'number' && Number.isFinite(k) ? Math.round(k) : SLICER_BASE_KEY;
@@ -57,7 +37,6 @@ function sliceIndex(ch: Channel, sliceId: string): number {
   return i;
 }
 
-/** Why a slice can't start at `sec` between `prev` and `next` (null = it fits). */
 function orderProblem(sec: number, prev: Slice | undefined, next: Slice | undefined, prevN: number): string | null {
   if (prev && !(sec - prev.sec >= MIN_SLICE_GAP_SEC)) return `it would cross or touch slice ${prevN} (at ${fmtSec(prev.sec)})`;
   if (next && !(next.sec - sec >= MIN_SLICE_GAP_SEC)) return `it would cross or touch slice ${prevN + 2} (at ${fmtSec(next.sec)})`;
@@ -69,10 +48,6 @@ function checkInFile(d: Project, ch: Channel, sec: number): void {
   if (dur !== null && sec >= dur) throw new CommandError(`${fmtSec(sec)} is past the end of the sample (${fmtSec(dur)} long)`);
 }
 
-/**
- * A pattern that replays the loop at `bpm`: slice N at its own time on its key, each note lasting until the next
- * slice. The pattern length is the loop rounded to a 16th.
- */
 function addReplayPattern(d: Project, ch: Channel, starts: readonly number[], lengthSec: number, bpm: number, name: string, ctx: CommandContext): string {
   const base = slicerBaseKey(ch);
   const toTick = (sec: number): number => Math.round((sec * bpm * PPQ) / 60);
@@ -91,13 +66,10 @@ function addReplayPattern(d: Project, ch: Channel, starts: readonly number[], le
   return id;
 }
 
-/** Automation aimed at the old instrument's params points nowhere once the instrument changes. */
 function unassignGenAutomation(d: Project, channelId: string): void {
   const prefix = `channel/${channelId}/gen/`;
   for (const aut of Object.values(d.automations)) if (aut.target?.startsWith(prefix)) aut.target = null;
 }
-
-// ── Commands ──────────────────────────────────────────────────────────
 
 export const slicerSlice = defineCommand({
   id: 'slicer.slice',
@@ -138,11 +110,10 @@ export const slicerSlice = defineCommand({
       }
       if (a.name) ch.name = a.name;
     } else {
-      // An audio clip's own channel would orphan its playlist clips: the Slicer goes on a new channel.
       ch = addChannelWithInsert(d, name, { type: SLICER_PLUGIN, params: {}, sampleId, slices }, ctx);
     }
     checkKeys(ch, slices.length);
-    ch.rootKey = slicerBaseKey(ch); // step-sequencer steps play slice 1
+    ch.rootKey = slicerBaseKey(ch);
     const patternId = a.pattern ? addReplayPattern(d, ch, starts, a.lengthSec, a.bpm ?? d.transport.bpm, a.patternName ?? `${sample.name} loop`, ctx) : undefined;
     return { channelId: ch.id, insertId: ch.insertId, patternId, slices: starts, baseKey: slicerBaseKey(ch) };
   },

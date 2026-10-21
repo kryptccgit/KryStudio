@@ -1,7 +1,3 @@
-//! Clip launcher (launcher.rs / launcher_hooks.rs) through the live core.
-//! Child of `tests` for its project builders and test plugins.
-//! Timing: 120 bpm at 48 kHz → 25 frames per tick, a 4/4 bar = 96000 frames.
-
 use super::*;
 use crate::launcher::{LaunchCmd, LaunchRecMsg, LauncherCtl, LauncherTel};
 use crate::program::NONE;
@@ -47,12 +43,10 @@ fn lclip(p: &mut Value, id: &str, track: &str, scene: &str, extra: Value) {
     p["session"]["clips"][id] = c;
 }
 
-/// A muted clip keeps the song (and its 1-bar default loop) out of the way.
 fn extend_song(p: &mut Value, bars: f64) {
     add_clip(p, "zz-extend", "pattern", 0.0, bars * 3840.0, json!({ "patternId": "pa", "mute": true }));
 }
 
-/// Song mode, channel c1 (test.dc) on insert i1, pattern pa = `notes`, 16 bars of song.
 fn proj(notes: &[(f64, f64, u8)]) -> Value {
     let mut p = base(120.0, "song");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
@@ -78,7 +72,6 @@ impl Live {
         let s = self.session.launcher.scene_slot(id).unwrap();
         self.send(Cmd::Launcher(LaunchCmd::Scene(s)));
     }
-    /// Run until absolute frame `f` (multiples of 480 keep the block grid).
     fn run_to(&mut self, f: u64) {
         let done = FRAMES.with(|c| c.get());
         if f > done {
@@ -97,7 +90,6 @@ impl Live {
 }
 
 thread_local! {
-    /// Frames run since the last `fresh` (run_to bookkeeping).
     static FRAMES: Cell<u64> = const { Cell::new(0) };
 }
 
@@ -114,8 +106,6 @@ fn on_keys(log: &[Rec]) -> Vec<(u8, u64)> {
     ons(log)
 }
 
-// ── Quantize ─────────────────────────────────────────────────────────────
-
 #[test]
 fn launch_waits_for_its_quantize_boundary() {
     for (q, expect) in [("1bar", BAR), ("1/4", 2 * BEAT), ("none", 30_000)] {
@@ -124,7 +114,7 @@ fn launch_waits_for_its_quantize_boundary() {
         lclip(&mut p, "l1", "t1", "s1", json!({ "quantize": q }));
         let mut live = fresh(&p);
         live.send(Cmd::Play);
-        live.run_to(30_000); // tick 1200
+        live.run_to(30_000);
         log_take();
         live.launch("l1");
         live.run_to(30_000 + 200_000);
@@ -132,7 +122,6 @@ fn launch_waits_for_its_quantize_boundary() {
         assert_eq!(o.first().copied(), Some(expect), "quantize {q}: {o:?}");
         assert_eq!(o.get(1).copied(), Some(expect + BAR), "quantize {q}: the clip loops every 3840 ticks");
     }
-    // The session's global quantize applies when a clip has none.
     let mut p = proj(&[(0.0, 240.0, 60)]);
     session(&mut p, &["s1"], "1/2");
     lclip(&mut p, "l1", "t1", "s1", json!({}));
@@ -154,15 +143,14 @@ fn pattern_mode_quantizes_on_ticks_since_play_start() {
     lclip(&mut p, "l1", "t1", "s1", json!({ "patternId": "pb" }));
     let mut live = fresh(&p);
     live.send(Cmd::Play);
-    live.run_to(30_000); // pattern tick 1200
+    live.run_to(30_000);
     live.send(Cmd::Pause);
     live.run_to(30_480);
-    live.send(Cmd::Play); // resumes at pattern tick 1200: the launch grid restarts here
-    live.run_to(40_480); // 400 ticks since play start
+    live.send(Cmd::Play);
+    live.run_to(40_480);
     log_take();
     live.launch("l1");
     live.run_to(100_000);
-    // Next quarter since play start = 960 ticks after the resume (song mode would use tick 1920).
     assert_eq!(ons_of(&log_take(), 72), vec![30_480 + BEAT]);
     assert!(!live.core.shared.song_mode.load(R), "launching while playing keeps pattern mode");
 }
@@ -186,15 +174,12 @@ fn launching_while_stopped_starts_song_mode_at_once() {
     assert!(!live.core.shared.song_mode.load(R), "back to the document's pattern mode after stop");
 }
 
-// ── Loop, offset, one-shot ───────────────────────────────────────────────
-
 #[test]
 fn launch_clips_loop_from_their_offset() {
     let notes = [(0.0, 100.0, 60), (1920.0, 100.0, 62), (2880.0, 100.0, 64)];
     let mut p = proj(&notes);
     session(&mut p, &["s1", "s2"], "none");
     lclip(&mut p, "l1", "t1", "s1", json!({ "length": 1920, "offset": 960 }));
-    // Offset past the pattern end: the source wraps at the pattern length (3840).
     lclip(&mut p, "l2", "t1", "s2", json!({ "length": 1920, "offset": 3000 }));
     let mut live = fresh(&p);
     live.launch("l1");
@@ -223,8 +208,6 @@ fn loop_off_plays_once_then_stops_the_track() {
     let slot = live.session.launcher.track_slot("t1").unwrap() as usize;
     assert_eq!(live.core.shared.launch.playing[slot].load(R), NONE);
 }
-
-// ── Override / back to arrangement / scenes ──────────────────────────────
 
 #[test]
 fn override_silences_the_arrangement_until_back_to_arrangement() {
@@ -306,8 +289,6 @@ fn scenes_launch_rows_and_stop_tracks_without_a_clip() {
     assert_eq!(ons_of(&log, 52), vec![0, BAR, 2 * BAR, 3 * BAR], "t3 has no launch clips: untouched");
 }
 
-// ── Follow actions ───────────────────────────────────────────────────────
-
 fn follow(action: &str, chance: f64, other: &str, bars: f64) -> Value {
     json!({ "action": action, "chance": chance, "otherAction": other, "afterBars": bars })
 }
@@ -357,7 +338,6 @@ fn follow_other_never_repeats_and_draws_are_deterministic() {
         assert!(a.contains(&k), "{k} never played: {a:?}");
     }
     assert_eq!(follow_run(&p, 40), a, "same transport start, same clip ids → same choices");
-    // 'any' may pick the playing clip again.
     let any = follow_run(&three_clip_follow("any"), 60);
     assert!(any.windows(2).any(|w| w[0] == w[1]), "'any' never repeated in 60 draws: {any:?}");
 }
@@ -377,8 +357,6 @@ fn follow_chance_picks_action_or_other_action() {
     }
 }
 
-// ── Launch modes ─────────────────────────────────────────────────────────
-
 #[test]
 fn gate_clips_stop_on_release_at_the_quantize_step() {
     let sixteenths: Vec<(f64, f64, u8)> = (0..16).map(|i| (i as f64 * 240.0, 120.0, 60)).collect();
@@ -392,7 +370,6 @@ fn gate_clips_stop_on_release_at_the_quantize_step() {
     live.run_to(150_240);
     let o = ons_of(&log_take(), 60);
     assert_eq!(o, (0..8).map(|i| i * 6000).collect::<Vec<u64>>(), "held from 0, released at tick 1209 → stops at tick 1920");
-    // Released before its quantize boundary: it never plays.
     live.release("l1");
     live.launch("l1");
     live.run_to(150_720);
@@ -438,8 +415,6 @@ fn repeat_clips_retrigger_every_step_while_held() {
     assert_eq!(ons_of(&log_take(), 60), vec![BEAT, 2 * BEAT, 3 * BEAT, 3 * BEAT + BAR], "retriggers while held, then loops normally");
 }
 
-// ── Audio launch clips ───────────────────────────────────────────────────
-
 fn audio_proj() -> Value {
     let mut p = proj(&[(0.0, 100.0, 60), (3000.0, 100.0, 61)]);
     add_channel(&mut p, "ca", "krypt.audioclip", "i1");
@@ -483,11 +458,8 @@ fn song_loop_jumps_do_not_restart_launch_clips() {
     assert_eq!(audio.iter().map(|a| a.0).collect::<Vec<_>>(), vec![0, 48_000, 72_000, 96_000], "{audio:?}");
     assert!((audio[2].1 - 0.75).abs() < 1e-6, "after the loop jump at tick 2880 it resumes 960 ticks into the pass: {}", audio[2].1);
     assert!((audio[3].1 - 0.25).abs() < 1e-9);
-    // The pattern clip runs on through the jump: 61 at elapsed 3000, 60 at 3840.
     assert_eq!(on_keys(&log).into_iter().filter(|k| k.0 != 48).collect::<Vec<_>>(), vec![(60, 0), (61, 75_000), (60, BAR)]);
 }
-
-// ── Launch recording ─────────────────────────────────────────────────────
 
 fn spans(live: &Live, ctl: &mut LauncherCtl) -> Vec<Value> {
     ctl.drain_records(&live.session.names.launch)
@@ -502,7 +474,6 @@ fn launch_recording_logs_spans_and_reports_on_stop() {
     lclip(&mut p, "l2", "t1", "s2", json!({ "patternId": "pb" }));
     let mut live = fresh(&p);
     let mut ctl = LauncherCtl::new(&live.core.shared.launch, None);
-    // On, then off without playing: no event.
     live.send(Cmd::Launcher(LaunchCmd::Record(true)));
     live.send(Cmd::Launcher(LaunchCmd::Record(false)));
     live.run_to(480);
@@ -526,7 +497,6 @@ fn launch_recording_logs_spans_and_reports_on_stop() {
     assert_eq!((e[1]["clipId"].as_str(), e[1]["startTick"].as_f64(), e[1]["offset"].as_f64()), (Some("l2"), Some(7680.0), Some(0.0)));
     let end = e[1]["endTick"].as_f64().unwrap();
     assert!((end - (250_080.0 - 480.0) / 25.0).abs() < 0.1, "ends where the transport stopped (it started at frame 480): {end}");
-    // Switching off while playing reports too.
     live.launch("l1");
     live.run_to(260_160);
     live.send(Cmd::Launcher(LaunchCmd::Record(false)));
@@ -539,7 +509,6 @@ fn launch_recording_logs_spans_and_reports_on_stop() {
 
 #[test]
 fn launch_recording_runs_past_the_end_of_an_empty_song() {
-    // No arrangement clips: song_end is 1 bar, which must not wrap a launch recording.
     let mut p = base(120.0, "song");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     add_channel(&mut p, "c1", "test.dc", "i1");
@@ -550,7 +519,7 @@ fn launch_recording_runs_past_the_end_of_an_empty_song() {
     let mut ctl = LauncherCtl::new(&live.core.shared.launch, None);
     live.send(Cmd::Launcher(LaunchCmd::Record(true)));
     live.launch("l1");
-    live.run_to(250_080); // ~10_000 ticks: well past the 1-bar song end
+    live.run_to(250_080);
     live.send(Cmd::Stop);
     live.run_to(250_560);
     let ev = spans(&live, &mut ctl);
@@ -582,8 +551,6 @@ fn launch_recording_splits_spans_at_song_loop_jumps() {
     assert!((e[1]["endTick"].as_f64().unwrap() - (10_003.2 - 7680.0)).abs() < 0.1, "{}", e[1]["endTick"]);
 }
 
-// ── MIDI grid controllers ────────────────────────────────────────────────
-
 #[test]
 fn grid_notes_are_swallowed_and_launch() {
     let mut p = proj(&[(0.0, 100.0, 60)]);
@@ -602,10 +569,10 @@ fn grid_notes_are_swallowed_and_launch() {
         let mut rs = 0;
         ends.sink.feed_at(crate::midi::now_ns(), &d, bytes, &mut rs);
     };
-    feed("Pads", &[0x90, 36, 100]); // grid: swallowed
-    feed("Pads", &[0x90, 50, 100]); // unmapped note: plays
-    feed("Keys", &[0x90, 36, 100]); // another device: plays
-    feed("Pads", &[0x91, 36, 100]); // another channel: plays
+    feed("Pads", &[0x90, 36, 100]);
+    feed("Pads", &[0x90, 50, 100]);
+    feed("Keys", &[0x90, 36, 100]);
+    feed("Pads", &[0x91, 36, 100]);
     live.run_to(4800);
     let mut live_keys: Vec<u8> = on_keys(&log_take()).into_iter().map(|k| k.0).collect();
     live_keys.sort_unstable();
@@ -614,21 +581,18 @@ fn grid_notes_are_swallowed_and_launch() {
     let clip = live.clip("l1");
     assert_eq!(ctl.tick(&live.session, &out), vec![LaunchCmd::Launch { clip, release: false }]);
     feed("Pads", &[0x80, 36, 0]);
-    feed("Pads", &[0x90, 37, 0]); // vel-0 note-on = note-off: a stop pad ignores releases
+    feed("Pads", &[0x90, 37, 0]);
     feed("Pads", &[0x90, 37, 90]);
     assert_eq!(ctl.tick(&live.session, &out), vec![LaunchCmd::Launch { clip, release: true }, LaunchCmd::Stop(NONE)]);
     live.send(Cmd::Launcher(LaunchCmd::Launch { clip, release: false }));
     live.run_to(9600);
     assert_eq!(on_keys(&log_take()), vec![(60, 4800)]);
-    // An empty map turns the grid off.
     ctl.command("setLaunchGrid", &json!({ "device": null, "channel": null, "notes": {} }), &live.session).unwrap().unwrap();
     feed("Pads", &[0x90, 36, 100]);
     live.run_to(14_400);
     assert_eq!(ons_of(&log_take(), 36).len(), 1);
     assert!(ctl.tick(&live.session, &out).is_empty());
 }
-
-// ── Model edits, render, real-time safety ────────────────────────────────
 
 #[test]
 fn session_entity_prunes_launch_clips_and_stops_them() {

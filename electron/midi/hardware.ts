@@ -1,18 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// MIDI hardware runtime (main process), Wave 12.2b (docs/ENGINE_PROTOCOL.md §14):
-// MIDI outputs, clock out, sync in and grid-controller LEDs.
-//
-//   settings.midiOut / launchGrid ─▶ this ─NDJSON─▶ engine: setMidiOutputs, setMidiClock,
-//                                                   setMidiSync, midiSend (LEDs)
-//   engine `launcherState` / doc changes ─▶ LED map (shared/live/gridLeds.ts) ─▶ only the changes
-//   engine `midiSync` (stopped) ─▶ transport.set (the external tempo, one undo step) when enabled
-//   engine `midiOutputs` ─▶ renderer list
-//
-// The engine owns the ports; this decides which are open (the user's, the
-// clock ports, the grid-LED port) and what the grid shows. Everything is
-// re-sent after an engine (re)start.
-// ──────────────────────────────────────────────────────────────────────
-
 import { USER, type DocHost, type DocChange } from '@shared/doc/DocHost';
 import type { ActionResult, MidiOutSettings, Settings } from '@shared/types';
 import type { EngineEvent, LauncherLedState, MidiClockReply, MidiInputInfo, MidiOutputInfo } from '@shared/engine/protocol';
@@ -33,7 +18,6 @@ export interface HardwareDeps {
 }
 
 const TIMEOUT_MS = 6000;
-/** Coalesce doc edits / launcher changes into one LED update. */
 const LED_DEBOUNCE_MS = 15;
 
 const flat = (m: LedMap): number[][] => Object.values(m).flat();
@@ -85,7 +69,6 @@ export class HardwareController {
     this.ledTimer = null;
   }
 
-  /** Wait for queued engine pushes (tests, IPC replies). */
   settle(): Promise<unknown> {
     return this.chain;
   }
@@ -100,9 +83,6 @@ export class HardwareController {
     return this.d.engine.status().state === 'running';
   }
 
-  // ── Engine sync ────────────────────────────────────────────────────
-
-  /** After every engine (re)start: the engine forgot ports, clock, sync and LEDs. */
   private async sync(): Promise<void> {
     this.openKey = '';
     this.clockKey = '';
@@ -116,10 +96,9 @@ export class HardwareController {
     await this.apply();
   }
 
-  /** Push whatever changed: open set, clock, sync, LEDs. */
   private async apply(): Promise<void> {
     if (!this.running()) return;
-    await this.handOver(); // before the open set changes: the old LED port is still open
+    await this.handOver();
     await this.pushOutputs();
     await this.pushClock();
     await this.pushSync();
@@ -172,8 +151,6 @@ export class HardwareController {
     return r;
   }
 
-  // ── Grid LEDs ──────────────────────────────────────────────────────
-
   private scheduleLeds(): void {
     if (this.ledTimer) return;
     this.ledTimer = setTimeout(() => {
@@ -182,7 +159,6 @@ export class HardwareController {
     }, LED_DEBOUNCE_MS);
   }
 
-  /** The LED port changes: hand the old one back (LEDs off, + Live mode on a Launchpad). Returns true on a change. */
   private async handOver(): Promise<boolean> {
     const port = resolveLedOutput(launchGridSettings(this.d.getSettings()), this.outputs);
     if (port === this.ledPort) return false;
@@ -197,11 +173,10 @@ export class HardwareController {
     return true;
   }
 
-  /** Send the LED changes (programmer mode first on a new port / layout). */
   private async updateLeds(): Promise<void> {
     if (!this.running()) return;
     const gs = launchGridSettings(this.d.getSettings());
-    if (await this.handOver()) await this.pushOutputs(); // the LED port joins (or leaves) the open set
+    if (await this.handOver()) await this.pushOutputs();
     const port = this.ledPort;
     if (!port || !this.isOpen(port)) return;
     const map = ledMap(gs, gridView(this.d.doc.project, gs, this.launcher));
@@ -209,7 +184,7 @@ export class HardwareController {
     const messages: number[][] = [];
     let atClose: number[][] | undefined;
     if (initKey !== this.ledInitKey) {
-      if (this.ledSent) messages.push(...flat(ledOff(this.ledSent))); // the previous layout's controls
+      if (this.ledSent) messages.push(...flat(ledOff(this.ledSent)));
       this.ledSent = null;
       if (gs.layout === 'launchpad') messages.push(...launchpadProgrammerMode(this.name(port), true));
       atClose = [...flat(ledOff(map)), ...(gs.layout === 'launchpad' ? launchpadProgrammerMode(this.name(port), false) : [])];
@@ -233,19 +208,16 @@ export class HardwareController {
     return this.outputs.find((o) => o.id === id)?.name ?? id;
   }
 
-  /** The LED output in use (null = none), for the grid popover. */
   ledOutput(): { port: string | null; open: boolean } {
     const port = resolveLedOutput(launchGridSettings(this.d.getSettings()), this.outputs);
     return { port, open: port ? this.isOpen(port) : false };
   }
 
-  // ── Engine events ──────────────────────────────────────────────────
-
   private onEngineEvent(e: EngineEvent): void {
     switch (e.event) {
       case 'midiOutputs':
         this.setOutputs(Array.isArray(e.outputs) ? e.outputs : []);
-        this.queue(() => this.apply()); // a hot-plugged grid / clock port may pair now
+        this.queue(() => this.apply());
         break;
       case 'launcherState':
         this.launcher = { playing: e.playing ?? {}, queued: e.queued ?? {}, overridden: e.overridden ?? [], recording: !!e.recording };
@@ -273,8 +245,6 @@ export class HardwareController {
     else this.d.log('warn', `Couldn't write the external tempo into the project: ${r.message ?? 'unknown error'}`);
   }
 
-  // ── API (IPC / MCP) ────────────────────────────────────────────────
-
   async listOutputs(): Promise<ActionResult<MidiOutputInfo[]>> {
     if (!this.running()) return { ok: false, message: "The audio engine isn't running" };
     const r = await this.d.engine.request<MidiOutputInfo[]>({ cmd: 'listMidiOutputs' }, TIMEOUT_MS);
@@ -285,7 +255,6 @@ export class HardwareController {
     return r;
   }
 
-  /** MIDI inputs (for midi_setup); the engine rescans. */
   listInputs(): Promise<ActionResult<MidiInputInfo[]>> {
     if (!this.running()) return Promise.resolve({ ok: false, message: "The audio engine isn't running" });
     return this.d.engine.request<MidiInputInfo[]>({ cmd: 'listMidiInputs' }, TIMEOUT_MS);
@@ -330,7 +299,6 @@ export class HardwareController {
   }
 }
 
-/** Does a doc change move what the grid shows (session, tracks, clip colours)? */
 function touchesGrid(c: DocChange): boolean {
   if (c.kind === 'reset') return true;
   for (const p of c.patches) {

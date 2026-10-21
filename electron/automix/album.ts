@@ -1,30 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Album mastering + Export all (research/23 §2). Runs inside the Auto Mix
-// service's job slot (one job at a time, Cancel, progress, the tab guard).
-//
-//   1. read every file (sample info: length, rate) — nothing changes yet
-//   2. a NEW project tab "Album: <first> + N": every song on its own track
-//      and insert, back to back on bars with a 2-bar gap and a marker per
-//      song; the master is emptied (history entry 1: the songs)
-//   3. measure each song (a render of its range, the mix only), one song at
-//      a time: never all songs in memory
-//   4. album targets (shared/automix/album.ts): loudness per song (keep the
-//      dynamics, ≤ 4 LU under the loudest, or all on target) and tone per
-//      song (the album curve + half the album's shared character + a
-//      quarter of the song's own)
-//   5. ONE history group (entry 2: the mastering): a safety true-peak
-//      limiter on the master, then the existing planner's master chain on
-//      EACH song's insert (tone EQ, glue, warmth, imager with mono lows,
-//      clipper for loud targets, limiter last), refined with at most 3
-//      passes where every song still off target is rendered once per pass
-//   6. Cancel / failure rolls the mastering back; the album tab keeps the
-//      songs as they were (and says so)
-//
-// Export all renders each song's range (its audio, through its chain and
-// the safety limiter) to "<song> (mastered).wav|mp3": a .partial file
-// renamed into place, never overwriting anything.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import type { Actor } from '@shared/doc/DocHost';
 import { MP3_BITRATES, type ActionResult, type Mp3Kbps } from '@shared/types';
@@ -54,12 +27,10 @@ import { publicMeasure, type MeasureFn } from './measure';
 import { dirExists, listDir, renameDir } from '../system/download';
 import { removeFile } from '../system/files';
 
-/** What an album job gets from the service. */
 export interface JobCtx {
   deps: MainDeps;
   measure: MeasureFn;
   signal: AbortSignal;
-  /** Throws (cancelled) once Cancel was pressed. */
   check(): void;
   say(stage: AutoMixStage, within: number, message: string): void;
   understand(prompt: string, useAi?: 'auto' | 'never'): Promise<ActionResult<AutoMixIntent>>;
@@ -96,10 +67,8 @@ interface SongState {
   done: boolean;
 }
 
-/** The whole album run (see the header). */
 export async function masterAlbumImpl(ctx: JobCtx, req: AlbumRequest, actor: Actor): Promise<ActionResult<AlbumOutcome>> {
   const deps = ctx.deps;
-  // ── 0. The list
   const paths = (Array.isArray(req.paths) ? req.paths : []).map((p) => String(p ?? '').trim()).filter(Boolean);
   if (paths.length < ALBUM_MIN_SONGS) return fail(`Pick at least ${ALBUM_MIN_SONGS} songs for an album (for one song, use Master a song).`);
   if (paths.length > ALBUM_MAX_SONGS) return fail(`An album takes up to ${ALBUM_MAX_SONGS} songs (you picked ${paths.length}): master it in two parts.`);
@@ -114,7 +83,6 @@ export async function masterAlbumImpl(ctx: JobCtx, req: AlbumRequest, actor: Act
   if (!deps.project.newProject) return fail("A new project can't be opened from here, so the album has nowhere to go.");
   if (!deps.project.opensNewTabs?.() && deps.project.status().dirty) return fail('The open project has unsaved changes: save it first (the album opens as a new project).');
 
-  // ── 1. Read the files (nothing changes yet)
   const n = paths.length;
   const infos: Array<{ frames: number; sampleRate: number; channels: number }> = [];
   try {
@@ -149,7 +117,6 @@ export async function masterAlbumImpl(ctx: JobCtx, req: AlbumRequest, actor: Act
     return fail('Cancelled: nothing was changed.');
   }
 
-  // ── 2. The album tab (history entry 1)
   const names = paths.map(songNameFromPath);
   const title = albumName(names).slice(0, 64);
   const np = deps.project.newProject();
@@ -199,7 +166,6 @@ export async function masterAlbumImpl(ctx: JobCtx, req: AlbumRequest, actor: Act
     doc.endGroup(gid);
   }
 
-  // ── 3-6. Measure, plan, apply, refine (history entry 2)
   let group: string | null = null;
   const rollback = (): boolean => {
     if (!group) return true;
@@ -242,7 +208,6 @@ export async function masterAlbumImpl(ctx: JobCtx, req: AlbumRequest, actor: Act
     const lufsBase = isNum(req.targetLufs) ? req.targetLufs : intent?.targetLufs ?? preset.targetLufs + (intent?.louder ?? 0);
     const target = { lufs: clampLufs(lufsBase), truePeak: clampTp(isNum(req.truePeak) ? req.truePeak : preset.truePeak) };
     if (autoPicked && !ref && !isNum(req.targetLufs) && intent?.targetLufs === undefined && !intent?.louder) {
-      // the album's loudest song sets it: Auto never turns the record down
       const keepLoud = autoKeepsLoudness(target.lufs, Math.max(...beforeLufs));
       if (keepLoud) {
         target.lufs = clampLufs(keepLoud.lufs);
@@ -283,7 +248,6 @@ export async function masterAlbumImpl(ctx: JobCtx, req: AlbumRequest, actor: Act
       chain: (id) => factoryChainPresets().find((c) => c.id === id) ?? null,
     };
     const albumChanges: AutoMixChange[] = [];
-    // The master keeps only a safety true-peak limiter (not Krypt-marked: a later Auto Master treats it as yours).
     if (doc.catalog.plugins.some((x) => x.id === 'krypt.limiter')) {
       io.exec('mixer.addSlot', { insertId: doc.project.mixer.masterId, type: 'krypt.limiter', params: { inputGain: 0, ceiling: target.truePeak, release: 100, truePeak: 1 } });
       albumChanges.push({ target: 'Master ▸ Krypt Limiter', what: `safety true-peak limiter at ${fmtDb(target.truePeak)} dBTP (each song has its own chain)` });
@@ -335,7 +299,6 @@ export async function masterAlbumImpl(ctx: JobCtx, req: AlbumRequest, actor: Act
         if (meetsTargets({ ...input(i), measure: s.cur }).ok) s.done = true;
       }
     }
-    // Safety: no song over the ceiling.
     for (let i = 0; i < n; i++) {
       const s = songs[i];
       if (!s.edits || s.cur!.master.truePeak <= target.truePeak + 0.05) continue;
@@ -364,7 +327,6 @@ export async function masterAlbumImpl(ctx: JobCtx, req: AlbumRequest, actor: Act
     group = null;
     ctx.say('done', 1, 'Done.');
 
-    // ── The result
     const out: AlbumSong[] = songs.map((s, i) => ({
       name: s.name,
       path: s.path,
@@ -424,11 +386,8 @@ export async function masterAlbumImpl(ctx: JobCtx, req: AlbumRequest, actor: Act
   }
 }
 
-// ── Export all ────────────────────────────────────────────────────────
-
 const FORMAT_LABEL = { wav24: '24-bit WAV', wav16: '16-bit WAV', mp3: 'MP3' } as const;
 
-/** One file per song (its range of the open album tab), into a folder. */
 export async function exportAlbumImpl(ctx: JobCtx, req: AlbumExportRequest): Promise<ActionResult<AlbumExportOutcome>> {
   const deps = ctx.deps;
   const folder = String(req.folder ?? '').trim();
@@ -439,7 +398,6 @@ export async function exportAlbumImpl(ctx: JobCtx, req: AlbumExportRequest): Pro
   const ext = format === 'mp3' ? 'mp3' : 'wav';
   const list = Array.isArray(req.songs) ? req.songs.slice(0, ALBUM_MAX_SONGS) : [];
   if (!list.length) return fail('There are no songs to export: master an album first.');
-  // The ranges must be the open tab's songs: an audio clip starts at each one.
   const p = deps.doc.project;
   const clips = Object.values(p.playlist.clips).filter((c) => c.kind === 'audio');
   const jobs: Array<{ name: string; start: number; end: number }> = [];

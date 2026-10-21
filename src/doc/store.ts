@@ -1,16 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Renderer-side READ REPLICA of the project document.
-// Truth lives in Electron main (DocHost). We hold a copy, kept in sync by
-// applying the exact Immer patches main broadcasts. Every mutation goes
-// through dispatch() → window.krypt.doc.exec → DocHost → patches come back.
-//
-// Usage:
-//   const bpm = useProject((p) => p.transport.bpm);
-//   const ids = useProject((p) => p.channelOrder);          // stable ref, fine
-//   const pair = useProject(useShallow((p) => [p.a, p.b])); // NEW objects → useShallow!
-//   await dispatch('notes.add', {...});
-// ──────────────────────────────────────────────────────────────────────
-
 import { create } from 'zustand';
 import { applyPatches, enablePatches } from 'immer';
 import type { Project } from '@shared/schema/project';
@@ -23,7 +10,6 @@ interface DocState {
   project: Project | null;
   version: number;
   ready: boolean;
-  /** Last change summary (for status bar / agent activity flashes). */
   lastChange: { label: string; actorKind: string; actorName: string; time: number } | null;
 }
 
@@ -58,7 +44,6 @@ function onPatches(m: DocPatchMessage): void {
   }
 }
 
-/** Start syncing (idempotent). Call once at app start; returns when the first snapshot is in. */
 export async function startDocSync(): Promise<void> {
   if (started) return;
   started = true;
@@ -67,12 +52,10 @@ export async function startDocSync(): Promise<void> {
   await resync();
 }
 
-/** Select from the project. Only call under a component tree gated on `ready`. */
 export function useProject<T>(selector: (p: Project) => T): T {
   return useDocStore((s) => selector(s.project as Project));
 }
 
-/** Imperative read (event handlers, canvas painters). */
 export function getProject(): Project {
   return useDocStore.getState().project as Project;
 }
@@ -80,12 +63,10 @@ export function getProject(): Project {
 type ErrorHandler = (cmd: string, message: string) => void;
 let errorHandler: ErrorHandler = (cmd, message) => console.warn(`[dispatch] ${cmd}: ${message}`);
 
-/** The app shell installs a toast-based handler so no failure is ever silent. */
 export function setDispatchErrorHandler(fn: ErrorHandler): void {
   errorHandler = fn;
 }
 
-/** Run a document command (the only way the UI mutates the project). */
 export async function dispatch<T = unknown>(cmd: string, args: unknown, opts?: ExecOpts & { silent?: boolean }): Promise<ExecResult<T>> {
   let r: ExecResult<T>;
   try {
@@ -103,7 +84,6 @@ export async function dispatchBatch(steps: Array<{ cmd: string; args: unknown }>
   return r;
 }
 
-/** Wrap a multi-step gesture (drag, paint) into ONE undo step. */
 export async function withGroup<T>(label: string, fn: (groupId: string) => Promise<T>): Promise<T> {
   const groupId = await window.krypt.doc.beginGroup(label);
   try {

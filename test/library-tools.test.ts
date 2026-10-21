@@ -1,9 +1,3 @@
-// The reference-library MCP tools against a real DocHost + LibraryService
-// + the fake analyzer: plain-language failures without a library, the
-// Browser-root restriction of library_import, status / search / read /
-// profile / originality output, the focus in get_project and the
-// automatic originality warning on commit_edit, plus the focus prompt and
-// the krypt://styles resource in the server's discovery answers.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -40,7 +34,6 @@ function settings0(): Settings {
     browserRoots: [{ id: 'r1', name: 'Browser root', path: USER_ROOT }],
     recent: [],
     autosaveSec: 60,
-    // library_import's refusals below are the 'browser' File access mode.
     mcp: { enabled: true, httpEnabled: false, httpPort: 47800, requireConsentForDestructive: false, fileAccess: 'browser' },
     agent: { model: 'claude-opus-5-5', hasApiKey: false },
     discordRpc: false,
@@ -98,7 +91,6 @@ async function rig(opts: { library?: boolean; stems?: boolean; models?: boolean 
     shimExePath: null,
     log: () => {},
     library: opts.library === false ? undefined : svc,
-    // What library_deep reads to see whether a stem model is installed (MainDeps.analyzer.listModels).
     analyzer: opts.models ? ({ listModels: () => models.states() } as unknown as MainDeps['analyzer']) : undefined,
   };
   const caller: ToolCaller = { actor: { kind: 'agent', clientId: 'lib-agent', name: 'Lib Agent' }, session: newSession(), via: 'test' };
@@ -174,7 +166,7 @@ test('status, search, read_reference, style profile, originality; focus in get_p
     const imp = await r.call('library_import', { folder: SONGS, collection: 'My beats' });
     assert.equal(imp.ok, true, imp.message);
     const c = r.svc.collections()[0];
-    const deep = await r.svc.setDeep(c.id, true); // the user's choice (UI), never an agent's
+    const deep = await r.svc.setDeep(c.id, true);
     assert.equal(deep.ok, true, deep.message);
     await idle(r.svc);
 
@@ -212,7 +204,6 @@ test('status, search, read_reference, style profile, originality; focus in get_p
     assert.equal(prof.ok, true, prof.message);
     assert.match(prof.text!, /STYLE PROFILE "My beats"/);
 
-    // The user sets a focus (UI): agents see it everywhere.
     await r.svc.setFocus({ collectionId: c.id, brief: 'dark and sparse' });
     const pf = await r.call('get_style_profile');
     assert.equal(pf.ok, true, pf.message);
@@ -224,7 +215,6 @@ test('status, search, read_reference, style profile, originality; focus in get_p
     const st2 = await r.call('library_status');
     assert.match(st2.text!, /Focus: "My beats" — brief: "dark and sparse"/);
 
-    // An agent writes the reference vocal melody (transposed) inside an edit group → commit_edit warns.
     const melody: Array<[number, number, number]> = [[0, 1, 62], [1, 0.5, 65], [1.5, 0.5, 69], [2, 1, 67], [3, 1.5, 64], [4.5, 0.5, 72], [5, 1, 70], [6, 0.5, 65], [6.5, 0.5, 67], [7, 1, 62], [8, 1, 69], [9, 2, 60]];
     assert.equal((await r.call('begin_edit', { label: 'Hook' })).ok, true);
     const add = await r.call('add_notes', { channel: 'Keys', notes: melody.map(([b, d, k]) => ({ key: k + 5, tick: b * 960, dur: d * 960 })) });
@@ -241,7 +231,6 @@ test('status, search, read_reference, style profile, originality; focus in get_p
     assert.match(co.message, /checked against 2 deep-analysed references: \d+ match/);
     assert.match(co.text!, /legal advice/i);
 
-    // A group that writes nothing melodic: no check, no warning.
     await r.call('begin_edit', { label: 'Tempo' });
     await r.call('set_tempo', { bpm: 141 });
     const c2 = await r.call('commit_edit');
@@ -252,7 +241,6 @@ test('status, search, read_reference, style profile, originality; focus in get_p
 });
 
 test('library_deep: refused without an installed stem model (never a download); with one, the estimate first, then queued', async () => {
-  // No stem model, the Model Manager visible to the tool: refused before anything starts.
   const a = await rig({ stems: false, models: true });
   try {
     const imp = await a.call('library_import', { folder: SONGS, collection: 'Deep test' });
@@ -265,7 +253,6 @@ test('library_deep: refused without an installed stem model (never a download); 
   } finally {
     await a.close();
   }
-  // No stem model and no model list for the tool: the library itself refuses, the agent gets the same advice.
   const b = await rig({ stems: false });
   try {
     await b.call('library_import', { folder: SONGS, collection: 'Deep test' });
@@ -276,7 +263,6 @@ test('library_deep: refused without an installed stem model (never a download); 
   } finally {
     await b.close();
   }
-  // With the stem model installed: estimate_only reports, then deep turns on with the estimate in the message.
   const c = await rig({ models: true });
   try {
     await c.call('library_import', { folder: SONGS, collection: 'Deep test' });

@@ -1,8 +1,3 @@
-// auto_mashup (research/18-auto-mashup.md): two songs → one mashup in ONE
-// call and one undo step, the same service as Home ▸ Audio Tools ▸ Auto
-// Mashup (electron/mashup). dry_run = the check only (plan, score, reasons,
-// suggestions, problems; no edits, no separation).
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import type { MashupCheck, MashupOutcome, MashupPlanSummary, MashupRequest, MashupSource } from '@shared/mashup/types';
@@ -16,7 +11,6 @@ import { findAudioClip } from './ears';
 const zSide = z.enum(['a', 'b']).nullable();
 const zFactor = z.union([z.literal(1), z.literal(0.5), z.literal(2)]);
 
-/** A path → a file source (File access checked by callTool + agentSamplePath); else an audio clip / channel name. */
 function sourceOf(deps: MainDeps, caller: ToolCaller, ref: string, which: string): MashupSource {
   const r = ref.trim();
   if (!r) fail(`${which} is empty: pass a file path or an audio clip / track name.`);
@@ -85,7 +79,6 @@ export const autoMashup = defineTool({
   }),
   summarize: (a) => `${safeName(a.a.split(/[\\/]/).pop() ?? a.a, 30)} × ${safeName(a.b.split(/[\\/]/).pop() ?? a.b, 30)}${a.dry_run ? ' (check)' : ''}`,
   paths: (a) => [a.a, a.b].filter((x) => looksLikePath(x)).map((value) => ({ value, kind: 'audio' as const })),
-  // dry_run edits nothing, and a new project is a reset (no patches of this call's own): never a "No change".
   readsWhenUnchanged: true,
   async run(deps, caller, a, ctx): Promise<ToolResult> {
     if (!deps.analyzer) fail("Audio analysis isn't available in this session (the analyzer didn't start; see the Krypt Studio log), so the songs can't be read.");

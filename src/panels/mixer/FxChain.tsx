@@ -1,7 +1,3 @@
-// FX chain for the selected insert: up to 10 slots with bypass, mix, open
-// editor, remove, drag-reorder, and a sidechain source picker on effects
-// that have a sidechain input. Plus the insert's routing summary.
-
 import { useRef, useState } from 'react';
 import { GripVertical, Layers, Plus, X } from 'lucide-react';
 import { EFFECTS, pluginById } from '@shared/plugins/catalog';

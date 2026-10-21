@@ -1,9 +1,3 @@
-// comp_takes (Wave 12.2b): take lanes + comping for agents. Loop recording in
-// song mode makes a take group (shared/schema/takes.ts); this tool lists the
-// groups and edits their comp through the takes.* commands: pick takes per
-// bar range (swipe-comp), use a whole take, silence ranges, set the
-// crossfade, delete a take, rename the group, flatten. Every call is one undo step (the call's group).
-
 import { z } from 'zod';
 import type { Project } from '@shared/schema/project';
 import { orderedTakes, takeGroupsOnTrack, type TakeGroup } from '@shared/schema/takes';
@@ -13,7 +7,6 @@ import { findTrack, fmtPos, parseBarRange, parsePosition, plural, round, safeNam
 
 const zLabel = z.string().max(80).optional().describe("Short description of this change for the user's AI-history panel.");
 
-/** [a, b) in words: "bar 3", "bars 3–4" (inclusive, when on bar lines), else "3.9 to 5" (positions, end exclusive). */
 export function fmtRange(p: Project, a: number, b: number): string {
   const ts = p.transport.timeSig;
   const bar = ticksPerBar(ts);
@@ -25,7 +18,6 @@ export function fmtRange(p: Project, a: number, b: number): string {
   return `${fmtPos(a, ts)} to ${fmtPos(b, ts)}`;
 }
 
-/** One human line per take group. */
 export function describeTakeGroup(p: Project, g: TakeGroup): string {
   const track = p.playlist.tracks[g.trackId]?.name ?? '?';
   const takes = orderedTakes(g);

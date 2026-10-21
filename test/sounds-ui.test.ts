@@ -1,7 +1,3 @@
-// Preset / sound-library renderer logic (src/sounds/logic.ts): the preset
-// browser's search + role grouping (chains: master first on the master),
-// prev/next cycling, the preset bar's "modified" detection, the drag
-// payload, factory sample folders, Save dialog defaults and Browser roots.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import type { ParamSpec } from '@shared/plugins/types';
@@ -73,8 +69,6 @@ const PRESETS: PresetSummary[] = [
   chain('factory:chain/reverbSend/hall', 'Big Hall', 'reverbSend', { tags: ['long'] }),
   chain('user:chain/my-bus', 'My Bus', 'drumBus'),
 ];
-
-// ── Search + grouping ────────────────────────────────────────────────
 
 test('groupPresets: role order, empty roles dropped, your presets first, natural name order', () => {
   const g = groupPresets(PRESETS, { kind: 'instrument' });
@@ -167,8 +161,6 @@ test('tagCounts: most used first', () => {
   assert.equal(t[0].count, 2);
 });
 
-// ── Prev / next ───────────────────────────────────────────────────────
-
 test('cycling: same plugin only, browser order, wraps both ways', () => {
   const list = cycleList(PRESETS, 'krypt.wavetable');
   assert.deepEqual(
@@ -190,8 +182,6 @@ test('cycling: from no preset (or one of another plugin) next = first, previous 
   const one = cycleList(PRESETS, 'krypt.fm');
   assert.equal(cyclePreset(one, 'factory:lead/glass-lead', 1)?.id, 'factory:lead/glass-lead', 'a single preset cycles to itself');
 });
-
-// ── Modified detection ────────────────────────────────────────────────
 
 const SPECS: ParamSpec[] = [
   { id: 'cutoff', name: 'Cutoff', min: 20, max: 20000, default: 8000, unit: 'Hz', scale: 'log' },
@@ -249,8 +239,6 @@ test('modified: without specs, the union of both param maps is compared as-is', 
   assert.deepEqual(changedParams({ ...cur, params: { cutoff: 1200 } }, PRESET), ['wave']);
 });
 
-// ── Drag payload ──────────────────────────────────────────────────────
-
 test('drag payload: round-trips id, kind and name; anything else is null', () => {
   assert.equal(PRESET_MIME, 'application/x-krypt-preset');
   for (const p of PRESETS) assert.deepEqual(decodePresetDrag(encodePresetDrag(p)), { id: p.id, kind: p.kind, name: p.name });
@@ -263,8 +251,6 @@ test('drag payload: round-trips id, kind and name; anything else is null', () =>
   assert.equal(decodePresetDrag(JSON.stringify({ id: 'user:x', kind: 'sample', name: 'x' })), null);
   assert.deepEqual(decodePresetDrag(JSON.stringify({ id: 'user:x', kind: 'chain' })), { id: 'user:x', kind: 'chain', name: 'user:x' }, 'missing name falls back to the id');
 });
-
-// ── Factory samples ───────────────────────────────────────────────────
 
 const sample = (path: string, name: string, kind: FactorySample['kind'], extra: Partial<FactorySample> = {}): FactorySample => ({
   path,
@@ -320,8 +306,6 @@ test('factory samples: root note for tonal sounds (C4 = MIDI 60), bars for synce
   assert.equal(sampleDetail({}), '');
 });
 
-// ── Save dialogs ──────────────────────────────────────────────────────
-
 test('save: tags are parsed lower-case and unique; names are validated', () => {
   assert.deepEqual(parseTagList('dark, Wide ,, pluck,dark;  big   room '), ['dark', 'wide', 'pluck', 'big room']);
   assert.deepEqual(parseTagList(''), []);
@@ -353,8 +337,6 @@ test('save chain: the role is guessed from the insert name', () => {
   assert.equal(guessChainRole('Insert 3', false), 'character');
 });
 
-// ── Home ▸ Sounds + Browser roots ─────────────────────────────────────
-
 test('counts: presets by source and kind, factory samples', () => {
   assert.deepEqual(soundsCounts(PRESETS, SAMPLES), { factoryPresets: 10, userPresets: 2, instrumentPresets: 8, chainPresets: 4, factorySamples: 5 });
   assert.equal(soundsCounts([], null).factorySamples, 0);
@@ -374,8 +356,6 @@ test('Add to Browser: appends once; the same folder in another case or with slas
   assert.equal(folderName('C:\\a\\b\\'), 'b');
   assert.equal(folderName('D:'), 'D:');
 });
-
-// ── Against the shipped factory data ─────────────────────────────────
 
 test('factory presets: every one lands in a labelled group and drags as a valid payload', () => {
   const summaries = FACTORY_PRESETS.map(summarizePreset);

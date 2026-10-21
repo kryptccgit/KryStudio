@@ -1,6 +1,3 @@
-// Release hygiene: the licence policy evaluator used by the CI gate, and the
-// shipped demo project (resources/demos/*.kstudio) still opening cleanly
-// against the current schema, catalog and command layer.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +11,6 @@ import { isOfficialDestination, resolveClientContext } from '../electron/system/
 // @ts-expect-error plain .mjs helper without type declarations
 import { evaluateLicense, spdxDnf } from '../scripts/lib/deps.mjs';
 
-// Bundled to test/.out/*.mjs by scripts/run-tests.mjs, so the repo root is two levels up.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 test('licence policy: permissive passes, copyleft fails, choices pick MIT', () => {

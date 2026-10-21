@@ -1,4 +1,3 @@
-// Start here (step by step) · 6: set up AI (Claude Code, Claude Desktop, Cursor, VS Code, or the built-in chat).
 import type { GuideArticle } from '../articles';
 
 export const AI_SETUP: GuideArticle = {

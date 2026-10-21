@@ -1,4 +1,3 @@
-// Techno: driving four-on-the-floor, rumbling bass, hypnotic sequences developed by automation.
 import type { Playbook } from './types';
 
 export const TECHNO: Playbook = {

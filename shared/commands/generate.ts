@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// notes.generate: the MIDI generators (shared/music/generate) written into
-// one channel of a pattern as ONE undo step. Scale-aware (the given key, else
-// the key the pattern's notes are in, else the project's), seeded (same seed
-// = same notes; another seed = another take), and range-aware: it replaces
-// the selected notes, or the channel's notes in a bar range, or merges.
-// planGenerate() is pure, so the piano roll previews and draws the
-// Variations thumbnails with exactly what Apply will write.
-// ──────────────────────────────────────────────────────────────────────
-
 import { z } from 'zod';
 import { defineCommand, must, CommandError } from './types';
 import { defaultNote, patternLength, type Note, type Project } from '../schema/project';
@@ -28,20 +18,16 @@ import {
   type GeneratorKind,
 } from '../music/generate';
 
-/** Channels whose keys are not pitches (drum synth pads, audio clips). */
 const UNPITCHED = new Set(['krypt.drumsynth', 'krypt.audioclip']);
 
 export const GENERATE_ARGS = z.object({
   patternId: z.string(),
   channelId: z.string(),
-  /** The selection: replaced in mode "replace", and the default bar range. */
   ids: z.array(z.string()).max(20000).optional(),
   kind: z.enum(GENERATOR_KINDS),
   options: z.record(z.string(), z.unknown()).default({}),
   seed: z.number().int().min(0).max(0xffffffff).default(1),
-  /** Key to stay in; omitted = the pattern's key (from its notes), else the project's, else A minor. */
   key: z.object({ root: z.number().int().min(0).max(11), scale: z.string() }).optional(),
-  /** Bars to fill (1-based); omitted = the selection's bars, else the whole pattern. */
   range: z.object({ fromBar: z.number().int().min(1).max(4096), bars: z.number().int().min(1).max(256) }).optional(),
   mode: z.enum(['replace', 'merge']).default('replace'),
 });
@@ -64,7 +50,6 @@ function pitchedNotes(p: Project, patternIds: string[]): Note[][] {
       const ch = p.channels[chId];
       if (!ch || UNPITCHED.has(ch.generator.type)) continue;
       const notes = Object.values(byId).filter((n) => !n.mute);
-      // one-shot drum samples sit on one key: no harmony in them
       if (ch.generator.type === 'krypt.sampler' && new Set(notes.map((n) => n.key)).size < 3) continue;
       if (notes.length) out.push(notes);
     }
@@ -85,7 +70,6 @@ function keyFrom(channels: Note[][], minNotes: number): GenKey | null {
   return k ? { root: k.root, scale: k.scale } : null;
 }
 
-/** The key a generator stays in when none is given: the pattern's notes, else the project's, else A minor. */
 export function guessKey(p: Project, patternId?: string | null): KeyGuess {
   const fromPat = patternId ? keyFrom(pitchedNotes(p, [patternId]), 6) : null;
   if (fromPat) return { key: fromPat, source: 'pattern', name: keyName(fromPat) };
@@ -95,7 +79,6 @@ export function guessKey(p: Project, patternId?: string | null): KeyGuess {
   return { key: def, source: 'default', name: keyName(def) };
 }
 
-/** The chords already written in a pattern (every pitched channel). */
 export function patternChords(p: Project, patternId: string): ChordEvent[] {
   return detectChords(pitchedNotes(p, [patternId]));
 }
@@ -103,9 +86,7 @@ export function patternChords(p: Project, patternId: string): ChordEvent[] {
 export interface GeneratePlan {
   kind: GeneratorKind;
   seed: number;
-  /** New notes (pattern ticks), without ids. */
   notes: Array<Omit<Note, 'id'>>;
-  /** Existing note ids the generated notes replace. */
   remove: string[];
   key: GenKey;
   keySource: KeyGuess['source'];
@@ -114,9 +95,7 @@ export interface GeneratePlan {
   chords?: string[];
   chordSource?: 'pattern' | 'progression' | 'none';
   detail: string;
-  /** Generated notes left out because an identical note (same start and key) stays. */
   skipped: number;
-  /** New pattern length when the range runs past a fixed-length pattern. */
   extendTo: number | null;
 }
 
@@ -128,7 +107,6 @@ const EMPTY_HINT: Record<GeneratorKind, string> = {
   bass: 'try another rhythm or a longer bar range',
 };
 
-/** Everything notes.generate would do, without touching the project. Throws CommandError. */
 export function planGenerate(d: Project, a: Args, flags: { allowSame?: boolean } = {}): GeneratePlan {
   const pat = must(d.patterns[a.patternId], `Pattern ${a.patternId} not found`);
   const ch = must(d.channels[a.channelId], `Channel ${a.channelId} not found`);

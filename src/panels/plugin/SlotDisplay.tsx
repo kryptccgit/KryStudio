@@ -1,8 +1,3 @@
-// The live display section of an FX slot's window (docs/ENGINE_PROTOCOL.md §15):
-// Krypt EQ → response curve with handles + live spectrum, Krypt Analyzer →
-// spectrum / scope / loudness, Krypt Gate/Time → custom steps editor + its
-// meter, dynamics effects → gain-reduction meter.
-
 import type { ReactNode } from 'react';
 import { hasGrMeter } from '@shared/engine/meters';
 import { AnalyzerDisplay } from './AnalyzerDisplay';

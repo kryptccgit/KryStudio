@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// "More like this" in the Browser (research/13 §12.1): the sounds closest
-// to one sample or preset by timbre, from window.krypt.sounds.similar.
-// Sample rows preview / drag / double-click like Browser rows; preset rows
-// drag / double-click like preset rows; both can be loaded onto the
-// selected channel. "Same kind" (a kick finds kicks) or "Any kind". While
-// installed pack sounds are still being measured, main is asked again
-// (each round ranks what is ready), with a Stop button. Failures toast.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, FileAudio, Loader2, Replace, ScanSearch, Square, SwatchBook } from 'lucide-react';
 import type { BrowserEntry, SimilarItem, SimilarResult } from '@shared/types';
@@ -25,7 +15,6 @@ import { kindName, measuringText, shouldMeasureMore, similarItemKey, sourceKindT
 
 type Scope = 'same' | 'any';
 
-/** Load a result onto the selected channel (a sample replaces the channel's sample; a preset its sound). */
 async function loadOntoSelected(i: SimilarItem): Promise<void> {
   const chId = effectiveChannelId();
   const ch = chId ? getProject().channels[chId] : null;
@@ -53,7 +42,6 @@ export function SimilarList({
   previewing: string | null;
   selected: string | null;
   onSelect: (key: string) => void;
-  /** The Browser's row click: select + preview (click again to stop). */
   onClickSample: (e: BrowserEntry) => void;
 }) {
   const [scope, setScope] = useState<Scope>('same');

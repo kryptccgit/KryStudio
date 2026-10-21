@@ -1,12 +1,9 @@
-// Instruments made of the transcribed audio (electron/analyzer/fromSource.ts): every note gets its own SFZ region on
-// the source copy and a velocity that picks exactly that region, so the converted pattern replays the original.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { JOIN_SEC, MAX_HIT_SEC, PRE_SEC, SOURCE_WAV, TAIL_SEC, drumEvents, monoEvents, shareRegions, slotOf, sourceInstrument } from '../electron/analyzer/fromSource';
 
 type Region = { lokey: number; hikey: number; center: number; lovel: number; hivel: number; offset: number; end: number };
 
-/** Parse what we write: <group> key opcodes, then <region> velocity / range opcodes. */
 function parse(sfz: string): Region[] {
   const out: Region[] = [];
   let g: Record<string, number> = {};
@@ -21,7 +18,6 @@ function parse(sfz: string): Region[] {
   return out;
 }
 
-/** The region the engine plays for a note: key in range, round(vel × 127) (min 1) in lovel..hivel. */
 function play(regions: Region[], key: number, vel: number): Region[] {
   const v = Math.max(1, Math.round(vel * 127));
   return regions.filter((r) => key >= r.lokey && key <= r.hikey && v >= r.lovel && v <= r.hivel);
@@ -50,9 +46,7 @@ test('every note plays its own original audio; edited notes still find a recordi
     assert.equal(hit[0].offset, Math.round((n.startSec - PRE_SEC) * sr), `note ${i} plays its own start`);
     assert.equal(hit[0].end, Math.round(ev[i].untilSec * sr));
   });
-  // Quieter originals sit on lower slots.
   assert.ok(inst.vel[2] < inst.vel[0] && inst.vel[0] < inst.vel[4]);
-  // Key ranges cover 0..127 without overlap; any key and velocity finds exactly one region.
   for (let k = 0; k <= 127; k++) for (const v of [0, 0.2, 0.5, 0.78, 1]) assert.equal(play(regions, k, v).length, 1, `key ${k} vel ${v}`);
   assert.equal(play(regions, 37, 0.78)[0].center, 36, 'a transposed note plays the nearest recording, pitched');
   assert.equal(play(regions, 44, 0.5)[0].center, 48);
@@ -98,7 +92,6 @@ test('drums: simultaneous hits merge into the loudest; each slice runs to the ne
 });
 
 test('crowded keys share regions by sound when timbres are known: a hit never borrows a different-sounding slice', () => {
-  // 400 hits of one drum: three sounds (a loop's kick, a ghost kick, a kick under a clap), loudness noisy.
   const kinds = [[0, -6, -20, -30, -40, -50], [-12, -10, -25, -35, -45, -55], [0, -6, -8, -10, -12, -20]];
   const events = Array.from({ length: 400 }, (_, i) => ({ startSec: i * 0.3, untilSec: i * 0.3 + 0.2 + (i % 5) * 0.01, key: 60, vel: ((i * 37) % 100) / 100 }));
   const kind = (i: number) => (i % 7 === 0 ? 2 : i % 3 === 0 ? 1 : 0);
@@ -107,11 +100,9 @@ test('crowded keys share regions by sound when timbres are known: a hit never bo
   assert.equal(groups.length, 127);
   assert.equal(groups.reduce((n, g) => n + g.members.length, 0), 400, 'every hit has a region');
   for (const g of groups) for (const m of g.members) assert.equal(kind(m), kind(g.rep), `hit ${m} plays slice ${g.rep}`);
-  // Without timbres: velocity bands (each band's longest slice).
   const bands = shareRegions(events.map((_, i) => i), events);
   assert.equal(bands.length, 127);
   for (const g of bands) assert.ok(g.members.includes(g.rep));
-  // The instrument uses them: every event still finds exactly one region.
   const inst = sourceInstrument(events, { sampleRate: 48000, frames: 200 * 48000, name: 'k', features });
   const regions = parse(inst.sfz);
   events.forEach((_, i) => assert.equal(play(regions, 60, inst.vel[i]).length, 1));

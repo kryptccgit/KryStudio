@@ -1,9 +1,3 @@
-//! `--serve`: the long-running host. The process main thread is the
-//! plugins' UI/main thread (a Win32 message loop); every instance gets its
-//! own real-time audio thread (audio.rs). Commands arrive on stdin (a reader
-//! thread queues them and wakes the UI thread); responses and events go to
-//! stdout (wire.rs).
-
 use crate::win;
 use crate::wire;
 use krypt_studio_pluginclient::{b64, shm::Channel};
@@ -15,7 +9,6 @@ use std::sync::{Arc, Mutex};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{DefWindowProcW, WM_TIMER};
 
-/// Everything a format backend needs to create an instance.
 pub struct LoadArgs {
     pub inst: u64,
     pub chan: Arc<Channel>,
@@ -27,23 +20,17 @@ pub struct LoadArgs {
     pub realtime: bool,
 }
 
-/// A hosted plugin instance, owned by the UI thread.
 pub trait Hosted {
     fn name(&self) -> &str;
     fn has_editor(&self) -> bool;
     fn get_state(&mut self) -> Result<Vec<u8>, String>;
     fn set_state(&mut self, data: &[u8]) -> Result<(), String>;
     fn open_editor(&mut self, owner: HWND, title: &str) -> Result<(), String>;
-    /// Close the editor (user closed the container, or the engine asked).
     fn close_editor(&mut self);
     fn editor_open(&self) -> bool;
-    /// The user resized the container to a client size of `w`×`h`.
     fn editor_resized(&mut self, _w: u32, _h: u32) {}
     fn set_sample_rate(&mut self, sr: f64) -> Result<(), String>;
-    /// UI-thread housekeeping (≈ 60 Hz and on wake-ups): plugin callbacks,
-    /// GUI param edits → engine events, restarts, latency.
     fn tick(&mut self);
-    /// Stop audio, close the editor, destroy the plugin.
     fn shutdown(&mut self);
 }
 
@@ -210,7 +197,6 @@ impl Server {
             let was_open = h.editor_open();
             h.tick();
             if was_open && !h.editor_open() {
-                // The plugin closed its own (floating) window.
             }
         }
     }
@@ -223,8 +209,6 @@ impl Server {
     }
 }
 
-/// While the server is busy (a plugin call pumped messages re-entrantly),
-/// still answer pings: the UI thread IS alive.
 fn answer_pings_only() {
     let mut q = CMDS.lock().unwrap_or_else(|e| e.into_inner());
     q.retain(|v| {
@@ -272,7 +256,6 @@ unsafe extern "system" fn msg_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
 fn spawn_parent_watchdog(pid: u32) {
     use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
     use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE};
-    // SAFETY: plain Win32 calls with a checked handle.
     let h = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
     if h.is_null() {
         eprintln!("[pluginhost] parent {pid} is not running; exiting");
@@ -280,7 +263,6 @@ fn spawn_parent_watchdog(pid: u32) {
     }
     let h = h as usize;
     let _ = std::thread::Builder::new().name("parent-watchdog".into()).spawn(move || {
-        // SAFETY: handle stays open for the life of the process.
         let r = unsafe { WaitForSingleObject(h as windows_sys::Win32::Foundation::HANDLE, INFINITE) };
         if r == WAIT_OBJECT_0 {
             eprintln!("[pluginhost] engine {pid} exited; exiting");
@@ -291,8 +273,6 @@ fn spawn_parent_watchdog(pid: u32) {
 
 pub fn run(parent_pid: Option<u32>) -> i32 {
     win::init_dpi();
-    // Many plugin GUIs need OLE (drag and drop, clipboard) on the UI thread.
-    // SAFETY: called once on the UI thread before any window exists.
     unsafe {
         windows_sys::Win32::System::Ole::OleInitialize(std::ptr::null());
     }
@@ -320,10 +300,8 @@ pub fn run(parent_pid: Option<u32>) -> i32 {
                 Err(e) => wire::err(&Value::Null, format!("Invalid JSON: {e}")),
             }
         }
-        // Engine gone: shut down cleanly.
         CMDS.lock().unwrap_or_else(|e| e.into_inner()).push_back(json!({ "cmd": "shutdown" }));
         win::wake();
-        // If the UI thread is wedged, don't linger.
         std::thread::sleep(std::time::Duration::from_secs(5));
         std::process::exit(0);
     });

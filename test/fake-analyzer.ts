@@ -1,18 +1,3 @@
-// A fake krypt-studio-analyzer.exe: a Node script speaking the NDJSON
-// protocol of docs/ANALYZER_PROTOCOL.md. Behaviour is chosen by the input
-// path: "crash" exits mid-job, "bad" fails, "slow" separates slowly,
-// "hang" never answers (and ignores cancel). Every job is appended to
-// FAKE_ANALYZER_LOG ("<cmd> <path>") so tests can count analyzer runs.
-// study_reference: a "fullsong" file is a 2-minute 128 bpm house-style track (see fullSong); its fake drum stem
-// transcribes to the same hits.
-// Wave 3B (reference library): analyze returns `chords` and, with
-// args.drums, `drumHits` over a 4-bar beat grid; "lazy" analyses slowly,
-// "fast" reads 160 bpm in C; separating an "instrumental" gives a silent
-// vocal stem; mono transcription of a stem inside library/tmp returns a
-// 12-note melody (vocals) or an 8-note bass line (bass).
-// Vocals & mashups: a file name with "key=Am", "bpm=96", "keyconf=0.3",
-// "nokey" or "notempo" sets what analyze reports; mono transcription of a
-// "melody" file returns the 12-note melody (it fits C major best).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -206,7 +191,6 @@ export function writeFakeAnalyzer(dir: string): string {
   return file;
 }
 
-/** A spawn hook for AnalyzerSupervisor that runs the fake with node. */
 export function fakeSpawn(script: string, logFile?: string): (exe: string, args: string[]) => ChildProcessWithoutNullStreams {
   return (_exe, args) =>
     spawn(process.execPath, [script, ...args], {
@@ -227,9 +211,6 @@ export function countRuns(logFile: string, cmd: string): number {
   }
 }
 
-// ── Shared fixtures ─────────────────────────────────────────────────────
-
-/** The stock catalog plus the audio-clip params the engine adds for Wave 3A (when this build lacks them). */
 export function earsCatalog(): PluginCatalog {
   const cat = structuredClone(CATALOG) as PluginCatalog;
   const ac = cat.plugins.find((p) => p.id === 'krypt.audioclip')!;
@@ -249,13 +230,11 @@ export const STEM_WEIGHTS = Buffer.from('demucs weights');
 export const BP_WEIGHTS = Buffer.from('basic pitch weights');
 const lic = { name: 'MIT', url: 'https://example.com' };
 
-/** Model catalog for tests: Basic Pitch (bundled) + HT-Demucs (download), with real hashes of the weights above. */
 export const TEST_MODELS: ModelDef[] = [
   { id: 'basic-pitch', name: 'Basic Pitch', task: 'transcribe', description: 'd', license: lic, bundled: true, default: true, files: [{ name: 'nmp.onnx', url: '', sha256: sha(BP_WEIGHTS), bytes: BP_WEIGHTS.length }] },
   { id: 'htdemucs', name: 'HT-Demucs (4 stems)', task: 'stems', description: 'd', license: { ...lic, notice: 'Trained partly on MUSDB18.' }, bundled: false, default: true, stems: ['drums', 'bass', 'vocals', 'other'], files: [{ name: 'htdemucs.onnx', url: 'https://example.com/htdemucs.onnx', sha256: sha(STEM_WEIGHTS), bytes: STEM_WEIGHTS.length }] },
 ];
 
-/** Put model files where a ModelManager finds them: stems in userData/models, Basic Pitch in a bundled dir. */
 export function stageModels(userDataDir: string, bundledDir: string, which: { stems?: boolean; basicPitch?: boolean }): void {
   if (which.stems) {
     fs.mkdirSync(path.join(userDataDir, 'models', 'htdemucs'), { recursive: true });

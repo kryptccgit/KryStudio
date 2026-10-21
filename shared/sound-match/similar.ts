@@ -1,64 +1,32 @@
-// ──────────────────────────────────────────────────────────────────────
-// "More like this" (research/13 §12.1): rank the library's sounds by how
-// close they are to ONE sound's timbre fingerprint, Ableton-style sound
-// similarity search. Pure + deterministic (same inputs, same order); the
-// I/O (index, pack cache, analyzer, file access) lives in
-// electron/sounds/similar.ts.
-//
-//   rankSimilar(fp, kind, candidates, opts) → SimilarHit[]
-//
-// kind: what the source sound is (a preset role, a sample kind, or null =
-// unknown, e.g. a user file named "sample_01.wav": inferSampleKind() guesses
-// it from its nearest factory neighbours). The kind picks the feature
-// weights (match.ts PROFILES: a kick is compared on sub, decay, click …)
-// and, with scope 'same', which candidates are eligible: the same kind and
-// its close relatives (a kick finds kicks and kick presets; a riser finds
-// risers, sweeps and swells). scope 'any' ranks everything by timbre alone.
-// ──────────────────────────────────────────────────────────────────────
-
 import { factoryPreset } from '../sounds/factory';
 import type { InstrumentPreset, InstrumentRole, SampleKind } from '../sounds/types';
 import { compareFingerprints, FEATURE_KEYS, PROFILES, profileFor, usableFingerprint, type FeatureKey, type FeatureWeights, type MatchProfile } from './features';
 import { FAMILY_FACTOR, ROLE_FAMILY, sampleKindsFor, sourceKey } from './match';
 import type { FingerprintEntry, FingerprintSource, SoundFingerprint } from './types';
 
-/** What the source sound is. sampleKind null = unknown (a user file with no telling name). */
 export type SimilarKind = { kind: 'preset'; role: InstrumentRole } | { kind: 'sample'; sampleKind: SampleKind | null };
 
 export type SimilarScope = 'same' | 'any';
 
-/** How a candidate relates to the source's kind. */
 export type SimilarRelation = 'exact' | 'family' | 'other';
 
 export interface SimilarHit {
   source: FingerprintSource;
-  /** 0..1 (× FAMILY_FACTOR for a related kind with scope 'same'). */
   similarity: number;
-  /** One short line: "darker, shorter tail" / "nearly identical" / "close on brightness and length". */
   why: string;
   relation: SimilarRelation;
 }
 
 export interface SimilarOptions {
-  /** 'same' (default): the source's kind and its relatives only. 'any': every kind, by timbre alone. */
   scope?: SimilarScope;
-  /** Which candidates: samples, presets or both (default). */
   want?: 'samples' | 'presets' | 'all';
-  /** Best N (default 30, max 200). */
   limit?: number;
-  /** The source itself (never proposed). */
   exclude?: FingerprintSource | null;
-  /** Extra filter (pack installed, file on disk …). */
   allow?: (s: FingerprintSource) => boolean;
-  /** Preset lookup for alsoRoles / kits; default the factory presets. */
   preset?: (id: string) => InstrumentPreset | undefined;
-  /** Override the feature weights (tests). */
   weights?: FeatureWeights;
 }
 
-// ── Kinds ─────────────────────────────────────────────────────────────
-
-/** Sample kinds that count as "the same kind" as a sample kind: the exact kind first, then close relatives. */
 export const SAMPLE_FAMILY: Record<SampleKind, SampleKind[]> = {
   kick: ['kick'],
   snare: ['snare', 'clap', 'rim'],
@@ -95,7 +63,6 @@ export const SAMPLE_FAMILY: Record<SampleKind, SampleKind[]> = {
   retro: ['retro', 'zap'],
 };
 
-/** Preset roles that play the same part as a sample kind (a kick sample also finds kick presets). */
 const SAMPLE_ROLES: Partial<Record<SampleKind, InstrumentRole[]>> = {
   kick: ['kick'],
   snare: ['snare', 'clap'],
@@ -117,14 +84,12 @@ const SAMPLE_ROLES: Partial<Record<SampleKind, InstrumentRole[]>> = {
   noise: ['texture', 'fx'],
 };
 
-/** The roles + sample kinds that count as "the same kind" as the source (exact first). Unknown kind = nothing. */
 export function similarKinds(k: SimilarKind): { roles: InstrumentRole[]; kinds: SampleKind[] } {
   if (k.kind === 'preset') return { roles: [...(ROLE_FAMILY[k.role] ?? [k.role])], kinds: sampleKindsFor({ kind: 'instrument', role: k.role }) };
   if (!k.sampleKind) return { roles: [], kinds: [] };
   return { roles: [...(SAMPLE_ROLES[k.sampleKind] ?? [])], kinds: [...(SAMPLE_FAMILY[k.sampleKind] ?? [k.sampleKind])] };
 }
 
-/** A full drum kit on one channel (GM layout): never "like" one sound. */
 function isKit(p: InstrumentPreset | undefined): boolean {
   return !!p && p.role === 'kick' && ['snare', 'hat'].every((r) => (p.alsoRoles ?? []).includes(r as InstrumentRole));
 }
@@ -134,14 +99,12 @@ function defaultPreset(id: string): InstrumentPreset | undefined {
   return p && p.kind === 'instrument' ? p : undefined;
 }
 
-/** How a candidate relates to the source's kind; null = never a candidate (a drum kit preset). */
 export function relationOf(entry: FingerprintEntry, k: SimilarKind, preset: (id: string) => InstrumentPreset | undefined = defaultPreset): SimilarRelation | null {
   const fam = similarKinds(k);
   const src = entry.source;
   if (src.kind === 'sample') {
     const i = fam.kinds.indexOf(src.sampleKind);
     if (i < 0) return 'other';
-    // The exact kind: the first of the family, or a preset source's own role played by a sample (a kick preset → kick samples).
     return i === 0 || (k.kind === 'preset' && src.sampleKind === (k.role as string)) ? 'exact' : 'family';
   }
   const p = preset(src.id);
@@ -152,9 +115,6 @@ export function relationOf(entry: FingerprintEntry, k: SimilarKind, preset: (id:
   return roles.some((r) => fam.roles.includes(r)) ? 'family' : 'other';
 }
 
-// ── Weights ───────────────────────────────────────────────────────────
-
-/** Feature profile per sample kind (match.ts PROFILES). */
 const SAMPLE_PROFILE: Record<SampleKind, MatchProfile> = {
   kick: 'kick',
   snare: 'snare',
@@ -191,21 +151,16 @@ const SAMPLE_PROFILE: Record<SampleKind, MatchProfile> = {
   ambience: 'fx',
 };
 
-/** Weights for a sound of unknown kind: every audible trait a little. */
 export const GENERAL_WEIGHTS: FeatureWeights = { centroid: 2, decay: 2, flatness: 1.5, harmonicity: 1, sustain: 1, attack: 1, rolloff: 1, sub: 0.75, low: 0.75, lowMid: 0.5, mid: 0.5, highMid: 0.5, high: 0.75, crest: 0.5, f0: 0.5, width: 0.25 };
 
 const DRUM_PROFILES: ReadonlySet<string> = new Set(['kick', 'snare', 'hat', 'perc']);
 
-/** The feature profile for a source kind ('general' when unknown). */
 export function similarProfile(k: SimilarKind): { profile: MatchProfile | 'general'; weights: FeatureWeights; drum: boolean } {
   const profile = k.kind === 'preset' ? profileFor({ kind: 'instrument', role: k.role }) : k.sampleKind ? SAMPLE_PROFILE[k.sampleKind] : 'general';
   const weights = profile === 'general' ? GENERAL_WEIGHTS : PROFILES[profile];
   return { profile, weights, drum: DRUM_PROFILES.has(profile) };
 }
 
-// ── Why (one short line) ──────────────────────────────────────────────
-
-/** Features that say the same thing to the ear: only the strongest of a group is named. */
 const WHY_GROUP: Partial<Record<FeatureKey, string>> = { centroid: 'bright', rolloff: 'bright', high: 'bright', decay: 'length', sustain: 'length', sub: 'low', low: 'low' };
 
 function diffWord(key: FeatureKey, more: boolean, profile: string, cand: SoundFingerprint): string {
@@ -270,11 +225,6 @@ function closeNoun(key: FeatureKey): string {
   }
 }
 
-/**
- * One short line about how a candidate differs from the source (z > 0 = the candidate has more): the two biggest
- * weighted differences of distinct kinds ("darker, shorter tail"); "nearly identical" when there's no audible one;
- * otherwise what is close ("close on brightness and length").
- */
 export function shortWhy(cand: SoundFingerprint, deltas: Partial<Record<FeatureKey, number>>, weights: FeatureWeights, similarity: number, profile: string): string {
   if (similarity >= 0.97) return 'nearly identical';
   const keys = (Object.keys(deltas) as FeatureKey[]).filter((k) => (weights[k] ?? 0) > 0);
@@ -293,14 +243,6 @@ export function shortWhy(cand: SoundFingerprint, deltas: Partial<Record<FeatureK
   return close.length ? `close on ${close.join(' and ')}` : 'very close';
 }
 
-// ── Ranking ───────────────────────────────────────────────────────────
-
-/**
- * The library sounds closest to one fingerprint, best first. Candidates with an unusable fingerprint, the source
- * itself, drum kits, ones `allow` refuses and (scope 'same') other kinds are skipped. similarity = exp(-d²/2) over
- * the kind's weighted feature deltas (compareFingerprints), × FAMILY_FACTOR for a related kind with scope 'same'.
- * An unknown kind with scope 'same' falls back to 'any'. Ties break on the source key (deterministic).
- */
 export function rankSimilar(fp: SoundFingerprint, k: SimilarKind, candidates: readonly FingerprintEntry[], opts: SimilarOptions = {}): SimilarHit[] {
   if (!usableFingerprint(fp)) return [];
   const { profile, weights: base, drum } = similarProfile(k);
@@ -333,10 +275,6 @@ export function rankSimilar(fp: SoundFingerprint, k: SimilarKind, candidates: re
   return scored.slice(0, limit).map((s) => s.hit);
 }
 
-/**
- * The likely kind of a sound nobody named, from its nearest factory samples (a similarity-weighted vote of the
- * closest `k`, timbre alone). null when there are no sample candidates.
- */
 export function inferSampleKind(fp: SoundFingerprint, candidates: readonly FingerprintEntry[], k = 7): { kind: SampleKind; confidence: number } | null {
   const near = rankSimilar(fp, { kind: 'sample', sampleKind: null }, candidates, { scope: 'any', want: 'samples', limit: k });
   if (!near.length) return null;

@@ -1,6 +1,3 @@
-// Collection menus (sidebar right-click, the header's "more" button, the
-// narrow-width collection picker). Same wording everywhere.
-
 import { BarChart3, Crosshair, FilePlus, FolderOpen, FolderPlus, LibraryBig, Pencil, Plus, RefreshCw, RotateCcw, Trash2, X } from 'lucide-react';
 import type { Collection } from '@shared/library/types';
 import type { MenuItem } from '../../components/Menu';
@@ -52,7 +49,6 @@ export function collectionMenu(c: Collection, doc: Document): MenuItem[] {
   return items;
 }
 
-/** Narrow widths: pick the shown collection from a menu. */
 export function collectionPickerMenu(doc: Document): MenuItem[] {
   const s = getLibraryState();
   const cols = s?.collections ?? [];

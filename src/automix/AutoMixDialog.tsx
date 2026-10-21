@@ -1,21 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Auto Mix dialog (research/20): mode tabs (Vocals / Mix / Master /
-// Mix + Master), the preset grid (Auto first; name, LUFS target and a tiny
-// tone curve per card), the prompt box with example chips and a live
-// "Understood as: …" line, the options (target loudness, peak limit, keep
-// my effects, scope, AI), Run with stages / progress / Cancel, and the
-// result: a one-line headline, three numbered next steps (listen Before /
-// After, Keep, Export…) and the numbers / tone chart / what changed under
-// Details. With master / full an optional reference row.
-// Master a song (target 'file', the beginner flow, research/22 + 23) is a
-// numbered, linear form: ① Your song (a file picker / drop that never
-// runs anything), ② Pick a style, ③ Sound like a song you love (optional,
-// folded), More options (folded), then a big Master my song button that
-// says why it is disabled. Its working view ticks through the real stages
-// with the song's name. The small parts are exported for the album
-// dialog. Pure view logic lives in ./logic.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useId, useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowRight,
@@ -162,8 +144,6 @@ function AutoMixView({ close }: { close: () => void }) {
   return <FormView close={close} />;
 }
 
-// ── Small parts ───────────────────────────────────────────────────────
-
 export function Note({ icon: Icon, tone, children }: { icon: LucideIcon; tone: 'muted' | 'warn' | 'ok' | 'error'; children: ReactNode }) {
   return (
     <div
@@ -193,7 +173,6 @@ export function SectionTitle({ children, right }: { children: ReactNode; right?:
   );
 }
 
-/** The gradient as an SVG paint server (stroke="url(#id)"). */
 export function GradientDef({ id }: { id: string }) {
   return (
     <linearGradient id={id} x1="0" y1="0" x2="1" y2="0">
@@ -204,7 +183,6 @@ export function GradientDef({ id }: { id: string }) {
   );
 }
 
-/** A preset card's tiny tone curve (relative to the mids; the dotted line is flat). */
 function ToneSpark({ tone, on }: { tone: AutoMixPreset['tone']; on: boolean }) {
   const id = useId().replace(/:/g, '');
   const w = 76;
@@ -221,8 +199,6 @@ function ToneSpark({ tone, on }: { tone: AutoMixPreset['tone']; on: boolean }) {
   );
 }
 
-// ── The form ──────────────────────────────────────────────────────────
-
 export const bigPrimary = cls(primary, 'h-10 rounded-xl px-5 text-[13px]');
 
 function FormView({ close }: { close: () => void }) {
@@ -230,7 +206,6 @@ function FormView({ close }: { close: () => void }) {
   return target === 'file' ? <MasterSongForm close={close} /> : <ProjectForm close={close} />;
 }
 
-/** A numbered step of a linear form: the number in a ring, a title, an optional line under it. */
 export function StepHead({ n, title, line, right }: { n: number; title: ReactNode; line?: ReactNode; right?: ReactNode }) {
   return (
     <div className="mb-2 flex items-start gap-2.5">
@@ -244,7 +219,6 @@ export function StepHead({ n, title, line, right }: { n: number; title: ReactNod
   );
 }
 
-/** A folded part of a form (step ③, More options): a header button that opens it. */
 export function Fold({ open, onToggle, head, children }: { open: boolean; onToggle(): void; head: ReactNode; children: ReactNode }) {
   return (
     <div className="rounded-xl border border-white/[0.07] bg-black/15">
@@ -257,7 +231,6 @@ export function Fold({ open, onToggle, head, children }: { open: boolean; onTogg
   );
 }
 
-/** Master a song: ① your song, ② a style, ③ a reference (optional, folded), more options (folded), Master my song. */
 function MasterSongForm({ close }: { close: () => void }) {
   const form = useAutoMix((s) => s.form);
   const song = useAutoMix((s) => s.song);
@@ -343,7 +316,6 @@ function MasterSongForm({ close }: { close: () => void }) {
   );
 }
 
-/** Step ①: a big "Choose your song…" (or drop the file), then the song's name, length and format with Change…. */
 function SongStep() {
   const song = useAutoMix((s) => s.song);
   const [over, setOver] = useState(false);
@@ -400,7 +372,6 @@ function SongStep() {
   );
 }
 
-/** Auto Mix on the open project: modes, the reference (master / full), presets, prompt, options, Run. */
 function ProjectForm({ close }: { close: () => void }) {
   const form = useAutoMix((s) => s.form);
   const blocker = formError(form);
@@ -481,10 +452,6 @@ function FormPresetHeading() {
   );
 }
 
-/**
- * The reference row: drop a file or "Pick a reference song…"; its summary once read; clear. `issue` says why a read
- * reference won't be used (it is the song being mastered).
- */
 export function ReferenceRow({ state, ctl, disabled, issue }: { state: ReferenceState; ctl: ReferenceController; disabled?: boolean; issue?: string | null }) {
   const [over, setOver] = useState(false);
   const name = state.sound?.name ?? fileLabel(state.path);
@@ -597,8 +564,6 @@ function ModeTabs() {
   );
 }
 
-// ── Presets ───────────────────────────────────────────────────────────
-
 function PresetGrid() {
   const presets = useAutoMix((s) => s.presets);
   const picked = useAutoMix((s) => s.form.preset);
@@ -607,7 +572,6 @@ function PresetGrid() {
   return <PresetCards presets={presets} picked={picked} genre={genre} onPick={(id) => editForm({ type: 'pickPreset', id })} onRetry={() => void loadPresets(true)} />;
 }
 
-/** The preset cards (Auto first): name, LUFS target and a tiny tone curve each. */
 export function PresetCards({
   presets,
   picked,
@@ -678,8 +642,6 @@ export function PresetCards({
     </div>
   );
 }
-
-// ── Prompt ────────────────────────────────────────────────────────────
 
 function PromptBox() {
   const prompt = useAutoMix((s) => s.form.prompt);
@@ -757,8 +719,6 @@ function PromptBox() {
     </div>
   );
 }
-
-// ── Options ───────────────────────────────────────────────────────────
 
 const SCOPES: Array<{ value: Scope; label: string; title: string }> = [
   { value: 'loudest', label: 'Loudest part', title: 'Krypt measures the loudest 32 bars (the whole song when it is short): faster' },
@@ -863,8 +823,6 @@ function Options() {
   );
 }
 
-// ── Progress ──────────────────────────────────────────────────────────
-
 const STAGE_ICON: Record<StageState, { icon: LucideIcon; className: string }> = {
   done: { icon: Check, className: 'text-emerald-300' },
   active: { icon: Loader2, className: 'animate-spin text-krypt-purple' },
@@ -873,7 +831,6 @@ const STAGE_ICON: Record<StageState, { icon: LucideIcon; className: string }> = 
   pending: { icon: Circle, className: 'text-white/20' },
 };
 
-/** The working steps, ticking through what main reports (Master a song, Master an album). `detail` sits next to the active one. */
 export function StepList({ steps, states, detail }: { steps: ReadonlyArray<{ id: string; label: string }>; states: readonly StageState[]; detail?: string }) {
   return (
     <ol className="space-y-1.5" aria-label="Steps">
@@ -995,8 +952,6 @@ function ProgressView({ close }: { close: () => void }) {
   );
 }
 
-// ── Done ──────────────────────────────────────────────────────────────
-
 function MeasureTable({ before, after }: { before: AutoMixMeasure; after: AutoMixMeasure }) {
   const rows = measureRows(before, after);
   return (
@@ -1031,7 +986,6 @@ function MeasureTable({ before, after }: { before: AutoMixMeasure; after: AutoMi
   );
 }
 
-/** Before (grey, dashed) vs after (gradient) vs the target or the reference (pink, dotted), relative to the mids. */
 export function ToneOverlay({ before, after, target, targetLabel = 'Target' }: { before: AutoMixMeasure['tone']; after: AutoMixMeasure['tone']; target: AutoMixMeasure['tone'] | null; targetLabel?: string }) {
   const id = useId().replace(/:/g, '');
   const w = 340;
@@ -1162,7 +1116,6 @@ function ABSwitch() {
   );
 }
 
-/** One numbered next step on a result: the number, what to do, and its buttons inline. */
 export function NextStep({ n, title, line, children }: { n: number; title: ReactNode; line?: ReactNode; children?: ReactNode }) {
   return (
     <li className="flex items-start gap-2.5">
@@ -1178,7 +1131,6 @@ export function NextStep({ n, title, line, children }: { n: number; title: React
   );
 }
 
-/** The calm part of a result: a "Details" header that folds the numbers away. */
 export function Details({ children, summary = 'the numbers before and after, the tone chart, what changed', defaultOpen = false }: { children: ReactNode; summary?: string; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -1198,7 +1150,6 @@ export function Details({ children, summary = 'the numbers before and after, the
   );
 }
 
-/** "Good to know" notes, always visible on a result (they explain a loudness that stopped short). */
 export function GoodToKnow({ notes }: { notes: readonly string[] }) {
   if (!notes.length) return null;
   return (

@@ -1,7 +1,3 @@
-// Connect Claude Code also adds ONE permission rule (mcp__krypt-studio) so
-// Claude Code stops asking before every Krypt Studio tool call. The merge must
-// keep everything else in the user's settings, be idempotent, keep a .bak and
-// never touch a file it can't parse. Uses temp files only.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';

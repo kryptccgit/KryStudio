@@ -1,7 +1,3 @@
-// Generator options: one zod schema per generator, shared by the
-// notes.generate command, the generate_notes MCP tool and the piano roll
-// Generate dialog. Strict, so a misspelt option is an error, not a no-op.
-
 import { z } from 'zod';
 import { PPQ } from '../../schema/time';
 
@@ -103,7 +99,6 @@ export type MelodyOptions = z.infer<typeof MELODY_OPTIONS>;
 export type BassOptions = z.infer<typeof BASS_OPTIONS>;
 export type GeneratorOptions = { rhythm: RhythmOptions; chords: ChordOptions; arp: ArpOptions; melody: MelodyOptions; bass: BassOptions };
 
-/** Parse a generator's options, or a human message naming the bad option. */
 export function parseGeneratorOptions<K extends GeneratorKind>(kind: K, raw: unknown): { ok: true; options: GeneratorOptions[K] } | { ok: false; message: string } {
   const r = GENERATOR_OPTIONS[kind].safeParse(raw ?? {});
   if (r.success) return { ok: true, options: r.data as GeneratorOptions[K] };

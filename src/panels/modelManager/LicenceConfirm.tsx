@@ -1,6 +1,3 @@
-// The confirm step before a model is installed: licence (with a link), the
-// licence notice shown prominently, size and source, and the SHA-256 promise.
-
 import { BrainCircuit, ExternalLink, ShieldAlert, ShieldCheck } from 'lucide-react';
 import type { ModelDef } from '@shared/analyzer/models';
 import { DialogForm, openDialog } from '../../components/Dialog';
@@ -8,7 +5,6 @@ import { modelBytes, modelSource, stemLabel } from '../../ears/logic';
 import { fmtBytes } from '../../utils/format';
 import { report } from '../../app/notify';
 
-/** Resolves true when the user accepts. `via`: a download, or files from a folder they pick. */
 export function openLicenceConfirm(def: ModelDef, via: 'download' | 'folder', doc?: Document | null): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false;

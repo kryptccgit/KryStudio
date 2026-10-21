@@ -1,9 +1,3 @@
-// shape_notes: the piano roll "Tools" menu for agents. Every op runs the same
-// shared/commands/noteTools command the UI uses, on one channel of a pattern
-// (all notes, or a bars / pitch selection); the whole call is ONE undo step.
-// Ops that replace notes (arpeggiate, glue) hand their result ids to the next
-// op, so a chain like arpeggiate → levels shapes the new arp notes.
-
 import { z } from 'zod';
 import { PPQ } from '@shared/schema/time';
 import { parseKey, parseNoteName, type Key } from '@shared/music/theory';

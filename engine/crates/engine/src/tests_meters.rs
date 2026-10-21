@@ -1,6 +1,3 @@
-//! Meters and scopes (meters.rs, docs/ENGINE_PROTOCOL.md §15) through the whole engine: the test sine
-//! instrument into the REAL stock Krypt Comp / Krypt EQ / Krypt Analyzer.
-
 use super::*;
 use crate::meters::{collect_gr, Watcher};
 
@@ -11,12 +8,10 @@ fn mixed_descriptors() -> Vec<PluginDescriptor> {
     v
 }
 
-/// Test instruments, stock effects.
 fn mixed_host() -> PluginHost {
     PluginHost { create_instrument: test_create_instrument, create_effect: krypt_studio_dsp::create_effect, descriptors: mixed_descriptors }
 }
 
-/// A held loud sine on insert i1 → comp (threshold −40 dB) → eq → analyzer → master.
 fn project() -> Value {
     let mut p = base(120.0, "pattern");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
@@ -67,7 +62,6 @@ fn offline_render_reports_gain_reduction_per_dynamics_slot() {
     assert_eq!((g.insert_id.as_str(), g.slot_id.as_str()), ("i1", "comp"));
     assert!(g.max_db > 5.0 && g.avg_db > 3.0 && g.avg_db <= g.max_db, "{g:?}");
     assert!(g.active > 0.5, "{g:?}");
-    // serialized as RenderResult.gainReduction
     let v = serde_json::to_value(&r.gain_reduction).unwrap();
     assert!(v[0]["avgDb"].is_number() && v[0]["insertId"] == "i1" && v[0]["slotId"] == "comp");
 }
@@ -97,7 +91,6 @@ fn live_meters_and_watched_slot_are_allocation_free() {
     let mut buf = vec![0f32; 480 * 2];
     let before = assert_no_alloc::violation_count();
     let mut scopes = None;
-    // ~0.8 s in 16 ms telemetry frames (the last one full)
     for frame in 0..51 {
         for _ in 0..2 {
             crate::rt::no_alloc(|| core.process_interleaved(&mut buf, 2));
@@ -114,7 +107,6 @@ fn live_meters_and_watched_slot_are_allocation_free() {
     assert!(lufs > -40.0 && lufs < 0.0, "{lufs}");
     assert_eq!(an.correlation, Some(1.0), "a centred sine is mono");
     let spec = an.spectrum.as_ref().expect("full frame");
-    // 440 Hz → bin log(440/20)/log(1000) · 96 ≈ 42.9
     let peak = spec.iter().enumerate().fold((0, -999f32), |a, (i, &v)| if v > a.1 { (i, v) } else { a }).0;
     assert!((42..=43).contains(&peak), "spectrum peak bin {peak}");
     assert!(s.contains_key("i1/eq"));

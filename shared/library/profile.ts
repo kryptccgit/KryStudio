@@ -1,16 +1,3 @@
-// Style profiles: aggregate a collection's track features into the
-// statistics the AI composes from (research/08 §4.2). Pure, deterministic
-// (seeded example sampling). No training: robust percentiles, histograms
-// and per-track averages the agent can read.
-//
-// Rules of thumb used throughout:
-//  - Every track weighs the same (per-track averages / weights 1/n), so one
-//    long song can't dominate a section.
-//  - A section needs data from at least MIN_PROFILE_TRACKS tracks, else it
-//    is null and `caveats` says why.
-//  - Examples are SAMPLED from the aggregated probabilities with a seeded
-//    RNG; nothing is copied from a single track.
-
 import type { DrumRole } from '../analyzer/protocol';
 import { printKpn } from '../kpn/print';
 import type { PrintNote, PrintTrack } from '../kpn/types';
@@ -24,17 +11,11 @@ export interface ProfileInput {
   features: TrackFeatures;
 }
 
-/** A profile section needs data from at least this many tracks. */
 export const MIN_PROFILE_TRACKS = 3;
-/** Below this many analysed tracks the whole profile is flagged as thin. */
 const THIN_PROFILE = 10;
-/** A track's drum grid needs this many measured bars to count. */
 const MIN_DRUM_BARS = 4;
-/** A track's bass line needs this many notes to count. */
 const MIN_BASS_NOTES = 8;
-/** Swing at or above this counts as "swung". */
 const SWUNG = 0.15;
-/** A 32nd note in beats (kick alignment, glide gap). */
 const THIRTY_SECOND = 0.125;
 const ENERGY_POINTS = 16;
 
@@ -44,7 +25,6 @@ const MINOR_KEYS = ['Cm', 'C#m', 'Dm', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'A
 interface TrackKey {
   root: number;
   minor: boolean;
-  /** Canonical spelling (enharmonics merged), e.g. "F#m". */
   name: string;
 }
 
@@ -63,13 +43,9 @@ function trackBpm(inp: ProfileInput): number | null {
   return isNum(b) && b > 0 ? b : null;
 }
 
-// ── Roman numerals ──────────────────────────────────────────────────────
-
 const MAJOR_NUMERALS = ['I', 'bII', 'II', 'bIII', 'III', 'IV', '#IV', 'V', 'bVI', 'VI', 'bVII', 'VII'];
-/** Minor keys count from the natural minor (i, ii°, III, iv, v, VI, VII), as producers write them. */
 const MINOR_NUMERALS = ['I', 'bII', 'II', 'III', '#III', 'IV', 'bV', 'V', 'VI', '#VI', 'VII', '#VII'];
 
-/** A chord as a roman numeral relative to a key: case = quality (i minor, I major), suffix 7 / maj7 / ° / sus / 5. */
 export function romanNumeral(root: number, quality: BeatChord['quality'], keyRoot: number, minor: boolean): string {
   const base = (minor ? MINOR_NUMERALS : MAJOR_NUMERALS)[mod(root - keyRoot, 12)];
   const acc = /^[b#]/.test(base) ? base[0] : '';
@@ -79,7 +55,6 @@ export function romanNumeral(root: number, quality: BeatChord['quality'], keyRoo
   return `${acc}${rn}${suffix}`;
 }
 
-/** Rotation-invariant form of a looped progression: start on the tonic when it is in the loop, else the alphabetically first rotation. */
 export function canonicalLoop(degrees: readonly string[]): string[] {
   const n = degrees.length;
   const rotations: string[][] = [];
@@ -90,8 +65,6 @@ export function canonicalLoop(degrees: readonly string[]): string[] {
   pool.sort((a, b) => (a.join(' ') < b.join(' ') ? -1 : a.join(' ') > b.join(' ') ? 1 : 0));
   return pool[0];
 }
-
-// ── Section builders ────────────────────────────────────────────────────
 
 function buildTempo(inputs: ProfileInput[]): StyleProfile['tempo'] {
   const bpms: number[] = [];
@@ -112,12 +85,6 @@ function buildTempo(inputs: ProfileInput[]): StyleProfile['tempo'] {
   return { bpm: percentiles(bpms, 1), histogram, halfTimeShare: round(ambiguous / bpms.length, 3) };
 }
 
-/**
- * Half / double-time ambiguity: the detector lists an octave reading in a
- * plausible range (55–190 BPM) AND either its confidence is low or the drums
- * play a half-time backbeat (snare on beat 3 rather than 2 and 4) — i.e. the
- * same groove reads as 70 or 140.
- */
 function halfTimeAmbiguous(inp: ProfileInput, bpm: number): boolean {
   const t = inp.features.analysis?.tempo;
   const alts = t?.alternatives ?? [];
@@ -160,7 +127,6 @@ function buildKeys(inputs: ProfileInput[]): StyleProfile['keys'] {
   return { top, minorShare: round(minor / n, 3) };
 }
 
-/** Tracks whose drum grid counts for the drum odds: enough measured bars, in 4 (the 32-step grid and step names assume 4/4). */
 function drumGridOf(inp: ProfileInput): NonNullable<TrackFeatures['drums']> | null {
   const d = inp.features.drums;
   return d && d.bars >= MIN_DRUM_BARS && beatsPerBar(inp.features.analysis) === 4 ? d : null;
@@ -197,11 +163,6 @@ function buildDrums(inputs: ProfileInput[]): StyleProfile['drums'] {
   return { roles, rollsPerBar: round(rollsPerBar, 3), tracks: grids.length, source: sources.size > 1 ? 'mixed' : grids[0].source };
 }
 
-/**
- * Share of a track's bass notes (sorted by beat) within a 32nd of a kick hit,
- * from the analysis' drum hits. null without kick hits or a tempo.
- * One linear sweep: notes go back to seconds through the O(1) inverse map.
- */
 function kickAlignFromHits(inp: ProfileInput, notes: ReadonlyArray<{ beat: number }>): number | null {
   const a = inp.features.analysis;
   const hits = a?.drumHits;
@@ -232,7 +193,6 @@ function kickAlignFromHits(inp: ProfileInput, notes: ReadonlyArray<{ beat: numbe
   return aligned / notes.length;
 }
 
-/** Valid notes sorted by beat; returns the input itself when it already is (lines from notesToBeats are). */
 function validSorted(notes: readonly BeatNote[]): readonly BeatNote[] {
   let ok = true;
   for (let i = 0; i < notes.length && ok; i++) {
@@ -256,19 +216,16 @@ function buildBass(inputs: ProfileInput[]): StyleProfile['bass'] {
     const notes = validSorted(raw);
     if (notes.length < MIN_BASS_NOTES) continue;
     tracks++;
-    // Lengths: 33 quantiles per track, each track weighing 1.
     const durs = new Float64Array(notes.length);
     for (let i = 0; i < notes.length; i++) durs[i] = notes[i].dur;
     durs.sort();
     const Q = 33;
     for (let q = 0; q < Q; q++) lengths.push({ v: durs[Math.min(durs.length - 1, Math.round((q / (Q - 1)) * (durs.length - 1)))], w: 1 / Q });
-    // Degrees relative to the track's key root.
     const key = trackKey(inp);
     if (key) {
       degreeTracks++;
       for (const n of notes) degrees[mod(Math.round(n.key) - key.root, 12)] += 1 / notes.length;
     }
-    // Kick alignment: drum hits when available, else the drum grid's likely kick steps.
     const fromHits = kickAlignFromHits(inp, notes);
     if (fromHits !== null) {
       align.push(fromHits);
@@ -285,7 +242,6 @@ function buildBass(inputs: ProfileInput[]): StyleProfile['bass'] {
         align.push(hit / notes.length);
       }
     }
-    // Glides: the next note starts within a 32nd of this one ending (or overlaps) at another pitch.
     let g = 0;
     for (let i = 0; i + 1 < notes.length; i++) {
       const gap = notes[i + 1].beat - (notes[i].beat + notes[i].dur);
@@ -303,7 +259,6 @@ function buildBass(inputs: ProfileInput[]): StyleProfile['bass'] {
   };
 }
 
-/** A track's chord sequence for progression counting: spans under half a beat dropped, repeats merged. */
 function chordSequence(chords: BeatChord[]): BeatChord[] {
   const out: BeatChord[] = [];
   for (const c of chords) {
@@ -319,7 +274,6 @@ function chordSequence(chords: BeatChord[]): BeatChord[] {
 }
 
 const QUALITIES: ReadonlyArray<BeatChord['quality']> = ['maj', 'min', '7', 'maj7', 'm7', 'dim', 'sus', '5'];
-/** Numeral ids: (interval × 8 + quality) × 2 + minor → 192 possible numerals. */
 const NUMERAL_IDS = 12 * QUALITIES.length * 2;
 const numeralText = new Map<number, string>();
 const loopCache = new Map<number, { id: string; loop: string[] }>();
@@ -331,7 +285,6 @@ function numeralId(root: number, quality: BeatChord['quality'], keyRoot: number,
   return id;
 }
 
-/** Canonical loop for a raw 4-numeral window (integer key), cached across tracks. */
 function canonicalWindow(key: number): { id: string; loop: string[] } {
   let c = loopCache.get(key);
   if (!c) {
@@ -359,7 +312,6 @@ function buildHarmony(inputs: ProfileInput[]): StyleProfile['harmony'] {
     if (!key || seq.length < 4) continue;
     tracks++;
     const ids = seq.map((c) => numeralId(c.root, c.quality, key.root, key.minor));
-    // Count raw windows first (a looped song repeats a handful of them), then canonicalise each once.
     const raw = new Map<number, number>();
     for (let i = 0; i + 4 <= ids.length; i++) {
       const w = ((ids[i] * NUMERAL_IDS + ids[i + 1]) * NUMERAL_IDS + ids[i + 2]) * NUMERAL_IDS + ids[i + 3];
@@ -380,7 +332,6 @@ function buildHarmony(inputs: ProfileInput[]): StyleProfile['harmony'] {
     }
     const bpb = beatsPerBar(inp.features.analysis);
     const span = seq[seq.length - 1].beat + seq[seq.length - 1].dur - seq[0].beat;
-    // Harmonic rhythm: chords per bar over the span the chords cover (a chord every bar = 1).
     if (span > 0) changes.push(seq.length / (span / bpb));
   }
   if (tracks < MIN_PROFILE_TRACKS) return null;
@@ -391,7 +342,6 @@ function buildHarmony(inputs: ProfileInput[]): StyleProfile['harmony'] {
   return { progressions, changesPerBar: round(median(changes), 2), tracks };
 }
 
-/** Section labels relabelled by first appearance (A, B, C …), consecutive repeats collapsed. */
 export function normaliseForm(labels: readonly string[]): string[] {
   const map = new Map<string, string>();
   const out: string[] = [];
@@ -483,14 +433,10 @@ function buildMix(inputs: ProfileInput[]): StyleProfile['mix'] {
   return { lufs: percentiles(lufs, 1), truePeakDb: percentiles(tp, 1), width: percentiles(width, 2), bands };
 }
 
-// ── Examples (seeded sampling) ──────────────────────────────────────────
-
 const STEP_TICKS_16 = 240;
 const STEP_TICKS_32 = 120;
 const BAR_TICKS = 3840;
-/** Steps at or above this probability are always played in examples. */
 const STRONG = 0.8;
-/** Steps below this probability are never played in examples (noise). */
 const RARE = 0.12;
 
 function safeTitle(name: string): string {
@@ -506,7 +452,6 @@ function exampleVel(v: number): number {
 
 interface DrumSketch {
   kpn: string;
-  /** Kick onsets per bar (16th step indices 0..15). */
   kicks: number[][];
 }
 
@@ -533,7 +478,6 @@ function sampleDrums(drums: NonNullable<StyleProfile['drums']>, title: string, r
       }
       if (bar === 0 && maxP >= 0.5) on.add(argmax);
       if (rolls) {
-        // A roll in bar 2 always (the style rolls), in bar 1 by its rate.
         if (bar === 1 || rng() < drums.rollsPerBar) {
           const start = [24, 26, 28][Math.floor(rng() * 3)];
           for (let s = start; s < GRID_STEPS; s++) on.add(s);
@@ -554,7 +498,6 @@ function sampleDrums(drums: NonNullable<StyleProfile['drums']>, title: string, r
 const MINOR_DEGREE_TOKENS = ['^1', '^b2', '^2', '^3', '^#3', '^4', '^b5', '^5', '^6', '^#6', '^7', '^#7'];
 const MAJOR_DEGREE_TOKENS = ['^1', '^b2', '^2', '^b3', '^3', '^4', '^#4', '^5', '^b6', '^6', '^b7', '^7'];
 
-/** A length in beats sampled from a percentile summary → 16th steps in [lo, hi] (4 steps when the summary is unusable). */
 function sampleSteps(p: Percentiles, rng: () => number, lo: number, hi: number): number {
   const beats = sampleFromPercentiles(p, rng());
   return clamp(isNum(beats) ? Math.round(beats * 4) : 4, lo, hi);
@@ -578,7 +521,6 @@ function sampleBass(bass: NonNullable<StyleProfile['bass']>, minor: boolean, kic
   const align = isNum(bass.kickAlign) ? bass.kickAlign : 0.5;
   const barTokens: string[][] = [];
   for (let bar = 0; bar < 2; bar++) {
-    // Onsets (16th steps): on the kicks by the style's alignment, plus off-kick notes.
     const on = new Set<number>([0]);
     const k = kicks?.[bar] ?? [];
     if (k.length) {
@@ -602,7 +544,6 @@ function sampleBass(bass: NonNullable<StyleProfile['bass']>, minor: boolean, kic
       const next = i + 1 < steps.length ? steps[i + 1] : 16;
       if (s > cursor) toks.push(`r:${s - cursor}`);
       const deg = degs[i];
-      // Slides only into a different pitch.
       const glide = next < 16 && degs[i + 1] !== deg && rng() < bass.glide;
       const want = sampleSteps(bass.length, rng, 1, 16);
       const len = glide ? next - s : Math.min(want, next - s);
@@ -615,9 +556,6 @@ function sampleBass(bass: NonNullable<StyleProfile['bass']>, minor: boolean, kic
   return `pattern "${title} bass sketch" bars=2 grid=16 key=${key}\nbass {oct=${oct}}: ${barTokens.map((t) => t.join(' ')).join(' | ')}`;
 }
 
-// ── buildProfile ────────────────────────────────────────────────────────
-
-/** Aggregate a collection. Sections with too little data are null and explained in `caveats`. */
 export function buildProfile(collection: Pick<Collection, 'id' | 'name'>, tracks: ProfileInput[], opts: { seed?: number; now?: number } = {}): StyleProfile {
   const inputs = tracks.filter((t) => t && t.features && t.features.analysis);
   const analysed = inputs.length;
@@ -676,8 +614,6 @@ export function buildProfile(collection: Pick<Collection, 'id' | 'name'>, tracks
   };
 }
 
-// ── profileText ─────────────────────────────────────────────────────────
-
 const ROLE_LABEL: Record<DrumRole, string> = { kick: 'Kick', snare: 'Snare/clap', hat: 'Hi-hat', openhat: 'Open hat', perc: 'Perc' };
 const DEGREE_LABEL = ['root', 'b2', '2nd', 'b3', '3rd', '4th', 'b5', '5th', 'b6', '6th', 'b7', '7th'];
 
@@ -685,7 +621,6 @@ function pct(x: number): string {
   return `${Math.round(x * 100)}%`;
 }
 
-/** Name of a 32nd step in "1 e & a" counting. */
 export function stepName(s: number): string {
   const beat = Math.floor(s / 8) + 1;
   const sub = s % 8;
@@ -714,7 +649,6 @@ function describeRole(role: DrumRole, prob: number[]): string {
     .join(', ');
 }
 
-/** One char per 16th: 9 = ~always … 1 = rare, . = never. */
 function sketchLine(prob: number[]): string {
   const chars: string[] = [];
   for (let i = 0; i < 16; i++) {
@@ -729,17 +663,14 @@ function fmtTime(sec: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-/** "140 BPM (middle half 138 to 142)"; just the median when the middle half is one value. */
 function range(p: Percentiles, fmt: (x: number) => string, unit: string): string {
   const lo = fmt(p.p25);
   const hi = fmt(p.p75);
   return lo === hi ? `${fmt(p.median)}${unit}` : `${fmt(p.median)}${unit} (middle half ${lo} to ${hi})`;
 }
 
-/** Compact plain text for an agent (MCP get_style_profile, focus prompt, built-in agent): numbers, idioms and KPN examples. */
 export function profileText(profile: StyleProfile, opts: { brief?: string; maxChars?: number } = {}): string {
   const maxChars = Math.max(400, opts.maxChars ?? 3500);
-  // Blocks in reading order with a priority (lower = dropped first when over budget).
   const blocks: Array<{ text: string; prio: number }> = [];
   const add = (text: string | null, prio: number) => {
     if (text) blocks.push({ text, prio });
@@ -757,7 +688,6 @@ export function profileText(profile: StyleProfile, opts: { brief?: string; maxCh
     35,
   );
 
-  // Tempo & feel.
   const feel: string[] = [];
   if (profile.tempo) {
     const t = profile.tempo;
@@ -782,7 +712,6 @@ export function profileText(profile: StyleProfile, opts: { brief?: string; maxCh
     add(`Keys: ${pct(k.minorShare)} minor. Common: ${k.top.slice(0, 5).map((x) => `${x.key} (${x.count})`).join(', ')}.`, 85);
   }
 
-  // Drums.
   if (profile.drums) {
     const d = profile.drums;
     const lines: string[] = [`Drums (${d.tracks} tracks, from ${d.source === 'stem' ? 'drum stems' : d.source === 'mix' ? 'the full mix, rough' : 'mix + stems'}; per bar):`];

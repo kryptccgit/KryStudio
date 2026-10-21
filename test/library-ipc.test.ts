@@ -1,8 +1,3 @@
-// IPC surface of window.krypt.library: every method of the contract in
-// shared/types.ts has a channel (channels.ts), a preload binding, an
-// ipcMain handler (ipc.ts) and a LibraryService method; state is broadcast
-// on library:state. Static checks over the sources (preload/ipc import
-// Electron, so they can't run under node).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +9,6 @@ import { LibraryService } from '../electron/library/service';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (p: string) => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g, '\n');
 
-/** Method names of a `<name>: { … };` block inside an interface / object literal. */
 function block(src: string, start: RegExp): string {
   const m = start.exec(src);
   assert.ok(m, `no ${start}`);

@@ -1,7 +1,3 @@
-// Status-bar indicator for the reference library's analysis queue, next to
-// the analyzer jobs: "Library 312/1,500 ▓▓░ 14m". Paused shows a pause
-// icon. Click opens the Library panel. Hidden when the queue is idle.
-
 import { LibraryBig, Pause } from 'lucide-react';
 import { ProgressBar } from '../ears/ProgressBar';
 import { fmtCount, fmtEtaShort, queueActive, queueFraction, queueHeadline, fmtEta } from './logic';

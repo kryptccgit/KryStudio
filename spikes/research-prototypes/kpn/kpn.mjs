@@ -1,5 +1,3 @@
-// Prototype parser for KPN (Krypt Pattern Notation) v0.1 - used only to validate doc examples.
-// Usage: node kpn.mjs <file.kpn>
 import fs from 'node:fs';
 
 const NOTE_RE = /^([A-Ga-g])(#|b)?(-?\d)$/;
@@ -14,7 +12,6 @@ function midi(tok) {
 }
 function parseOpts(s) { const o = {}; if (!s) return o; for (const kv of s.trim().split(/\s+/)) { const [k, v] = kv.split('='); o[k] = v; } return o; }
 function expandRepeats(s) {
-  // (...)*n  -> repeated, innermost first
   let prev; do { prev = s; s = s.replace(/\(([^()]*)\)\*(\d+)/g, (_, body, n) => Array(Number(n)).fill(body).join(' ')); } while (s !== prev);
   return s;
 }
@@ -34,7 +31,7 @@ export function parse(text) {
     if (!tm || !H) { out.errors.push(`unparsed line: ${line}`); continue; }
     const [, name, gridOverride, optStr, rawBody] = tm;
     const opts = parseOpts(optStr); const grid = Number(gridOverride || H.grid);
-    const barLen = grid; // steps per bar
+    const barLen = grid;
     const total = barLen * H.bars;
     const body = expandRepeats(rawBody);
     const notes = []; const errs = [];
@@ -90,7 +87,6 @@ if (process.argv[2]) {
   const text = fs.readFileSync(process.argv[2], 'utf8');
   const r = parse(text);
   const nNotes = r.tracks.reduce((a, t) => a + t.notes.length, 0);
-  // Equivalent verbose JSON a naive add_notes tool would need
   const json = JSON.stringify(r.tracks.map(t => ({ channel: t.name, notes: t.notes.map(n => ({ pitch: n.pitch, start_beat: +(n.pos * 4 / t.grid).toFixed(4), length_beats: +(n.len * 4 / t.grid).toFixed(4), velocity: n.vel })) })));
   console.log(JSON.stringify({ header: r.header, tracks: r.tracks.map(t => ({ name: t.name, notes: t.notes.length })), errors: r.errors, notes: nNotes, kpnChars: text.length, jsonChars: json.length, ratio: +(json.length / text.length).toFixed(1) }, null, 1));
 }

@@ -1,8 +1,3 @@
-//! krypt.comp — feed-forward compressor after Giannoulis, Massberg & Reiss
-//! ("Digital Dynamic Range Compressor Design", JAES 2012): stereo-linked
-//! peak or RMS detector, soft-knee gain computer in dB, smooth branching
-//! attack/release on the gain reduction, auto makeup, sidechain input.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::{db_to_gain, tc_coef, Smooth};
 use crate::params::{param_table, ParamBank};
@@ -38,7 +33,6 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
-/// Static gain computer: returns gain change in dB (<= 0) for input level `x` dB.
 #[inline]
 pub(crate) fn gain_computer(x: f32, t: f32, r: f32, w: f32) -> f32 {
     let over = x - t;
@@ -55,7 +49,6 @@ pub(crate) fn gain_computer(x: f32, t: f32, r: f32, w: f32) -> f32 {
 
 pub struct Comp {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     thr: f32,
@@ -70,7 +63,6 @@ pub struct Comp {
     gr: f32,
     makeup: Smooth,
     auto: bool,
-    /// slow average of the gain reduction (dB) for auto makeup
     avg_gr: f32,
     avg_coef: f32,
 }
@@ -157,19 +149,17 @@ impl Effect for Comp {
                 let x2 = 0.5 * (dl * dl + dr * dr);
                 self.ms += (x2 - self.ms) * self.rms_coef;
                 self.ms = crate::blocks::flush(self.ms);
-                // RMS of a sine reads 3 dB under its peak; +3 dB keeps thresholds peak-referenced
                 (2.0 * self.ms).sqrt()
             } else {
                 dl.abs().max(dr.abs())
             };
             let xdb = if level > 1e-9 { 20.0 * level.log10() } else { -180.0 };
-            let target = -gain_computer(xdb, self.thr, self.ratio, self.knee); // reduction >= 0
+            let target = -gain_computer(xdb, self.thr, self.ratio, self.knee);
             let c = if target > self.gr { self.att } else { self.rel };
             self.gr += (target - self.gr) * c;
             if self.gr < 1e-6 {
                 self.gr = 0.0;
             }
-            // auto makeup follows the average reduction while signal is present
             if self.auto && xdb > -60.0 {
                 self.avg_gr += (self.gr - self.avg_gr) * self.avg_coef;
             }
@@ -203,7 +193,6 @@ mod tests {
         assert_eq!(gain_computer(-40.0, t, r, w), 0.0);
         let g = gain_computer(0.0, t, r, w);
         assert!((g - (-15.0)).abs() < 1e-4, "{g}");
-        // continuity at knee edges
         let a = gain_computer(-23.0 - 1e-4, t, r, w);
         let b = gain_computer(-23.0 + 1e-4, t, r, w);
         assert!((a - b).abs() < 1e-3);

@@ -1,8 +1,3 @@
-//! Control-side compiler: keeps the Model mirror and turns it into `Batch`es
-//! for the audio thread. Plugin instances persist across edits, keyed by
-//! entity id (channel id / "insertId/slotId"); param edits become
-//! `set_param` updates, and only a type or sample change re-creates.
-
 use crate::automation::Point;
 use crate::model::{Model, WarpMap, Warnings};
 use crate::params::{self, ChannelParam, InsertParam, ParamRef, TransportParam};
@@ -22,11 +17,9 @@ use std::sync::Arc;
 use crate::core::Shared;
 use crate::plugins::PluginHost;
 
-// Racks (Wave 12.2): RackDef → rack::RackPlan, with the session's samples and warnings.
 #[path = "rack_compile.rs"]
 mod rack_compile;
 
-/// Stable slot allocation (id → index) with deferred reuse.
 #[derive(Default)]
 struct SlotAlloc {
     map: HashMap<String, u32>,
@@ -58,7 +51,6 @@ impl SlotAlloc {
         self.map.insert(id.to_string(), s);
         Some(s)
     }
-    /// Release every slot whose id is not in `live`; returns (id, slot).
     fn release_missing(&mut self, live: &HashSet<String>) -> Vec<(String, u32)> {
         let gone: Vec<(String, u32)> = self.map.iter().filter(|(k, _)| !live.contains(*k)).map(|(k, v)| (k.clone(), *v)).collect();
         for (k, s) in &gone {
@@ -67,7 +59,6 @@ impl SlotAlloc {
         }
         gone
     }
-    /// Slots freed in this batch become reusable from the next batch on.
     fn commit(&mut self) {
         self.free.append(&mut self.pending_free);
     }
@@ -81,23 +72,16 @@ impl SlotAlloc {
 struct InstRec {
     type_id: String,
     has_instance: bool,
-    /// Path of the sample the instance holds (None = no sample).
     sample: Option<PathBuf>,
-    /// Audio clips: the stretched / pitched variant of `sample` it holds (None = the original).
     variant: Option<VariantKey>,
     params: Vec<f32>,
     voice: (bool, f32),
-    /// Racks: structure key (rack.rs); a change re-creates the instance.
     rack: Option<String>,
-    /// krypt.slicer: the slice map it holds; a change re-creates the instance.
     slices: Option<Arc<SliceSet>>,
-    /// Instrument latency (instrument racks, third-party plugins): channel PDC.
     latency: usize,
-    /// Batch version that last created / re-parametrized it.
     version: u64,
 }
 
-/// A slicer channel's slice map for the instrument (None = no slices: the whole sample is one slice).
 fn slice_set(markers: Option<&[crate::model::SliceMarker]>) -> Option<Arc<SliceSet>> {
     let m = markers.filter(|m| !m.is_empty())?;
     let set = SliceSet::new(m.iter().map(|s| Slice {
@@ -109,10 +93,8 @@ fn slice_set(markers: Option<&[crate::model::SliceMarker]>) -> Option<Arc<SliceS
     (!set.is_empty()).then(|| Arc::new(set))
 }
 
-/// Where an audio clip's variant stands for this build.
 enum VariantState {
     Ready(Arc<SampleData>),
-    /// Being rendered by a variant worker.
     Pending,
     Failed(String),
 }
@@ -122,28 +104,21 @@ struct FxRec {
     has_instance: bool,
     params: Vec<f32>,
     latency: usize,
-    /// Batch version that last created / re-parametrized it.
     version: u64,
-    /// Racks: structure key (rack.rs); a change re-creates the instance.
     rack: Option<String>,
 }
 
-/// Slot → id tables for telemetry.
 #[derive(Default, Clone)]
 pub struct Names {
     pub inserts: Vec<(u32, String)>,
     pub channels: Vec<(u32, String)>,
     pub patterns: Vec<(u32, String)>,
-    /// Clip launcher: track / launch clip slots.
     pub launch: crate::launcher::LaunchNames,
-    /// meters: FX slot → "insertId/slotId" (gain reduction, watched slots; meters.rs).
     pub fx: Vec<(u32, String)>,
 }
 
 pub enum SampleMode {
-    /// Live engine: misses are queued to the loader thread.
     Async(crossbeam_channel::Sender<PathBuf>),
-    /// Offline render: decode synchronously.
     Sync,
 }
 
@@ -162,35 +137,24 @@ pub struct Session {
     warned: HashSet<String>,
     pub cache: Arc<SampleCache>,
     pub factory_dir: PathBuf,
-    /// Installed sound packs (`--packs-dir`): where `pack:` sample paths resolve.
     pub packs_dir: Option<PathBuf>,
     pub base_dir: Option<PathBuf>,
     sample_mode: SampleMode,
     loading: HashSet<PathBuf>,
-    /// (level, message) to be emitted by the caller.
     pub logs: Vec<(&'static str, String)>,
     pub names: Names,
     pub version: u64,
-    /// Live engine: queue of the variant (time-stretch) workers. None → variants
-    /// are rendered inline during `build` (offline renders: correctness over speed).
     pub variant_tx: Option<crossbeam_channel::Sender<VariantJob>>,
-    /// Variants the workers are rendering for us (with their cancel flags).
     variant_jobs: HashMap<VariantKey, Arc<AtomicBool>>,
-    /// Channels that waited for a variant in the last build (sorted ids).
     pub stretch_pending: Vec<String>,
-    /// Offline renders: their cancel flag, polled by inline variant renders.
     pub cancel: Arc<AtomicBool>,
-    /// Clip launcher: stable track / launch clip / scene slots (launcher.rs).
     pub launcher: crate::launcher::LauncherCompiler,
-    /// Racks compiled in the current build, by owner (channel id or "insertId/slotId"):
-    /// their targets, for automation of inner params (rack_compile.rs).
     rack_targets: HashMap<String, rack_compile::RackTargets>,
 }
 
 impl Session {
     pub fn new(host: PluginHost, sr: f32, cache: Arc<SampleCache>, factory_dir: PathBuf, sample_mode: SampleMode) -> Self {
         let mut descs: HashMap<String, Arc<PluginDescriptor>> = (host.descriptors)().into_iter().map(|d| (d.id.to_string(), Arc::new(d))).collect();
-        // The rack devices are engine composites: known whatever the plugin host.
         for d in crate::rack::rack_descriptors() {
             descs.entry(d.id.to_string()).or_insert_with(|| Arc::new(d));
         }
@@ -242,7 +206,6 @@ impl Session {
     }
 
     pub fn descriptor(&self, id: &str) -> Option<Arc<PluginDescriptor>> {
-        // Third-party hook: scanned vst3:/clap: plugins (krypt-studio-pluginclient registry).
         self.descs.get(id).cloned().or_else(|| krypt_studio_pluginclient::descriptor(id))
     }
 
@@ -250,22 +213,17 @@ impl Session {
         self.chan_slots.get(id)
     }
 
-    /// Forget every live instance (after a plugin fault): the next build re-creates all.
     pub fn forget_instances(&mut self) {
         self.insts.clear();
         self.fxs.clear();
     }
 
-    /// Third-party hook: make the next build re-create plugin instances —
-    /// every vst3:/clap: one (`all_external`: the plugin host restarted) or
-    /// only entities that had none (new plugins were just registered).
     pub fn forget_plugins(&mut self, all_external: bool) {
         let keep = |type_id: &str, has: bool| has && !(all_external && krypt_studio_pluginclient::is_external_id(type_id));
         self.insts.retain(|_, r| keep(&r.type_id, r.has_instance));
         self.fxs.retain(|_, r| keep(&r.type_id, r.has_instance));
     }
 
-    /// Resolved paths of every sample a channel of the current model uses.
     pub fn referenced_samples(&self) -> HashSet<PathBuf> {
         self.model
             .channels
@@ -276,27 +234,22 @@ impl Session {
             .collect()
     }
 
-    /// Resolve a sample path (`factory:`, `pack:`, project-relative, absolute).
     pub fn resolve(&self, p: &str) -> Result<PathBuf, String> {
         resolve_path(p, &self.factory_dir, self.packs_dir.as_deref(), self.base_dir.as_deref())
     }
 
-    /// Called when the loader finished a path (success or failure).
     pub fn sample_loaded(&mut self, path: &Path) {
         self.loading.remove(path);
     }
 
-    /// Called when a variant worker finished (or dropped) a job.
     pub fn variant_done(&mut self, key: &VariantKey) {
         self.variant_jobs.remove(key);
     }
 
-    /// Number of variants the workers are rendering for this session.
     pub fn variants_in_flight(&self) -> usize {
         self.variant_jobs.len()
     }
 
-    /// Document tempo used for tempo-synced clips (same clamp as the transport).
     fn doc_bpm(model: &Model) -> f64 {
         let b = model.transport.bpm;
         if b.is_finite() {
@@ -306,9 +259,6 @@ impl Session {
         }
     }
 
-    /// The variant a `krypt.audioclip` channel needs for its stretch params at
-    /// the document tempo (None = play the sample as is: the identity path).
-    /// `warp`: the generator's warp map (warp.rs; >= 2 markers override the stretch timing).
     #[allow(clippy::too_many_arguments)]
     fn clip_variant(&mut self, id: &str, type_id: &str, desc: Option<&PluginDescriptor>, params: &[f32], path: &Path, bpm: f64, warp: Option<&WarpMap>) -> Option<VariantKey> {
         if type_id != audioclip::PLUGIN_ID {
@@ -329,7 +279,6 @@ impl Session {
         (!key.is_identity()).then_some(key)
     }
 
-    /// Cached variant, or queue it on the workers (live) / render it now (offline).
     fn variant_for(&mut self, key: &VariantKey, src: &Arc<SampleData>) -> VariantState {
         match self.cache.variants.lookup(key) {
             VLookup::Hit(d) => VariantState::Ready(d),
@@ -358,7 +307,6 @@ impl Session {
                             }
                         }
                         VariantOutcome::Failed(m) => VariantState::Failed(m),
-                        // The render was cancelled: stay silent without a warning.
                         VariantOutcome::Cancelled => VariantState::Pending,
                     }
                 }
@@ -366,8 +314,6 @@ impl Session {
         }
     }
 
-    /// Offline builds: render every missing variant up front, in parallel, so the
-    /// channel pass below finds them all cached.
     fn prefetch_variants(&mut self, model: &Model) {
         let bpm = Self::doc_bpm(model);
         let mut jobs: Vec<(VariantKey, Arc<SampleData>)> = Vec::new();
@@ -399,8 +345,6 @@ impl Session {
         }
     }
 
-    /// Re-read effect latencies published by the audio thread. True if the
-    /// program must be rebuilt for PDC.
     pub fn refresh_latencies(&mut self, shared: &Shared) -> bool {
         let applied = shared.applied_version.load(Ordering::Acquire);
         let mut changed = false;
@@ -409,14 +353,12 @@ impl Session {
                 continue;
             }
             let Some(slot) = self.fx_slots.get(key) else { continue };
-            // Remote (third-party) effects report latency asynchronously after loading.
             let lat = krypt_studio_pluginclient::effect_latency(key).unwrap_or_else(|| shared.fx_latency[slot as usize].load(Ordering::Relaxed) as usize);
             if lat != rec.latency {
                 rec.latency = lat;
                 changed = true;
             }
         }
-        // Instrument latency (instrument racks, third-party instruments): channel PDC.
         for (id, rec) in self.insts.iter_mut() {
             if !rec.has_instance || rec.version > applied {
                 continue;
@@ -456,8 +398,6 @@ impl Session {
         }
     }
 
-    /// An SFZ instrument for krypt.multisampler: cached, loaded now (offline),
-    /// or queued on the loader thread (live; the channel is re-created when it lands).
     fn multi_for(&mut self, path: &Path) -> Option<Arc<MultiSampleSet>> {
         let res = match self.cache.lookup_multi(path) {
             MultiLookup::Hit(d) => Ok(d),
@@ -474,7 +414,6 @@ impl Session {
         };
         match res {
             Ok(set) => {
-                // The load report (regions, RAM, time; missing files, ignored opcodes): once per load.
                 if self.warned.insert(format!("multi-report:{}", set.id)) {
                     for (level, msg) in &set.report {
                         self.logs.push((level, msg.clone()));
@@ -501,8 +440,6 @@ impl Session {
         }
     }
 
-    /// Compile the current model into a batch. Never panics: a failure keeps
-    /// the audio thread on its previous program and logs an error.
     pub fn build(&mut self, reset: bool) -> Box<Batch> {
         let model = std::mem::take(&mut self.model);
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.build_inner(&model, reset)));
@@ -534,7 +471,6 @@ impl Session {
         let mut wanted_variants: HashSet<VariantKey> = HashSet::new();
         self.stretch_pending.clear();
 
-        // ── Slots for inserts, channels, patterns ───────────────────────
         let ins_ids = model.ordered_insert_ids();
         let live_ins: HashSet<String> = ins_ids.iter().cloned().collect();
         self.ins_slots.release_missing(&live_ins);
@@ -557,7 +493,6 @@ impl Session {
             self.warn_once("no-master".into(), "Project has no master insert; output is silent".into());
         }
 
-        // ── Patterns ────────────────────────────────────────────────────
         for (id, p) in &model.patterns {
             let Some(slot) = self.pat_slots.alloc(id) else { continue };
             let len = pattern_length(p, ts.time_sig.num, ts.time_sig.den);
@@ -567,8 +502,6 @@ impl Session {
                     continue;
                 };
                 for n in list {
-                    // Muted notes (piano-roll mute tool) are never scheduled. They still count
-                    // towards the auto pattern length (time::pattern_length), like on the TS side.
                     if n.tick < 0.0 || n.mute {
                         continue;
                     }
@@ -595,7 +528,6 @@ impl Session {
             prog.patterns[s] = Some(PatternProg { len, notes });
         }
 
-        // ── Channels + instrument instances ─────────────────────────────
         for (id, ch) in &model.channels {
             let Some(slot) = self.chan_slots.alloc(id) else {
                 self.warn_once(format!("ch-cap:{id}"), format!("Too many channels; channel {id} is ignored"));
@@ -610,14 +542,12 @@ impl Session {
                     match model.samples.get(sid) {
                         Some(s) => match self.resolve(&s.path) {
                             Ok(p) => sample_path = Some(p),
-                            // `pack:` paths: malformed, packs folder unknown, pack not installed.
                             Err(e) => self.warn_once(format!("resolve:{e}"), format!("{e}. Channels that use it stay silent.")),
                         },
                         None => self.warn_once(format!("ch-sample:{id}:{sid}"), format!("Channel {id} references missing sample {sid}")),
                     }
                 }
             }
-            // krypt.multisampler + .sfz: a multisample set instead of one sample.
             let sfz = sample_path.as_deref().is_some_and(is_sfz);
             let multi_data = match &sample_path {
                 Some(p) if sfz && type_id == multisampler::PLUGIN_ID => self.multi_for(p),
@@ -636,15 +566,12 @@ impl Session {
                 Some(p) => self.sample_for(p),
                 None => None,
             };
-            // Racks (rack.rs): the composite's flat param vector + its structure key.
             let rack_plan = crate::rack::RackKind::of_instrument(&type_id).map(|k| self.rack_plan(id, k, &ch.generator.params, ch.generator.rack.as_deref(), model));
             let rack_key = rack_plan.as_ref().map(|p| p.key.clone());
             let params = match &rack_plan {
                 Some(p) => p.values.clone(),
                 None => Self::param_values(desc.as_deref(), &ch.generator.params),
             };
-            // Audio clips: what the instance plays — the original sample (identity),
-            // or its time-stretched / pitched variant (variants.rs).
             let mut play_data = sample_data.clone();
             let mut variant: Option<VariantKey> = None;
             let mut keep_current = false;
@@ -657,9 +584,6 @@ impl Session {
                             variant = Some(key);
                         }
                         VariantState::Pending => {
-                            // While it renders: keep what plays if only pitch / formants
-                            // changed (same timing); otherwise silence — never audio at the
-                            // wrong tempo. Offline renders never get here (inline render).
                             self.stretch_pending.push(id.clone());
                             keep_current = self.insts.get(id).is_some_and(|r| {
                                 r.has_instance
@@ -697,7 +621,6 @@ impl Session {
                 let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut inst: Box<dyn Instrument> = match &rack_plan {
                         Some(plan) => crate::rack::build_instrument(plan, &host, sr, PREPARE_MAX),
-                        // Third-party hook: unknown to the stock factory → out-of-process VST3/CLAP proxy.
                         None => create(&type_id, sr, PREPARE_MAX)
                             .or_else(|| krypt_studio_pluginclient::create_instrument(&type_id, id, ch.generator.state.as_deref(), &ch.generator.params, sr, realtime))?,
                     };
@@ -724,8 +647,6 @@ impl Session {
                 match inst {
                     Some((inst, latency)) => {
                         b.instruments.push((slot, Some(inst)));
-                        // An audio clip re-created with new audio (sample loaded, variant
-                        // ready) resumes mid-clip at the playhead instead of waiting a pass.
                         if had_rec && type_id == audioclip::PLUGIN_ID && play_data.is_some() {
                             b.rechase.push(slot);
                         }
@@ -767,11 +688,6 @@ impl Session {
                 pan: ch.pan.clamp(-1.0, 1.0) as f32,
                 pitch: ch.pitch as f32,
                 mute: ch.mute,
-                // Sample instruments play the original pitch at pitch == the sample's own
-                // root (WAV smpl chunk, else 60). The document's rootKey is authoritative:
-                // shift so that key == rootKey lands exactly on that. The Multisampler maps
-                // keys itself (SFZ pitch_keycenter per region): no shift. The Slicer plays every slice at its
-                // recorded pitch (its keys pick slices): no shift either.
                 root_shift: if uses_sample && ch.generator.type_id != "krypt.multisampler" && ch.generator.type_id != slicer::PLUGIN_ID {
                     sample_data.as_ref().and_then(|d| d.root_key).map(|k| k as f32).unwrap_or(60.0) - root_key as f32
                 } else {
@@ -784,7 +700,6 @@ impl Session {
                 pdc: None,
             });
         }
-        // Variants: stop rendering what is no longer wanted; protect what is.
         if self.variant_tx.is_some() {
             self.variant_jobs.retain(|k, cancel| {
                 let keep = wanted_variants.contains(k);
@@ -798,7 +713,6 @@ impl Session {
         self.logs.extend(self.cache.variants.drain_logs());
         self.stretch_pending.sort();
 
-        // Cut groups.
         let cut_by: Vec<(u32, i64)> = model
             .channels
             .iter()
@@ -812,7 +726,6 @@ impl Session {
             }
         }
 
-        // ── FX instances ────────────────────────────────────────────────
         let mut live_fx: HashSet<String> = HashSet::new();
         for iid in &ins_ids {
             let ins = &model.inserts[iid];
@@ -828,11 +741,9 @@ impl Session {
             }
         }
 
-        // ── Graph: nodes = inserts (ordered), edges = routes + sidechains ─
         let n = ins_ids.len();
         let index: HashMap<&str, usize> = ins_ids.iter().enumerate().map(|(i, id)| (id.as_str(), i)).collect();
         let master_idx = index.get(model.master_id.as_str()).copied();
-        // Route automation may target a send that doesn't exist yet: add it at level 0.
         let mut extra_routes: HashSet<(String, String)> = HashSet::new();
         for clip in model.clips.values() {
             if clip.kind != "automation" {
@@ -874,7 +785,6 @@ impl Session {
             }
         }
         let route_adj = adj.clone();
-        // Sidechain edges.
         let mut sc_ok: HashMap<(usize, String), usize> = HashMap::new();
         for v in 0..n {
             let ins = &model.inserts[&ins_ids[v]];
@@ -895,7 +805,6 @@ impl Session {
         }
         let order = topo_order(&adj);
 
-        // Solo: keep soloed inserts, everything feeding them, everything they feed, and the master.
         let soloed: Vec<usize> = (0..n).filter(|&i| model.inserts[&ins_ids[i]].solo).collect();
         let mut solo_muted = vec![false; n];
         if !soloed.is_empty() {
@@ -903,7 +812,6 @@ impl Session {
             for &s in &soloed {
                 keep[s] = true;
             }
-            // downstream
             let mut q: VecDeque<usize> = soloed.iter().copied().collect();
             let mut seen = keep.clone();
             while let Some(x) = q.pop_front() {
@@ -915,7 +823,6 @@ impl Session {
                     }
                 }
             }
-            // upstream
             let mut radj: Vec<Vec<usize>> = vec![Vec::new(); n];
             for (u, vs) in route_adj.iter().enumerate() {
                 for &v in vs {
@@ -941,11 +848,8 @@ impl Session {
             }
         }
 
-        // FX programs + instance diffs, per insert.
         let mut fx_progs: Vec<Vec<FxProg>> = vec![Vec::new(); n];
         let mut lat = vec![0usize; n];
-        // An insert's FX chain may sleep through silence when every active effect is
-        // a stock one whose output can't return after a silent gap (an echo delay can).
         let mut can_sleep = vec![true; n];
         for u in 0..n {
             let iid = ins_ids[u].clone();
@@ -958,7 +862,6 @@ impl Session {
                     continue;
                 };
                 let desc = self.descriptor(&fx.type_id);
-                // FX racks (rack.rs): the composite's flat param vector + its structure key.
                 let rack_plan = (fx.type_id == crate::rack::FX_RACK_PLUGIN).then(|| self.rack_plan(&key, crate::rack::RackKind::Effect, &fx.params, fx.rack.as_deref(), model));
                 let rack_key = rack_plan.as_ref().map(|p| p.key.clone());
                 let params = match &rack_plan {
@@ -978,7 +881,6 @@ impl Session {
                     let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         let mut e = match &rack_plan {
                             Some(plan) => crate::rack::build_effect(plan, &host, sr, PREPARE_MAX),
-                            // Third-party hook: unknown to the stock factory → out-of-process VST3/CLAP proxy.
                             None => create(&fx.type_id, sr, PREPARE_MAX)
                                 .or_else(|| krypt_studio_pluginclient::create_effect(&fx.type_id, &key, fx.state.as_deref(), &fx.params, sr, realtime))?,
                         };
@@ -1032,11 +934,9 @@ impl Session {
                 } else {
                     NONE
                 };
-                // echoes / grains can leave silent gaps longer than quiet_frames (and frozen loops play on silence)
                 if fx.enabled && (!fx.type_id.starts_with("krypt.") || matches!(fx.type_id.as_str(), "krypt.delay" | "krypt.tapeecho" | "krypt.grain")) {
                     can_sleep[u] = false;
                 }
-                // FX racks sleep only if every inner device could (rack.rs).
                 if fx.enabled && fx.rack.as_deref().is_some_and(|r| !crate::rack::devices_may_sleep(r)) {
                     can_sleep[u] = false;
                 }
@@ -1044,8 +944,6 @@ impl Session {
             }
         }
 
-        // PDC for instruments (Wave 12.2b): the direct channel inputs of insert u line up at in_lat[u],
-        // the largest instrument latency among its channels; each channel is delayed by the difference.
         let mut in_lat = vec![0usize; n];
         let ins_of_slot: HashMap<u32, usize> = (0..n).filter_map(|u| self.ins_slots.get(&ins_ids[u]).map(|s| (s, u))).collect();
         for c in prog.channels.iter() {
@@ -1057,7 +955,6 @@ impl Session {
             let d = ins_of_slot.get(&c.insert_slot).map_or(0, |&u| in_lat[u] - c.latency);
             c.pdc = (d > 0).then(|| DelayLine::new(d));
         }
-        // PDC: arrival latency per insert along route edges, in topo order (direct channels arrive at in_lat).
         let mut arrive = in_lat.clone();
         for &u in &order {
             for &(v, _) in &routes_ok[u] {
@@ -1098,7 +995,6 @@ impl Session {
                 routes,
                 chan_delay,
                 in_lat: in_lat[u],
-                // 0.5 s outlasts the longest silent gap a stock effect can leave (reverb pre-delay <= 250 ms)
                 quiet_frames: if can_sleep[u] && !is_master { (0.5 * self.sr).max(1.0) as u32 } else { 0 },
             });
             if is_master {
@@ -1107,7 +1003,6 @@ impl Session {
         }
         let ins_prog_index: HashMap<u32, usize> = prog.inserts.iter().enumerate().map(|(i, p)| (p.slot, i)).collect();
 
-        // ── Transport ───────────────────────────────────────────────────
         prog.transport = TransportProg {
             bpm: if ts.bpm.is_finite() { ts.bpm.clamp(10.0, 999.0) } else { 140.0 },
             swing: ts.swing.clamp(0.0, 1.0),
@@ -1122,9 +1017,8 @@ impl Session {
             metronome: ts.metronome,
         };
 
-        // ── Clips ───────────────────────────────────────────────────────
         for (k, m) in self.launcher.alloc_tracks(model) {
-            self.warn_once(k, m); // launcher: track slots (clip progs carry them)
+            self.warn_once(k, m);
         }
         let any_track_solo = model.tracks.values().any(|t| t.solo);
         let mut song_end_raw: f64 = 0.0;
@@ -1202,7 +1096,6 @@ impl Session {
         prog.song_end = bar.max((song_end_raw / bar).ceil() * bar);
         self.prev_targets = target_index;
 
-        // ── Clip launcher (launcher.rs) ─────────────────────────────────
         let (lp, lwarns) = {
             let pats = &self.pat_slots;
             let chans = &self.chan_slots;
@@ -1215,7 +1108,6 @@ impl Session {
             self.warn_once(k, m);
         }
 
-        // ── Names for telemetry ─────────────────────────────────────────
         self.names = Names { inserts: self.ins_slots.entries(), channels: self.chan_slots.entries(), patterns: self.pat_slots.entries(), launch: self.launcher.names(), fx: self.fx_slots.entries() };
         self.names.inserts.retain(|(_, id)| model.inserts.contains_key(id));
         self.names.channels.retain(|(_, id)| model.channels.contains_key(id));
@@ -1296,7 +1188,6 @@ impl Session {
                 let k = prog.inserts[i].routes.iter().position(|r| r.target_slot == ts)?;
                 (TargetKind::Route { ins: i, route: k }, params::spec_route(), ins.routes.get(&target).copied().unwrap_or(0.0) as f32)
             }
-            // Inside a rack (Wave 12.2b): the rack's target index; the core writes it as an override.
             ParamRef::Rack { host, chain, what } => match host {
                 params::RackHost::Channel(ch) => {
                     let slot = self.chan_slots.get(&ch)?;
@@ -1320,7 +1211,6 @@ impl Session {
     }
 }
 
-/// Is `to` reachable from `from` over `adj`?
 pub fn reachable(adj: &[Vec<usize>], from: usize, to: usize) -> bool {
     if from == to {
         return true;
@@ -1342,7 +1232,6 @@ pub fn reachable(adj: &[Vec<usize>], from: usize, to: usize) -> bool {
     false
 }
 
-/// Kahn's algorithm; ties broken by node index (deterministic).
 pub fn topo_order(adj: &[Vec<usize>]) -> Vec<usize> {
     let n = adj.len();
     let mut indeg = vec![0usize; n];
@@ -1364,7 +1253,6 @@ pub fn topo_order(adj: &[Vec<usize>]) -> Vec<usize> {
         }
     }
     if out.len() < n {
-        // Unreachable when edges were cycle-checked; keep every node anyway.
         for i in 0..n {
             if !out.contains(&i) {
                 out.push(i);
@@ -1380,7 +1268,6 @@ mod tests {
 
     #[test]
     fn topo_and_cycle_rejection() {
-        // Build like the compiler does: add edges one by one, rejecting cycles.
         let n = 4;
         let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
         let edges = [(1, 0), (2, 1), (3, 2), (0, 3), (1, 2), (3, 0)];
@@ -1411,7 +1298,7 @@ mod tests {
         assert_eq!(s.alloc("b"), Some(1));
         let live: HashSet<String> = ["b".to_string()].into_iter().collect();
         assert_eq!(s.release_missing(&live), vec![("a".to_string(), 0)]);
-        assert_eq!(s.alloc("c"), Some(2)); // freed slot not reused in the same batch
+        assert_eq!(s.alloc("c"), Some(2));
         s.commit();
         assert_eq!(s.alloc("d"), Some(0));
         assert_eq!(s.alloc("e"), Some(3));

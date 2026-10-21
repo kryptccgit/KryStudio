@@ -1,8 +1,3 @@
-// Slicer tools (research/13-roadmap.md §8.5): slice_sample chops a loop into ONE Krypt Slicer channel (markers on the
-// channel, slice N on key First key + N - 1) through the main-side slicer shared with the UI and slice_to_pads
-// (electron/racks/slice.ts); edit_slices adds, moves, removes and tweaks markers with the slicer.* doc commands.
-// Each call is one undo step (the call's group).
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import type { Channel } from '@shared/schema/project';
@@ -15,14 +10,12 @@ import { sliceToPads } from '../../racks/slice';
 
 const zLabel = z.string().max(80).optional().describe("Short description of this change for the user's AI-history panel.");
 
-/** The Slicer channel `ref` names (anything else is refused with a human message). */
 function slicerChannel(deps: MainDeps, ref: string): Channel {
   const ch = findChannel(deps.doc.project, ref);
   if (ch.generator.type !== SLICER_PLUGIN) fail(`"${safeName(ch.name)}" is not a Slicer channel. Chop a loop into one with slice_sample first.`);
   return ch;
 }
 
-/** "slice 3 (D4) at 0.750 s" lines for the result. */
 function describeSlices(ch: Channel): string {
   const base = slicerBaseKey(ch);
   const list = ch.generator.slices ?? [];
@@ -34,8 +27,6 @@ function describeSlices(ch: Channel): string {
     })
     .join('; ');
 }
-
-// ── slice_sample ──────────────────────────────────────────────────────
 
 export const sliceSampleTool = defineTool({
   name: 'slice_sample',
@@ -97,8 +88,6 @@ export const sliceSampleTool = defineTool({
   },
 });
 
-// ── edit_slices ───────────────────────────────────────────────────────
-
 const zSliceNo = z.number().int().min(1).max(MAX_SLICER_SLICES);
 
 export const editSlicesTool = defineTool({
@@ -136,7 +125,7 @@ export const editSlicesTool = defineTool({
       done.push('cleared the markers');
     }
     if (a.remove?.length) {
-      const ids = [...new Set(a.remove)].map(idOf); // numbers as they were before the call
+      const ids = [...new Set(a.remove)].map(idOf);
       for (const sliceId of ids) ctx.exec('slicer.removeSlice', { channelId: id, sliceId });
       done.push(`removed ${plural(ids.length, 'slice')}`);
     }
@@ -151,7 +140,6 @@ export const editSlicesTool = defineTool({
     if (a.set?.length) done.push(`set ${plural(a.set.length, 'slice')}`);
     let patternNote = '';
     if (a.pattern) {
-      // The pool may not know the sample's length (the replay pattern's last note needs it): ask the engine.
       const s = deps.doc.project.samples[current().generator.sampleId ?? ''];
       const info = s ? await deps.engine.sampleInfo(deps.project.resolveSamplePath(s.path)).catch(() => null) : null;
       const lengthSec = info?.ok && info.data && info.data.durationSec > 0 ? info.data.durationSec : undefined;

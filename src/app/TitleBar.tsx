@@ -1,6 +1,3 @@
-// Frameless title bar: logo, menu bar (File / Edit / View / Tools / Help),
-// the project tab strip (src/app/tabs, research/19) and the window buttons.
-
 import { useEffect, useRef, useState } from 'react';
 import {
   AudioLines,
@@ -175,7 +172,6 @@ function toolsMenu(): MenuItem[] {
   ];
 }
 
-/** Tools ▸ AI focus: pick the collection agents compose from, or clear it. */
 function focusMenu(): MenuItem[] {
   const s = useLibrary.getState().state;
   const cols = s?.collections ?? [];
@@ -225,7 +221,7 @@ function helpMenu(): MenuItem[] {
         cmd('tools.shortcuts', 'Customize shortcuts…', Settings),
         { type: 'separator' },
         ...getKeymap()
-          .filter((b) => !b.context && !/^tabs\.goto[2-8]$/.test(b.command)) // Ctrl+1 … Ctrl+8: one row is enough
+          .filter((b) => !b.context && !/^tabs\.goto[2-8]$/.test(b.command))
           .map((b) => ({ label: getAppCommand(b.command)?.label ?? b.command, shortcut: prettyKeys(b.keys), onSelect: () => runCommand(b.command) })),
         { type: 'separator' },
         { type: 'header', label: 'Piano roll / Playlist tool keys: see Customize shortcuts' },
@@ -241,7 +237,6 @@ function helpMenu(): MenuItem[] {
   ];
 }
 
-/** `guide`: the Guides' "Show me" anchor (src/guides/anchors.ts), set as data-guide on the menu button. */
 const MENUS: Array<{ id: string; label: string; guide?: string; items: () => MenuItem[] }> = [
   { id: 'file', label: 'File', guide: 'titlebar.file', items: fileMenu },
   { id: 'edit', label: 'Edit', items: editMenu },
@@ -288,7 +283,6 @@ function MenuBar() {
   );
 }
 
-/** Title-bar Home button: the hub ⇄ the Studio. */
 function HomeButton() {
   const open = useHome((s) => s.open && s.phase === 'ready');
   const keys = shortcutFor('view.home');

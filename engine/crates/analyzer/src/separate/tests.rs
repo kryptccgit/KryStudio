@@ -1,10 +1,3 @@
-//! `separate` job tests. The end-to-end ones need the model and ONNX Runtime:
-//!
-//!   KRYPT_TEST_HTDEMUCS=<dir with htdemucs_fwd.onnx(.data)>
-//!   ORT_DYLIB_PATH=<…\onnxruntime.dll>   (default: <repo>/resources/bin/onnxruntime.dll)
-//!
-//! and are skipped (pass trivially, with a note on stderr) without them.
-
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -24,8 +17,6 @@ fn test_dylib() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../resources/bin").join(runtime::DYLIB))
 }
 
-/// Every test that may touch ONNX Runtime goes through here first, so the
-/// process-wide runtime is always loaded from the same place.
 fn init_runtime() -> Result<(), String> {
     runtime::runtime_from(&test_dylib()).map(|_| ())
 }
@@ -80,17 +71,12 @@ fn devices_lists_cpu_first() {
     assert!(d.iter().all(|x| x == "cpu" || x == "directml"));
 }
 
-// ── End to end (gated) ────────────────────────────────────────────────
-
 struct Mix {
     left: Vec<f32>,
     right: Vec<f32>,
-    /// The bass line alone (mono, same in both channels).
     bass: Vec<f32>,
 }
 
-/// ~kick on every beat, 8th-note noise hats, a sine bass line and a vibrato
-/// "vocal" with harmonics, at 120 BPM.
 fn synth_mix(rate: u32, seconds: f32) -> Mix {
     let sr = rate as f32;
     let n = (sr * seconds) as usize;
@@ -207,7 +193,6 @@ fn e2e(rate: u32, device: &str) {
     let resid_db = 10.0 * (resid / energy).log10();
     eprintln!("[{rate} Hz, {device}] sum-of-stems residual {resid_db:.1} dB; bass-line share per stem (drums, bass, other, vocals): {bass_share:.3?}");
     assert!(resid_db < -15.0, "stems don't add up to the mix: residual {resid_db:.1} dB");
-    // The very end must be real audio too (resampler delay flushed, not zero-padded).
     let tail = n - (rate as usize / 20);
     let tail_resid: f64 = (tail..n).map(|i| f64::from(sum_l[i] - mix.left[i]).powi(2)).sum();
     let tail_energy: f64 = (tail..n).map(|i| f64::from(mix.left[i]).powi(2)).sum();
@@ -252,8 +237,6 @@ fn e2e_cancel_mid_run_leaves_nothing() {
     let out = dir.join("stems");
     let cancel = Arc::new(AtomicBool::new(false));
     let events = Arc::new(Mutex::new(Vec::new()));
-    // Cancel ~0.3 s after the model is loaded and the first chunk starts: lands inside a model run
-    // (terminated through RunOptions), not just between chunks.
     let (c2, armed) = (cancel.clone(), Arc::new(AtomicBool::new(false)));
     let ctx = JobCtx::new(9, cancel.clone(), {
         let events = events.clone();

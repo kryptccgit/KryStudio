@@ -1,6 +1,3 @@
-//! Effect behaviour: silence, tails, latency, extreme params, limiter
-//! ceiling incl. true peak, EQ accuracy, sidechain, tempo sync.
-
 mod common;
 use common::*;
 
@@ -18,13 +15,11 @@ fn fx(id: &str) -> Box<dyn Effect> {
 #[test]
 fn silence_in_gives_silence_out() {
     for id in effect_ids() {
-        // fresh instance: digital silence stays digital silence
         let mut e = fx(id);
         let mut l = vec![0.0f32; 48000];
         let mut r = vec![0.0f32; 48000];
         run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
         assert_eq!(peak(&l).max(peak(&r)), 0.0, "{id} made noise from silence");
-        // after a loud burst, tails decay to (near) silence
         let mut l = noise(48000, 3, 0.7);
         let mut r = noise(48000, 4, 0.7);
         l.extend(std::iter::repeat_n(0.0, 48000 * 12));
@@ -76,8 +71,8 @@ fn extreme_params_stay_finite() {
             }
             let mut l = noise(9600, round + 1, 1.0);
             let mut r = noise(9600, round + 2, 1.0);
-            l[100] = 1e6; // a spike
-            r[200] = f32::NAN; // and garbage
+            l[100] = 1e6;
+            r[200] = f32::NAN;
             let sc_l = noise(9600, 9, 1.0);
             let sc_r = noise(9600, 10, 1.0);
             run_fx(e.as_mut(), &mut l, &mut r, if round == 5 { 1e-9 } else { 40.0 + 200.0 * rnd() as f64 }, Some((&sc_l, &sc_r)));
@@ -114,7 +109,6 @@ fn reported_latency_matches_impulse_delay() {
         for (p, v) in *params {
             e.set_param(param(id, p), *v);
         }
-        // the engine reads latency() right after set_param, before processing
         let lat = e.latency();
         let mut l = vec![0.0f32; 4800];
         let mut r = vec![0.0f32; 4800];
@@ -122,7 +116,6 @@ fn reported_latency_matches_impulse_delay() {
         r[1000] = 0.05;
         run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
         let imax = l.iter().enumerate().fold((0, 0.0f32), |a, (i, &v)| if v.abs() > a.1 { (i, v.abs()) } else { a }).0;
-        // drive's tone low pass (20 kHz) adds ~1 sample of group delay of its own
         let slack = if *id == "krypt.drive" { 1 } else { 0 };
         assert!((imax as i64 - (1000 + lat) as i64).abs() <= slack, "{id} {params:?}: peak at {imax}, latency() = {lat}");
     }
@@ -213,7 +206,6 @@ fn eq_gain_at_centre_frequency_within_half_db() {
             }
         }
     }
-    // shelves: full gain far from the corner, half (in dB) at the corner
     let mut e = fx("krypt.eq");
     e.set_param(param("krypt.eq", "b2Gain"), 9.0);
     e.set_param(param("krypt.eq", "b2Freq"), 200.0);
@@ -226,7 +218,6 @@ fn eq_gain_at_centre_frequency_within_half_db() {
     e.set_param(param("krypt.eq", "b6Freq"), 3000.0);
     let far = sine_gain_db(e.as_mut(), 18000.0);
     assert!((far + 9.0).abs() < 0.5, "high shelf far {far}");
-    // cuts: -3 dB at the corner per Butterworth section, slope per setting
     for (slope, expect_oct) in [(0.0f32, 12.0f32), (1.0, 24.0), (2.0, 48.0)] {
         let mut e = fx("krypt.eq");
         e.set_param(param("krypt.eq", "b1On"), 1.0);
@@ -237,7 +228,6 @@ fn eq_gain_at_centre_frequency_within_half_db() {
         let below = sine_gain_db(e.as_mut(), 100.0);
         assert!((below + 2.0 * expect_oct).abs() < 2.0, "low cut slope {slope}: {below} dB two octaves down");
     }
-    // flat by default
     let mut e = fx("krypt.eq");
     for f in [30.0f32, 440.0, 5000.0, 16000.0] {
         assert!(sine_gain_db(e.as_mut(), f).abs() < 0.01, "default EQ not flat at {f}");
@@ -246,8 +236,6 @@ fn eq_gain_at_centre_frequency_within_half_db() {
 
 #[test]
 fn compressor_reduces_and_follows_sidechain() {
-    // 0 dBFS-peak sine, threshold -18, ratio 4 → steady reduction 13.5 dB
-    // (RMS detector is peak-referenced for sines, so it reads 0 dB)
     let mut e = fx("krypt.comp");
     e.set_param(param("krypt.comp", "autoMakeup"), 0.0);
     e.set_param(param("krypt.comp", "knee"), 0.0);
@@ -258,7 +246,6 @@ fn compressor_reduces_and_follows_sidechain() {
     run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
     let gr = 20.0 * (peak(&l[40000..]) / 1.0).log10();
     assert!((gr + 13.5).abs() < 0.5, "reduction {gr}");
-    // sidechain: quiet input, loud key → ducks only when enabled
     let quiet: Vec<f32> = src.iter().map(|v| v * 0.05).collect();
     let key: Vec<f32> = src.clone();
     for (use_sc, expect_duck) in [(1.0, true), (0.0, false)] {
@@ -286,13 +273,12 @@ fn delay_echo_lands_on_the_synced_time() {
     let mut r = vec![0.0f32; 96000];
     l[100] = 1.0;
     r[100] = 1.0;
-    run_fx(e.as_mut(), &mut l, &mut r, 120.0, None); // 1/4 at 120 bpm = 0.5 s
+    run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
     let first = l.iter().enumerate().skip(200).fold((0, 0.0f32), |a, (i, &v)| if v.abs() > a.1 { (i, v.abs()) } else { a });
     assert!((first.0 as i64 - (100 + 24000)).abs() <= 2, "echo at {}", first.0);
     let second = l[24200..].iter().enumerate().skip(23000).fold((0, 0.0f32), |a, (i, &v)| if v.abs() > a.1 { (i, v.abs()) } else { a });
     assert!((second.0 as i64 + 24200 - (100 + 48000)).abs() <= 3, "second echo at {}", second.0 + 24200);
     assert!(second.1 < first.1 * 0.7, "feedback should decay");
-    // ping-pong alternates sides
     let mut e = fx("krypt.delay");
     e.set_param(param("krypt.delay", "modDepth"), 0.0);
     e.set_param(param("krypt.delay", "division"), 9.0);
@@ -310,7 +296,7 @@ fn duck_tempo_shape_locks_to_beats() {
     let mut e = fx("krypt.duck");
     let n = 48000 * 2;
     let (mut l, mut r) = (vec![0.5f32; n], vec![0.5f32; n]);
-    run_fx(e.as_mut(), &mut l, &mut r, 120.0, None); // beats every 24000 samples
+    run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
     for beat in 1..4 {
         let at = beat * 24000;
         let dip = l[at + 60..at + 200].iter().cloned().fold(1.0f32, f32::min);
@@ -318,7 +304,6 @@ fn duck_tempo_shape_locks_to_beats() {
         let before = l[at - 300];
         assert!(before > 0.45, "not recovered before beat {beat}: {before}");
     }
-    // follow mode without sidechain passes audio unchanged
     let mut e = fx("krypt.duck");
     e.set_param(param("krypt.duck", "mode"), 1.0);
     let (mut l, mut r) = (vec![0.5f32; 9600], vec![0.5f32; 9600]);
@@ -345,12 +330,8 @@ fn clipper_and_drive_behave() {
     }
 }
 
-/// Tube's and Fold's ADAA antiderivatives aren't 0 at 0: a zeroed state after
-/// reset (playback restart mid-note) or a mode switch mid-stream used to
-/// divide that jump by a tiny dx and spike to ~80x full scale.
 #[test]
 fn drive_never_spikes_after_reset_or_a_mode_switch() {
-    // starts at its crest: the first sample after reset is far from 0
     let src: Vec<f32> = (0..9600).map(|i| 0.3 * (std::f32::consts::TAU * 220.0 * i as f32 / SR).cos()).collect();
     for mode in 0..4 {
         let mut e = fx("krypt.drive");
@@ -386,7 +367,6 @@ fn filter_lfo_is_tempo_locked() {
     let mut l = noise(n, 21, 0.5);
     let mut r = l.clone();
     run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
-    // saw-up LFO per beat: the second half of each beat is brighter (louder) than the first
     for beat in 0..3 {
         let s = beat * 24000;
         let a = rms(&l[s + 1000..s + 9000]);
@@ -425,7 +405,6 @@ fn reverb_decay_matches_rt60_and_is_decorrelated() {
         l[0] = 1.0;
         r[0] = 1.0;
         run_fx(e.as_mut(), &mut l, &mut r, 120.0, None);
-        // Schroeder backward integration: T30 extrapolated to RT60
         let mut sch = vec![0.0f64; n];
         let mut acc = 0.0f64;
         for i in (0..n).rev() {
@@ -444,7 +423,7 @@ fn reverb_decay_matches_rt60_and_is_decorrelated() {
 
 #[test]
 fn comp_auto_makeup_keeps_level() {
-    let mut e = fx("krypt.comp"); // defaults: -18 dB, 4:1, auto makeup on
+    let mut e = fx("krypt.comp");
     let n = 48000 * 6;
     let src: Vec<f32> = (0..n).map(|i| 0.7 * (std::f32::consts::TAU * 220.0 * i as f32 / SR).sin()).collect();
     let (mut l, mut r) = (src.clone(), src.clone());

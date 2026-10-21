@@ -1,10 +1,3 @@
-//! Automation curve evaluation — the IDENTICAL formula to
-//! shared/schema/automation.ts (golden-tested below):
-//!   t = (tick - a) / (b - a)
-//!   shape(t, τ) = τ == 0 ? t : t ^ (2 ^ (-3τ))
-//!   value = va + (vb - va) * shape(t, τ)
-//! Before the first point: first value. After the last point: last value.
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
     pub tick: f64,
@@ -21,12 +14,10 @@ pub fn shape_curve(t: f64, tension: f64) -> f64 {
     }
 }
 
-/// Sort like `sortPoints()` (tick, then id).
 pub fn sort_points(points: &mut [(f64, String, f64, f64)]) {
     points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.1.cmp(&b.1)));
 }
 
-/// Normalized 0..1 value at `tick` (points must be sorted). [RT]
 pub fn eval(sorted: &[Point], tick: f64) -> f64 {
     let n = sorted.len();
     if n == 0 {
@@ -62,8 +53,6 @@ pub fn eval(sorted: &[Point], tick: f64) -> f64 {
 mod tests {
     use super::*;
 
-    // Golden values produced by running the TS formula in Node 24
-    // (shapeCurve / evalAutomation from shared/schema/automation.ts).
     #[test]
     fn golden_shape() {
         let cases = [
@@ -105,7 +94,6 @@ mod tests {
             assert!((got - want).abs() < 1e-14, "eval({tick}) = {got}, want {want}");
         }
         assert_eq!(eval(&[], 5.0), 0.0);
-        // Coincident points: value of the later one.
         let dup = [
             Point { tick: 0.0, value: 0.0, tension: 0.0 },
             Point { tick: 100.0, value: 0.2, tension: 0.0 },

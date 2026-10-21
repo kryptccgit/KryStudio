@@ -1,6 +1,3 @@
-//! `analyze` on synthetic signals: tempo, beats, downbeats, key, swing,
-//! sections, loudness, stereo.
-
 mod common;
 
 use common::*;
@@ -43,16 +40,12 @@ fn tempo_120_groove() {
     eprintln!("120: {}", summary(&a));
     assert_tempo(&a, 120.0);
     let b = a.beats.as_ref().unwrap();
-    // 16 bars × 4 beats; the tracker may trim one at either end.
     assert!((60..=66).contains(&b.times.len()), "{} beats", b.times.len());
-    // Beats sit on the grid (offset 0.3 s, 0.5 s period) within 15 ms.
     for &t in &b.times {
         let ph = ((t - 0.3) / 0.5).round();
         assert!(((t - 0.3) - ph * 0.5).abs() < 0.015, "beat at {t} off the grid");
     }
     assert_eq!(b.beats_per_bar, 4);
-    // Downbeats: kick on 1 and 3, snare on 2 and 4 → bar starts at 0.3 + 2k s
-    // (the DSP heuristic may land on beat 3, which also carries the kick).
     for &d in &b.downbeats {
         let ph = ((d - 0.3) / 1.0).round();
         assert!(((d - 0.3) - ph).abs() < 0.015, "downbeat {d} not on a kick beat");
@@ -66,9 +59,7 @@ fn tempo_93_groove() {
     let a = run(&[x], false, false);
     eprintln!("93: {}", summary(&a));
     assert_tempo(&a, 93.0);
-    // 8th-note hats: no off-beat 16ths, so no 16th swing to report.
     assert!(a.swing.is_none(), "swing {:?}", a.swing);
-    // Unpitched drums: no key.
     assert!(a.key.is_none(), "key {:?}", a.key.as_ref().map(|k| &k.name));
 }
 
@@ -91,7 +82,6 @@ fn tempo_click_track_120_and_93() {
 
 #[test]
 fn tempo_140_trap_half_time() {
-    // 140 BPM, 16th hats, kick syncopated, snare on beat 3 (half-time feel).
     let x = groove(140.0, 16, "x... .... ..x. ..x.", ".... .... x... ....", HAT_16, 0.0, 0.2);
     let a = run(&[x], false, false);
     eprintln!("trap: {}", summary(&a));
@@ -111,7 +101,6 @@ fn no_pulse_gives_null_tempo() {
     assert!(a.tempo.is_none(), "noise has a tempo: {}", summary(&a));
     assert!(a.beats.is_none());
     assert!(a.key.is_none(), "noise has a key: {}", summary(&a));
-    // A sustained chord has a key but no pulse.
     let pad = chord(&[60.0, 64.0, 67.0], 20.0, 0.2);
     for model in [false, true] {
         let a = run(std::slice::from_ref(&pad), false, model);
@@ -132,21 +121,18 @@ fn progression(chords: &[&[f32]], secs_each: f32, repeats: usize) -> Vec<f32> {
 
 #[test]
 fn key_c_major_and_a_minor() {
-    // I–IV–V–I in C (C E G, F A C, G B D, C E G), bass doubling the root.
     let c = progression(&[&[48.0, 60.0, 64.0, 67.0], &[53.0, 60.0, 65.0, 69.0], &[55.0, 59.0, 62.0, 67.0], &[48.0, 60.0, 64.0, 67.0]], 2.0, 3);
     let a = run(&[c], false, false);
     eprintln!("C: {}", summary(&a));
     let k = a.key.as_ref().expect("key");
     assert_eq!(k.name, "C");
     assert_eq!(k.mode, "major");
-    // The pitch profile: 12 shares summing to 1, the C major notes on top.
     let pp = a.pitch_profile.as_ref().expect("pitch profile");
     assert_eq!(pp.len(), 12);
     assert!((pp.iter().sum::<f32>() - 1.0).abs() < 0.01, "{pp:?}");
     let in_key: f32 = [0usize, 2, 4, 5, 7, 9, 11].iter().map(|&i| pp[i]).sum();
     assert!(in_key > 0.85, "C major notes hold {in_key} of {pp:?}");
     assert!(pp[0] > pp[1] && pp[7] > pp[6], "{pp:?}");
-    // i–iv–V–i in A minor (A C E, D F A, E G# B, A C E).
     let am = progression(&[&[45.0, 57.0, 60.0, 64.0], &[50.0, 57.0, 62.0, 65.0], &[52.0, 56.0, 59.0, 64.0], &[45.0, 57.0, 60.0, 64.0]], 2.0, 3);
     let a = run(&[am], false, false);
     eprintln!("Am: {}", summary(&a));
@@ -154,7 +140,6 @@ fn key_c_major_and_a_minor() {
     assert_eq!(k.name, "Am");
     assert_eq!(k.tonic, "A");
     assert_eq!(k.mode, "minor");
-    // F# minor, spelled with a sharp: i–iv–V–i.
     let fsm = progression(&[&[42.0, 54.0, 57.0, 61.0], &[47.0, 54.0, 59.0, 62.0], &[49.0, 53.0, 56.0, 61.0], &[42.0, 54.0, 57.0, 61.0]], 2.0, 3);
     let a = run(&[fsm], false, false);
     eprintln!("F#m: {}", summary(&a));
@@ -163,7 +148,6 @@ fn key_c_major_and_a_minor() {
 
 #[test]
 fn key_survives_drums_and_detuning() {
-    // Eb major progression 30 cents sharp under a drum groove.
     let det = 0.3;
     let eb = progression(&[&[51.0 + det, 63.0 + det, 67.0 + det, 70.0 + det], &[56.0 + det, 63.0 + det, 68.0 + det, 72.0 + det], &[58.0 + det, 62.0 + det, 65.0 + det, 70.0 + det], &[51.0 + det, 63.0 + det, 67.0 + det, 70.0 + det]], 2.0, 3);
     let mut x = groove(120.0, 12, KICK_44, SNARE_BACK, HAT_8, 0.0, 0.0);
@@ -182,7 +166,6 @@ fn swing_measured_on_transport_scale() {
         let s = a.swing.unwrap_or_else(|| panic!("no swing for {sw}: {}", summary(&a)));
         assert!(s >= lo && s <= hi, "swing {sw} measured {s}");
     }
-    // Only quarter-note hits: off-beat 16ths are empty → nothing to measure.
     let x = groove(100.0, 12, "x... x... x... x...", "", "", 0.0, 0.25);
     let a = run(&[x], false, false);
     assert!(a.swing.is_none(), "swing on a quarter-note pattern: {:?}", a.swing);
@@ -190,7 +173,6 @@ fn swing_measured_on_transport_scale() {
 
 #[test]
 fn sections_label_repeats() {
-    // A (C–F chords, 8th hats) / B (Am–E chords, 16th hats, louder kick) / A / B; 8 bars each at 120.
     let bars = 8;
     let make = |b: bool| -> Vec<f32> {
         let mut d = if b { groove(120.0, bars, "x.x. ..x. x.x. ..x.", SNARE_BACK, HAT_16, 0.0, 0.0) } else { groove(120.0, bars, KICK_44, SNARE_BACK, HAT_8, 0.0, 0.0) };
@@ -211,13 +193,11 @@ fn sections_label_repeats() {
     for (s, want) in a.sections.iter().zip([0.0f32, 16.0, 32.0, 48.0]) {
         assert!((s.start_sec - want).abs() <= 1.1, "section at {} (want {want})", s.start_sec);
     }
-    // B is louder than A.
     assert!(a.sections[1].lufs > a.sections[0].lufs);
 }
 
 #[test]
 fn loudness_energy_and_stereo() {
-    // Stereo: uncorrelated noise → wide; mono → width 0, correlation 1.
     let mut r1 = Rng::new(1);
     let mut r2 = Rng::new(2);
     let n = (12.0 * SR) as usize;
@@ -230,12 +210,10 @@ fn loudness_energy_and_stereo() {
     let a = run(std::slice::from_ref(&l), false, false);
     assert_eq!(a.stereo.width, 0.0);
     assert!((a.stereo.correlation - 1.0).abs() < 1e-3);
-    // Energy curve: 0.5 s hop, covers the file, matches the engine's integrated loudness.
     assert_eq!(a.energy.hop_sec, 0.5);
     assert_eq!(a.energy.lufs.len(), 24);
     let mid = a.energy.lufs[12];
     assert!((mid - a.levels.lufs_integrated).abs() < 0.5, "short-term {mid} vs integrated {}", a.levels.lufs_integrated);
-    // Quiet then loud: the curve follows.
     let mut x = vec![0f32; n];
     for i in 0..n {
         x[i] = l[i] * if i < n / 2 { 0.1 } else { 1.0 };
@@ -297,13 +275,11 @@ fn analyze_file_end_to_end_and_errors() {
     }
     assert!(json["beats"]["beatsPerBar"].is_number());
     assert!((a.onset_rate - 4.0).abs() < 1.0, "onset rate {}", a.onset_rate);
-    // Missing file → a sentence naming it.
     let bad = AnalyzeArgs { path: dir.join("nope.wav").to_string_lossy().into(), sections: true, beat_model_dir: None, drums: false };
     match krypt_studio_analyzer::analyze::run(&bad, &JobCtx::detached()) {
         Err(krypt_studio_analyzer::JobError::Failed(m)) => assert!(m.contains("nope.wav"), "{m}"),
         _ => panic!("expected failure"),
     }
-    // Garbage file → unsupported/corrupt.
     let junk = dir.join("junk.wav");
     std::fs::write(&junk, b"this is not audio at all").unwrap();
     let bad = AnalyzeArgs { path: junk.to_string_lossy().into(), sections: true, beat_model_dir: None, drums: false };
@@ -325,7 +301,6 @@ fn cancel_stops_analysis() {
     assert!(matches!(r, Err(krypt_studio_analyzer::JobError::Cancelled)));
 }
 
-/// 3-minute stereo 44.1 kHz performance check (run with --ignored, release).
 #[test]
 #[ignore]
 fn perf_three_minutes() {
@@ -344,13 +319,11 @@ fn perf_three_minutes() {
     }
 }
 
-// ── harmonic-rich key regressions (detuned saws, sub bass, dense hats) ──
-
 const BAR140: f32 = 60.0 / 140.0 * 4.0;
-const FM9: &[f32] = &[53.0, 56.0, 60.0, 63.0, 67.0]; // F3 Ab3 C4 Eb4 G4
-const DBMAJ7: &[f32] = &[49.0, 53.0, 56.0, 60.0, 65.0]; // Db3 F3 Ab3 C4 F4
-const EBMAJ9: &[f32] = &[51.0, 55.0, 58.0, 62.0, 65.0]; // Eb3 G3 Bb3 D4 F4
-const CM7: &[f32] = &[48.0, 51.0, 55.0, 58.0]; // C3 Eb3 G3 Bb3
+const FM9: &[f32] = &[53.0, 56.0, 60.0, 63.0, 67.0];
+const DBMAJ7: &[f32] = &[49.0, 53.0, 56.0, 60.0, 65.0];
+const EBMAJ9: &[f32] = &[51.0, 55.0, 58.0, 62.0, 65.0];
+const CM7: &[f32] = &[48.0, 51.0, 55.0, 58.0];
 
 fn f_minor_pad(detune: f32, loops: usize) -> Vec<f32> {
     let bar: [(&[f32], f32); 4] = [(FM9, BAR140), (DBMAJ7, BAR140), (EBMAJ9, BAR140), (CM7, BAR140)];
@@ -358,7 +331,6 @@ fn f_minor_pad(detune: f32, loops: usize) -> Vec<f32> {
     saw_pad(&chords, 12.0, detune, 2400.0, 0.12)
 }
 
-/// The expected key, or its relative with the expected key ranked second.
 fn assert_key_or_relative(a: &AudioAnalysis, want: &str, relative: &str) {
     let k = a.key.as_ref().unwrap_or_else(|| panic!("no key (want {want}): {}", summary(a)));
     assert!(k.name == want || k.name == relative, "key {} (want {want} or {relative})", k.name);
@@ -372,7 +344,6 @@ fn key_detuned_saw_pad_minor_sevenths() {
         eprintln!("saw pad Fm (detune {detune:+}): {}", summary(&a));
         assert_key_or_relative(&a, "Fm", "Ab");
     }
-    // D minor with a harmonic-minor V7: Dm7 – Bbmaj7 – Gm7 – A7, 20 cents sharp.
     let bar: [(&[f32], f32); 4] = [(&[50.0, 53.0, 57.0, 60.0], 2.0), (&[46.0, 50.0, 53.0, 57.0], 2.0), (&[43.0, 46.0, 50.0, 53.0], 2.0), (&[45.0, 49.0, 52.0, 55.0], 2.0)];
     let chords: Vec<(&[f32], f32)> = (0..3).flat_map(|_| bar.iter().copied()).collect();
     let x = saw_pad(&chords, 15.0, 20.0, 3000.0, 0.12);
@@ -383,11 +354,6 @@ fn key_detuned_saw_pad_minor_sevenths() {
 
 #[test]
 fn key_sub_bass_saw_pad_under_dense_hats() {
-    // i – VI – VII – i in F minor; square-bass roots F1 (43.7 Hz), Db1
-    // (34.6 Hz), Eb1 (38.9 Hz): the 808 register. (The Neon Fog loop itself,
-    // i – VI – VII – v, is a near-tie between Fm and Cm on pitch content; a
-    // loud, partial-rich bass then decides it. The real demo is covered by
-    // tests/neonfog.rs.)
     let bass_bar = [(29.0, BAR140), (25.0, BAR140), (27.0, BAR140), (29.0, BAR140)];
     let bass_notes: Vec<(f32, f32)> = (0..4).flat_map(|_| bass_bar.iter().copied()).collect();
     let bar: [(&[f32], f32); 4] = [(FM9, BAR140), (DBMAJ7, BAR140), (EBMAJ9, BAR140), (FM9, BAR140)];
@@ -405,7 +371,6 @@ fn key_sub_bass_saw_pad_under_dense_hats() {
 
 #[test]
 fn key_square_bass_alone() {
-    // An F-minor bass riff with fundamentals at 35–55 Hz (and its octave).
     let q = 60.0 / 140.0;
     let riff = [29.0, 32.0, 36.0, 29.0, 25.0, 29.0, 32.0, 25.0, 27.0, 31.0, 34.0, 27.0, 36.0, 32.0, 31.0, 29.0];
     let notes: Vec<(f32, f32)> = (0..4).flat_map(|_| riff.iter().map(|&m| (m, q))).collect();
@@ -422,13 +387,6 @@ fn dense_hats_and_claps_have_no_key() {
     assert!(a.key.is_none(), "{}", summary(&a));
 }
 
-// ── key re-ranking by chord function (transposed Neon Fog loop) ──
-
-/// The Neon Fog loop (i9 – VImaj7 – VIImaj9 – v7, demo voicings) moved by
-/// `shift` semitones at 142 BPM: detuned saw pad, square bass on the roots
-/// (the demo's 808 rhythm) and a drum groove whose kick has a fixed pitch
-/// (~50 Hz) that does not move with the song — as in the real demo, it
-/// biases the pitch profile, and the chords must set the key straight.
 fn transposed_loop(shift: f32, loops: usize) -> Vec<f32> {
     let bar = 240.0 / 142.0;
     let s = |v: &[f32]| -> Vec<f32> { v.iter().map(|m| m + shift).collect() };
@@ -436,7 +394,6 @@ fn transposed_loop(shift: f32, loops: usize) -> Vec<f32> {
     let bar_chords: Vec<(&[f32], f32)> = voicings.iter().map(|v| (v.as_slice(), bar)).collect();
     let chords: Vec<(&[f32], f32)> = (0..loops).flat_map(|_| bar_chords.iter().copied()).collect();
     let mut x = saw_pad(&chords, 12.0, 0.0, 2400.0, 0.12);
-    // 808 rhythm on the roots (beats): F F Ab | Db Db C | Eb Eb F | C C Eb.
     let q = 60.0 / 142.0;
     let line: [(f32, f32); 12] = [(29.0, 2.5), (29.0, 1.0), (32.0, 0.5), (37.0, 2.5), (37.0, 0.75), (36.0, 0.75), (39.0, 2.5), (39.0, 1.0), (41.0, 0.5), (36.0, 2.5), (36.0, 0.75), (39.0, 0.75)];
     let notes: Vec<(f32, f32)> = (0..loops).flat_map(|_| line.iter().map(|&(m, b)| (m + shift, b * q))).collect();

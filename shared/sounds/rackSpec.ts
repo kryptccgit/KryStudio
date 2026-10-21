@@ -1,9 +1,3 @@
-// Racks in presets (Wave 12.2): a project RackDef → the id-free PresetRack a
-// preset stores (shared/sounds/types.ts). Chains, devices and macro targets
-// become indices; inner samples become their pool paths (like preset
-// samples); params are sparse (only what differs from the defaults). The
-// reverse is rackFromSpec in shared/commands/racks.ts. Pure.
-
 import type { Project } from '../schema/project';
 import type { RackDef } from '../schema/rack';
 import { MACRO_COUNT } from '../schema/rack';
@@ -13,7 +7,6 @@ import type { PresetFx, PresetMacroMap, PresetRack, PresetRackChain } from './ty
 
 const round = (v: number): number => Math.round(v * 1e6) / 1e6;
 
-/** Params that differ from the plugin's defaults (local copy of capture.sparseParams, to keep the import graph flat). */
 function sparse(catalog: PluginCatalog, type: string, params: Record<string, number>): Record<string, number> {
   const desc = findPlugin(catalog, type);
   const out: Record<string, number> = {};
@@ -27,7 +20,6 @@ function sparse(catalog: PluginCatalog, type: string, params: Record<string, num
   return out;
 }
 
-/** The preset form of a rack. Chains with an instrument that isn't in the catalog keep it as is (validated on load). */
 export function rackToSpec(project: Project, catalog: PluginCatalog, rack: RackDef): PresetRack {
   const chainIdx = new Map<string, number>();
   const chains: PresetRackChain[] = rack.chainOrder
@@ -75,7 +67,6 @@ export function rackToSpec(project: Project, catalog: PluginCatalog, rack: RackD
     const named = m.name && m.name !== `Macro ${i + 1}`;
     return { ...(named ? { name: m.name } : {}), ...(maps.length ? { maps } : {}) };
   });
-  // Trailing default macros are left out.
   while (macros.length && !macros[macros.length - 1].name && !macros[macros.length - 1].maps) macros.pop();
   const spec: PresetRack = { kind: rack.kind, chains };
   if (macros.length) spec.macros = macros;

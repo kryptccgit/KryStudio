@@ -1,12 +1,3 @@
-// Built-in agent panel backend (research/04 §8): a tool-use loop in Electron MAIN over the SAME tool registry the
-// MCP server exposes, on the provider the user picked (shared/agent/providers.ts): Anthropic through its SDK
-// (./loop.ts), OpenAI (ChatGPT) and OpenRouter through the OpenAI-compatible Chat Completions API
-// (./openaiLoop.ts). The renderer only receives AgentChatEvents on MCP_CHANNELS.agentEvent.
-//
-// Each provider's API key is encrypted with Electron safeStorage (DPAPI) in its own userData file (./key.ts). A key
-// is never logged, broadcast, returned or written in plain text; settings.agent.keys mirrors which providers have one
-// and settings.agent.hasApiKey whether the selected one does.
-
 import fs from 'node:fs';
 import { safeStorage } from 'electron';
 import type { ActionResult } from '@shared/types';
@@ -33,7 +24,6 @@ export function createAgent(deps: MainDeps): AgentController {
     return isAgentProvider(p) ? p : 'anthropic';
   };
 
-  /** Record which providers have a saved key (files only: env keys are a developer convenience). */
   const syncKeys = () => {
     const s = deps.getSettings();
     const keys = Object.fromEntries(AGENT_PROVIDER_IDS.map((p) => [p, fs.existsSync(keyPathFor(deps.userDataDir, p))])) as Record<AgentProvider, boolean>;
@@ -48,7 +38,6 @@ export function createAgent(deps: MainDeps): AgentController {
     if (p === 'anthropic') return null;
     const key = providerKey(deps.userDataDir, p);
     if (!key) return null;
-    // OpenRouter shows which app made the request (its documented attribution headers).
     const headers = p === 'openrouter' && ctx.intact ? { 'HTTP-Referer': ctx.siteUrl, 'X-Title': ctx.productName } : undefined;
     return { provider: p, key, model: modelFor(deps.getSettings().agent, p), headers };
   });

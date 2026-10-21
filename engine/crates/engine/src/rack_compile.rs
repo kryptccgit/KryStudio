@@ -1,9 +1,3 @@
-//! Rack planning (compile.rs child module, so it reaches the Session's
-//! sample cache and warnings): `RackDef` → `rack::RackPlan`, i.e. the inner
-//! instruments / devices to create, their samples (resolved and loaded like
-//! channel samples), the flat param vector (module docs of rack.rs) with
-//! the macro maps resolved, and the structure key that decides rebuilds.
-
 use super::Session;
 use crate::model::{FxSlot, Generator, Model};
 use crate::model_ext::RackDef;
@@ -15,16 +9,12 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-/// A compiled rack's mappable targets, for automation of inner params
-/// (`<host>/rack/<chain>/…` ParamRefs → TargetKind::RackInst / RackFx).
 pub(crate) struct RackTargets {
     pub index: BTreeMap<TargetKey, usize>,
-    /// Per target: its spec and its document (base) value.
     pub targets: Vec<(ParamSpec, f32)>,
 }
 
 impl RackTargets {
-    /// Target index, spec and document value of an inner param.
     pub fn find(&self, chain: &str, what: &crate::params::RackParam) -> Option<(usize, ParamSpec, f32)> {
         use crate::params::RackParam;
         let key: TargetKey = match what {
@@ -38,18 +28,13 @@ impl RackTargets {
     }
 }
 
-/// Per chain: the instrument's descriptor and each device with its descriptor.
 type ChainDescs<'a> = (Option<Arc<PluginDescriptor>>, Vec<(&'a FxSlot, Arc<PluginDescriptor>)>);
 
-/// Built-in target specs (same as shared/schema/params.ts BUILTIN_SPECS).
 fn spec_chain_volume() -> ParamSpec {
     ParamSpec { id: "volume", name: "Volume", min: 0.0, max: 2.0, default: 1.0, unit: "", scale: "gain", step: None, options: None, group: None, automatable: None }
 }
 
 impl Session {
-    /// Plan the rack of a channel generator (`owner` = channel id) or of an FX
-    /// slot (`owner` = "insertId/slotId"). Never fails: anything unsupported is
-    /// skipped with a warning and the rest of the rack still plays.
     pub(super) fn rack_plan(&mut self, owner: &str, kind: RackKind, params: &BTreeMap<String, f64>, def: Option<&RackDef>, model: &Model) -> RackPlan {
         let mut plan = RackPlan::new(kind);
         let mut key = String::new();
@@ -72,10 +57,8 @@ impl Session {
             chains.truncate(MAX_RACK_CHAINS);
         }
 
-        // Pass 1: chains, inner instances, chain settings.
         let mut settings: Vec<f32> = Vec::with_capacity(chains.len() * CHAIN_SETTINGS);
         let mut enabled: Vec<f32> = Vec::new();
-        // Per chain: (instrument descriptor, [(device slot, descriptor)]).
         let mut descs: Vec<ChainDescs> = Vec::new();
         for c in &chains {
             let mut cp = ChainPlan { id: c.id.clone(), ..Default::default() };
@@ -136,9 +119,7 @@ impl Session {
             descs.push((inst_desc, devs));
         }
 
-        // Pass 2: mappable targets (chain-major), their base values, and an index to resolve maps.
         let mut bases: Vec<f32> = Vec::new();
-        // (chain id, kind, device id, param) → target index.
         let mut index: BTreeMap<TargetKey, usize> = BTreeMap::new();
         for (ci, c) in chains.iter().enumerate() {
             let mut push = |plan: &mut RackPlan, what: TargetWhat, spec: ParamSpec, base: f32, k: (&'static str, String, String)| {
@@ -163,8 +144,6 @@ impl Session {
             }
         }
 
-        // Pass 3: macro maps → per-target (macro, min, max). Macro order, then map id order:
-        // a later map of the same target overwrites (last wins).
         let mut maps: Vec<(u8, f32, f32)> = vec![(0, 0.0, 1.0); plan.targets.len()];
         for (m, mac) in def.macros.iter().take(MACRO_COUNT).enumerate() {
             for map in mac.maps.values() {
@@ -195,7 +174,6 @@ impl Session {
         plan.values = values;
         plan.key = key;
         plan.index = index;
-        // Automation of inner params resolves its target index and spec here (compile.rs resolve_target).
         let bases = plan.targets_base();
         self.rack_targets.insert(
             owner.to_string(),
@@ -204,7 +182,6 @@ impl Session {
         plan
     }
 
-    /// A chain's instrument: a stock, non-rack instrument, with its sample.
     fn rack_instrument(&mut self, owner: &str, chain: &str, g: &Generator, model: &Model) -> Option<(InstPlan, Arc<PluginDescriptor>)> {
         let t = g.type_id.as_str();
         if t.is_empty() {
@@ -264,7 +241,6 @@ impl Session {
         Some((ip, desc))
     }
 
-    /// A chain device: a stock, non-rack effect.
     fn rack_device(&mut self, owner: &str, chain: &str, fx: &FxSlot) -> Option<Arc<PluginDescriptor>> {
         let t = fx.type_id.as_str();
         if is_rack(t) {

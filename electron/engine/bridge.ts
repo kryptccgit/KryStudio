@@ -1,9 +1,3 @@
-// DocHost → engine bridge. Every DocChange becomes an entity-level diff
-// (shared/engine/projection.ts) sent as `apply {version}`; bursts within
-// ~8 ms are coalesced into one apply. A reset (new/open project) — or any
-// failed apply — sends the whole project with `loadProject` instead.
-// Sample paths are resolved to absolute paths before they reach the engine.
-
 import type { Patch } from 'immer';
 import type { DocChange, DocHost } from '@shared/doc/DocHost';
 import type { Project, SampleRef } from '@shared/schema/project';
@@ -22,7 +16,6 @@ export class EngineBridge {
   private loadSeq = 0;
   private failedApplies = 0;
   private lastLoadAt = 0;
-  /** The last loadProject/apply sent. The engine answers stdin in order, so its ack covers every earlier one. */
   private lastSent: Promise<unknown> = Promise.resolve();
   private unsub: () => void;
 
@@ -33,8 +26,6 @@ export class EngineBridge {
     private readonly log: (level: 'debug' | 'info' | 'warn' | 'error', m: string) => void,
   ) {
     this.unsub = doc.subscribe((c) => this.onChange(c));
-    // The process died (or hasn't said hello yet): nothing to keep in sync.
-    // The supervisor calls load() again as the last step of every (re)start.
     engine.onStatus(() => {
       if (!engine.isAlive()) this.toIdle();
     });
@@ -54,14 +45,12 @@ export class EngineBridge {
 
   private resolveSample = (s: SampleRef): SampleRef => ({ ...s, path: this.resolveSamplePath(s.path) });
 
-  /** The project as the engine should see it (absolute sample paths). */
   engineProject(p: Project = this.doc.project): Project {
     const samples: Record<string, SampleRef> = {};
     for (const [id, s] of Object.entries(p.samples)) samples[id] = this.resolveSample(s);
     return { ...p, samples };
   }
 
-  /** Send the whole project. Changes arriving meanwhile are queued and applied after the ack. */
   async load(): Promise<ActionResult> {
     const seq = ++this.loadSeq;
     this.lastLoadAt = Date.now();
@@ -73,7 +62,7 @@ export class EngineBridge {
     const req = this.engine.request<{ version: number }>({ cmd: 'loadProject', version, project: this.engineProject() }, 60_000);
     this.lastSent = req;
     const r = await req;
-    if (seq !== this.loadSeq) return r; // superseded by a newer load
+    if (seq !== this.loadSeq) return r;
     if (!r.ok) {
       this.mode = 'idle';
       return r;
@@ -90,7 +79,6 @@ export class EngineBridge {
       return;
     }
     if (this.mode === 'idle') {
-      // Engine alive but the last load/apply failed: retry a full load (at most every 5 s).
       if (this.engine.isAlive() && this.engine.status().state === 'running' && Date.now() - this.lastLoadAt > 5000) void this.load();
       return;
     }
@@ -98,12 +86,6 @@ export class EngineBridge {
     if (this.mode === 'live') this.schedule();
   }
 
-  /**
-   * Send changes still waiting in the coalescing window now and resolve once
-   * the engine has acked everything sent so far, including a load in progress
-   * and the changes queued behind it. Never rejects; a failed apply has
-   * already triggered a resync, which this waits for too.
-   */
   async sync(): Promise<void> {
     for (let i = 0; i < 4; i++) {
       if (this.timer) {

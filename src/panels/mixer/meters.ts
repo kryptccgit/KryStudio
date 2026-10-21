@@ -1,6 +1,3 @@
-// Peak meters drawn straight to canvases from ONE frame subscriber per
-// mixer view. Strips register their canvas; values never touch React.
-
 import { onFrame, setupCanvas } from '../../render/frameLoop';
 import { telemetry } from '../../live/telemetry';
 
@@ -77,11 +74,9 @@ export class MeterBank {
       const hR = mr * e.h;
       ctx.fillRect(0, e.h - hL, bw, hL);
       ctx.fillRect(bw + 1, e.h - hR, bw, hR);
-      // peak hold ticks
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       if (mhl > 0.01) ctx.fillRect(0, Math.round(e.h - mhl * e.h), bw, 1);
       if (mhr > 0.01) ctx.fillRect(bw + 1, Math.round(e.h - mhr * e.h), bw, 1);
-      // 0 dB line + clip cap
       const zero = Math.round(e.h - ((0 - MIN_DB) / (MAX_DB - MIN_DB)) * e.h);
       ctx.fillStyle = 'rgba(255,255,255,0.18)';
       ctx.fillRect(0, zero, e.w, 1);

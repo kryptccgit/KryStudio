@@ -1,10 +1,3 @@
-// Tab shortcuts as app commands (keymap ids in src/input/keymap.ts):
-//   tabs.next / tabs.prev        Ctrl+Tab / Ctrl+Shift+Tab
-//   tabs.goto1 … tabs.goto9      Ctrl+1 … Ctrl+8, Ctrl+9 = the last tab
-//   tabs.close                   Ctrl+W
-//   tabs.reopenClosed            Ctrl+Shift+T: the newest closed thing, a tab or a panel
-// File ▸ New tab stays `file.new` (Ctrl+N) so users' custom bindings keep working.
-
 import { registerCommands } from '../../input/commands';
 import { shortcutFor } from '../../input/keymap';
 import { flashHint } from '../hints';
@@ -39,7 +32,6 @@ function closeActive(): void {
   if (id) void closeTab(id);
 }
 
-/** Ctrl+Shift+T: whichever went last, a project tab or a panel. */
 function reopenLast(): void {
   const pick = pickReopen(lastPanelClosedAt(), lastTabClosedAt());
   if (pick === 'panel') {
@@ -52,7 +44,6 @@ function reopenLast(): void {
 
 let installed = false;
 
-/** Boot: the tab feed, panel-close undo and the tab commands. */
 export function installTabs(): void {
   if (installed) return;
   installed = true;

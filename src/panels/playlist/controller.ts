@@ -1,9 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Playlist controller: tracks × time, pattern / audio / automation clips.
-// Same contract as the piano roll: React renders chrome once, this class
-// owns view + gestures + canvas layers; each gesture commits ONE dispatch.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { AutomationPoint, Clip, Project } from '@shared/schema/project';
 import { patternLength } from '@shared/schema/project';
 import { ticksPerBar, type TimeSig } from '@shared/schema/time';
@@ -41,7 +35,6 @@ import { C, rgba } from '../../editors/theme';
 import { PL_TOOLS, usePlaylistView } from './store';
 import { CLIP_HEADER_H, automationPointsXY, paintClip, sortedPoints, type AutoOverride } from './paint';
 import { AUDIO_FILE_RE } from '@shared/audio/formats';
-// Wave 12.2b (workflow): fades, ruler markers, Follow tempo on drop
 import { ticksPerBeat } from '@shared/schema/time';
 import { previousTouching, type CrossfadeKind } from '@shared/commands/fades';
 import type { Marker } from '@shared/schema/project';
@@ -49,7 +42,6 @@ import { openMenu } from '../../components/Menu';
 import { fadeLabel, fadeLenAt, hitFadeHandle, withFade, type FadeDrag, type FadeEdge } from './fades';
 import { editMarkerInline, hitMarker, markerLabelWidth, markerMenuItems, markersWithDrag, moveMarker, type MarkerDrag } from './markers';
 import { followTempoAfterDrop } from './followTempo';
-// Wave 12.2b (takes): take lanes under tracks + swipe-comp (takes.ts)
 import { TakeLanes, buildTrackLanes, type TrackLaneLayout } from './takes';
 import { registerTabView } from '../../app/tabs/viewState';
 
@@ -118,7 +110,6 @@ type Drag =
     }
   | { kind: 'resize'; edge: 'left' | 'right'; ids: string[]; origins: Map<string, Clip>; primary: Clip; grab: number; dT: number; committing?: boolean }
   | { kind: 'marquee'; tickA: number; yA: number; base: Set<string> }
-  /** `menu`: a right-press that hasn't moved yet. Released in place it opens a menu; dragged, it swipe-deletes (the FL gesture). */
   | { kind: 'erase'; ids: Set<string>; lastX: number; lastY: number; menu?: RightPress; committing?: boolean }
   | { kind: 'mute'; ids: Set<string>; value: boolean | null; lastX: number; lastY: number; committing?: boolean }
   | { kind: 'slice'; tick: number; laneA: number; laneB: number; committing?: boolean }
@@ -128,7 +119,6 @@ type Drag =
 
 type RightPress = { clientX: number; clientY: number; downX: number; downY: number; clipId: string | null; lane: number };
 
-/** A right-press moving further than this (px) is a swipe-delete, not a menu click. */
 const RIGHT_DRAG_PX = 4;
 
 type RulerDrag =
@@ -136,7 +126,6 @@ type RulerDrag =
   | { kind: 'loop'; a: number; b: number }
   | { kind: 'edge'; edge: 'start' | 'end'; start: number; end: number };
 
-/** Per-tab playlist view (src/app/tabs/viewState.ts). */
 type PlaylistViewSnap = { scrollTick: number; pxPerTick: number; scrollY: number };
 
 export class PlaylistController {
@@ -154,7 +143,6 @@ export class PlaylistController {
 
   private project: Project | null = null;
   private lanes: TrackLaneLayout = buildTrackLanes([], () => 0, () => 0);
-  /** Wave 12.2b (takes): take lanes under expanded tracks + the swipe-comp gesture (takes.ts). */
   private takes = new TakeLanes({
     project: () => this.project,
     lanes: () => this.lanes,
@@ -178,11 +166,9 @@ export class PlaylistController {
   readonly selection = new Set<string>();
   private drag: Drag | null = null;
   private ptr: Ptr | null = null;
-  /** Pointer at gesture start; edge auto-scroll arms only after real movement (a click near an edge must not scroll). */
   private downPt: { x: number; y: number; armed: boolean } | null = null;
   private hover: { lane: number; tick: number; clipId: string | null; zone: EdgeZone | ''; pointId: string | null } | null = null;
   private rulerDrag: RulerDrag | null = null;
-  /** Wave 12.2b: a fade handle being dragged (fades.ts), the fade handle under the pointer, a ruler marker being dragged (markers.ts). */
   private fadeDrag: FadeDrag | null = null;
   private fadeHover: FadeEdge | null = null;
   private markerDrag: MarkerDrag | null = null;
@@ -194,19 +180,11 @@ export class PlaylistController {
   private glowWasActive = false;
   private offs: Array<() => void> = [];
 
-  /** performance.now() of the last manual scroll / zoom: follow-playhead waits a moment after it. */
   private userViewAt = 0;
 
-  /** Set by the React shell: open the clip context menu at client coords. */
   onMenu: ((x: number, y: number, clipId: string) => void) | null = null;
-  /** Set by the React shell: right-click on empty playlist space (trackId null below the last track). */
   onEmptyMenu: ((x: number, y: number, trackId: string | null, tick: number) => void) | null = null;
-  /** Set by the React shell: open the ruler (time) menu at client coords for a song tick. */
   onRulerMenu: ((x: number, y: number, tick: number) => void) | null = null;
-
-  // ────────────────────────────────────────────────────────────────────
-  // Lifecycle
-  // ────────────────────────────────────────────────────────────────────
 
   attach(els: PlaylistEls): () => void {
     this.els = els;
@@ -286,8 +264,7 @@ export class PlaylistController {
         if (s.tool !== prev.tool) this.updateCursor();
       }),
       onFrame((_dt, now) => this.frame(now)),
-      this.takes.subscribe(() => this.rebuildLanes()), // takes: expand / collapse
-      // Project tabs (research/19): scroll / zoom per tab; a tab switch clears the clip selection.
+      this.takes.subscribe(() => this.rebuildLanes()),
       registerTabView('playlist', { capture: () => this.viewSnapshot(), restore: (v) => this.restoreView(v as PlaylistViewSnap | undefined) }),
     );
     void els.root.ownerDocument.fonts?.ready.then(() => this.markAll());
@@ -307,10 +284,6 @@ export class PlaylistController {
     for (const l of [this.gridL, this.contentL, this.overlayL, this.rulerL]) l.dirty = true;
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Data
-  // ────────────────────────────────────────────────────────────────────
-
   private refresh(agent: boolean, prevProject: Project | null): void {
     const p = getProject();
     if (!p) return;
@@ -322,7 +295,7 @@ export class PlaylistController {
       this.anySolo = Object.values(p.playlist.tracks).some((t) => t.solo);
       this.rebuildLanes();
     }
-    if (this.takes.changed(p)) this.rebuildLanes(); // takes: lane counts follow the take groups
+    if (this.takes.changed(p)) this.rebuildLanes();
     if (p.playlist.clips !== this.clipsRec) {
       if (agent) this.glow.mark(changedIds(this.clipsRec ?? undefined, p.playlist.clips), performance.now());
       this.clipsRec = p.playlist.clips;
@@ -330,7 +303,6 @@ export class PlaylistController {
       for (const id of this.selection) if (!p.playlist.clips[id]) this.selection.delete(id);
     }
     if (agent && prevProject) {
-      // an agent editing a pattern / automation lights up every clip that uses it
       const pats = new Set(changedIds(prevProject.patterns, p.patterns));
       const auts = new Set(changedIds(prevProject.automations, p.automations));
       if (pats.size || auts.size) {
@@ -385,10 +357,6 @@ export class PlaylistController {
     return this.lanes.ids.indexOf(c.trackId);
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // View
-  // ────────────────────────────────────────────────────────────────────
-
   private contentTicks(): number {
     const bar = ticksPerBar(this.ts);
     return Math.max(this.songEnd + bar * 16, bar * 128);
@@ -398,7 +366,6 @@ export class PlaylistController {
     return { scrollTick: this.tv.scrollTick, pxPerTick: this.tv.pxPerTick, scrollY: this.scrollY };
   }
 
-  /** After a tab switch: that tab's scroll / zoom (undefined = a tab not seen yet: back to the start, zoom kept). */
   restoreView(v: PlaylistViewSnap | undefined): void {
     this.selection.clear();
     this.drag = null;
@@ -462,10 +429,6 @@ export class PlaylistController {
     if (el.style.cursor !== c) el.style.cursor = c;
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Hit-testing
-  // ────────────────────────────────────────────────────────────────────
-
   private laneAtY(y: number): number {
     return laneAt(this.lanes, y + this.scrollY);
   }
@@ -484,7 +447,6 @@ export class PlaylistController {
     return { clip: h.clip, zone: h.zone, lane, header };
   }
 
-  /** Content area of a clip in lane `lane` (screen y): where curves / notes are drawn. */
   private clipBody(lane: number): { top: number; h: number } {
     const hh = this.lanes.heights[lane] - 2;
     const header = hh >= 28 ? CLIP_HEADER_H : 0;
@@ -502,10 +464,6 @@ export class PlaylistController {
     return i >= 0 ? { clip: hit.clip, lane: hit.lane, point: pts[i].p } : null;
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Grid pointer handling
-  // ────────────────────────────────────────────────────────────────────
-
   private setPtr(e: PointerEvent | MouseEvent | DragEvent): Ptr {
     const r = this.els!.overlay.getBoundingClientRect();
     this.ptr = { x: e.clientX - r.left, y: e.clientY - r.top, alt: e.altKey, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey };
@@ -517,7 +475,7 @@ export class PlaylistController {
     const p = this.setPtr(e);
     this.downPt = { x: p.x, y: p.y, armed: false };
     if (this.takes.down(e, p.x, p.y)) {
-      this.els!.overlay.setPointerCapture(e.pointerId); // takes: swipe-comp on a take lane
+      this.els!.overlay.setPointerCapture(e.pointerId);
       return;
     }
     const tick = xToTick(this.tv, p.x);
@@ -541,7 +499,6 @@ export class PlaylistController {
         void dispatch('automation.editPoints', { id: ap.clip.automationId, remove: [ap.point.id] }, { label: 'Delete automation point' });
         return;
       }
-      // Right-click = a menu (the clip's, or empty space's); right-drag = swipe-delete. Decided on the first real move.
       this.lastClickTick = p.alt ? Math.round(tick) : snapTo(tick, grid);
       this.drag = { kind: 'erase', ids: new Set(), lastX: p.x, lastY: p.y, menu: { clientX: e.clientX, clientY: e.clientY, downX: p.x, downY: p.y, clipId: hit?.clip.id ?? null, lane } };
       return;
@@ -642,7 +599,6 @@ export class PlaylistController {
       this.contentL.dirty = this.overlayL.dirty = true;
       return;
     }
-    // empty: draw / paint the brush pattern
     if (lane < 0 || lane >= this.lanes.ids.length) return;
     const patId = this.project.transport.activePatternId;
     const pat = patId ? this.project.patterns[patId] : undefined;
@@ -674,7 +630,7 @@ export class PlaylistController {
     const p = this.setPtr(e);
     if (!this.drag && !this.fadeDrag && this.takes.move(p.x, p.y, e.altKey)) {
       if (this.hover) {
-        this.hover = null; // takes: no clip hover over a take lane
+        this.hover = null;
         this.overlayL.dirty = true;
       }
       return;
@@ -778,7 +734,7 @@ export class PlaylistController {
       case 'mute': {
         if (d.kind === 'erase' && d.menu) {
           if (Math.hypot(p.x - d.menu.downX, p.y - d.menu.downY) <= RIGHT_DRAG_PX) return;
-          d.menu = undefined; // a drag after all: erase from the press point on
+          d.menu = undefined;
         }
         const steps = Math.max(1, Math.ceil(Math.hypot(p.x - d.lastX, p.y - d.lastY) / 4));
         let grew = false;
@@ -825,7 +781,6 @@ export class PlaylistController {
       try {
         this.els?.overlay.releasePointerCapture(e.pointerId);
       } catch {
-        /* not captured */
       }
       if (cancelled) this.takes.cancel();
       else this.takes.up();
@@ -840,7 +795,6 @@ export class PlaylistController {
     try {
       this.els?.overlay.releasePointerCapture(e.pointerId);
     } catch {
-      /* not captured */
     }
     if (cancelled) {
       this.cancelDrag();
@@ -879,7 +833,6 @@ export class PlaylistController {
       }
       case 'move': {
         if (!d.moved) {
-          // click on a pattern clip: it becomes the brush (FL)
           if (d.primary.kind === 'pattern' && d.primary.patternId && d.primary.patternId !== this.project?.transport.activePatternId) {
             await dispatch('patterns.select', { id: d.primary.patternId });
           }
@@ -959,7 +912,6 @@ export class PlaylistController {
 
   private resized(o: Clip, edge: 'left' | 'right', dT: number): { start: number; length: number; offset: number } {
     if (edge === 'right') return { start: o.start, length: Math.max(1, o.length + dT), offset: o.offset };
-    // left edge trims start AND offset; can't trim before the source start
     const d = clamp(dT, -Math.min(o.offset, o.start), o.length - 1);
     return { start: o.start + d, length: o.length - d, offset: o.offset + d };
   }
@@ -980,10 +932,6 @@ export class PlaylistController {
       void dispatch('automation.editPoints', { id: c.automationId, add: [{ tick, value, tension: 0 }] }, { label: 'Add automation point' });
     }
   }
-
-  // ────────────────────────────────────────────────────────────────────
-  // Drops (Browser samples, pattern list)
-  // ────────────────────────────────────────────────────────────────────
 
   private dropKind(e: DragEvent): 'sample' | 'pattern' | 'files' | null {
     const types = e.dataTransfer?.types ?? [];
@@ -1024,7 +972,6 @@ export class PlaylistController {
       return;
     }
     if (kind === 'files') {
-      // OS drops from Explorer: Electron resolves the real path (webUtils); '' in the browser mock
       const files = [...e.dataTransfer.files].filter((f) => AUDIO_EXT.test(f.name));
       if (!files.length) {
         toast.warn('Drop audio files (wav, mp3, flac, ogg, aiff) onto the playlist');
@@ -1057,7 +1004,6 @@ export class PlaylistController {
         name = j.name;
       }
     } catch {
-      /* plain path string */
     }
     if (!path) {
       toast.error('Nothing to drop: the sample path is missing');
@@ -1066,7 +1012,6 @@ export class PlaylistController {
     await this.placeAudio(path, name, trackId, drop.tick);
   }
 
-  /** Probe the file (frames → clip length) and place it; falls back to a default length when the engine can't read it. */
   private async placeAudio(path: string, name: string | undefined, trackId: string, start: number): Promise<void> {
     let info: { frames?: number; sampleRate?: number; channels?: number } = {};
     try {
@@ -1079,10 +1024,6 @@ export class PlaylistController {
     const added = await dispatch<{ channelId: string }>('playlist.addAudio', { path, name: name?.replace(/\.[a-z0-9]+$/i, ''), trackId, start, ...info });
     if (added.ok && added.data?.channelId) await followTempoAfterDrop(path, name, added.data.channelId);
   }
-
-  // ────────────────────────────────────────────────────────────────────
-  // Ruler: locate, loop region, markers
-  // ────────────────────────────────────────────────────────────────────
 
   private rulerTick(e: PointerEvent | MouseEvent, mode: 'round' | 'floor' = 'round'): number {
     const r = this.els!.ruler.getBoundingClientRect();
@@ -1131,7 +1072,6 @@ export class PlaylistController {
     }
     const d = this.rulerDrag;
     if (!d) {
-      // hover feedback: resize cursor over loop edges
       const p = this.project;
       if (!p || !this.els) return;
       const r = this.els.ruler.getBoundingClientRect();
@@ -1191,10 +1131,6 @@ export class PlaylistController {
     return loop;
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Track header resize (called from the React header rows)
-  // ────────────────────────────────────────────────────────────────────
-
   beginTrackResize(trackId: string, e: PointerEvent, handle: HTMLElement): void {
     const p = this.project;
     const t = p?.playlist.tracks[trackId];
@@ -1229,14 +1165,9 @@ export class PlaylistController {
     handle.addEventListener('pointercancel', up);
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Wheel + keyboard
-  // ────────────────────────────────────────────────────────────────────
-
   private onWheel(e: WheelEvent): void {
     if (!this.els) return;
     const target = e.target as HTMLElement | null;
-    // let the pattern list / inputs scroll natively
     if (target && !this.els.body.contains(target)) return;
     const r = this.els.gridHost.getBoundingClientRect();
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? r.height : 1;
@@ -1288,10 +1219,6 @@ export class PlaylistController {
     e.stopPropagation();
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Commands
-  // ────────────────────────────────────────────────────────────────────
-
   selectAll(): void {
     this.selection.clear();
     for (const id of Object.keys(this.clipsRec ?? {})) this.selection.add(id);
@@ -1339,7 +1266,6 @@ export class PlaylistController {
     toast.info(`Copied ${clips.length} clip${clips.length === 1 ? '' : 's'}`);
   }
 
-  /** Copy, then delete: Paste puts them back wherever you click next. */
   async cut(): Promise<void> {
     const clips = [...this.selection].map((id) => this.clip(id)).filter((c): c is Clip => !!c);
     if (!clips.length) {
@@ -1356,7 +1282,6 @@ export class PlaylistController {
     return !!getClipClipboard();
   }
 
-  /** Paste the copied (or cut) clips at the last click (or the playhead). `trackId` moves them onto that track, keeping their relative lanes. */
   async paste(trackId?: string | null): Promise<void> {
     const cb = getClipClipboard();
     if (!cb) {
@@ -1393,7 +1318,6 @@ export class PlaylistController {
     if (r.ok) toast.success('Clip now has its own pattern copy');
   }
 
-  /** Selected clips, earliest first. */
   selectedClips(): Clip[] {
     return [...this.selection]
       .map((id) => this.clip(id))
@@ -1407,7 +1331,6 @@ export class PlaylistController {
     this.contentL.dirty = true;
   }
 
-  /** FL "Split by channel": one pattern + clip per channel for every selected pattern clip. */
   async splitByChannel(ids = [...this.selection]): Promise<void> {
     const pats = ids.map((id) => this.clip(id)).filter((c): c is Clip => c?.kind === 'pattern');
     if (!pats.length) {
@@ -1422,7 +1345,6 @@ export class PlaylistController {
     }
   }
 
-  /** Select every clip that plays the same pattern as `clipId`. */
   selectAllOfPattern(clipId: string): void {
     const c = this.clip(clipId);
     if (c?.kind !== 'pattern' || !c.patternId) return;
@@ -1434,7 +1356,6 @@ export class PlaylistController {
     flashHint(`Selected ${ids.length} clip${ids.length === 1 ? '' : 's'} of ${name}`, 'ok');
   }
 
-  /** Merge the selected pattern clips into one new pattern + clip. */
   async consolidateSelection(): Promise<void> {
     const pats = this.selectedClips().filter((c) => c.kind === 'pattern');
     if (pats.length < 2) {
@@ -1448,7 +1369,6 @@ export class PlaylistController {
     }
   }
 
-  /** Duplicate the selection right after itself, each pattern clip on its own (unique) pattern copy. */
   async cloneSelection(ids = [...this.selection]): Promise<void> {
     const clips = ids.map((id) => this.clip(id)).filter((c): c is Clip => !!c);
     if (!clips.length) {
@@ -1467,7 +1387,6 @@ export class PlaylistController {
     }
   }
 
-  /** The song loop region, if one is set (enabled or not). */
   loopRegion(): { enabled: boolean; start: number; end: number } | null {
     const loop = this.project?.transport.loop;
     return loop && loop.end > loop.start ? loop : null;
@@ -1508,9 +1427,6 @@ export class PlaylistController {
     if (r.ok) flashHint(`Added Marker ${n}`, 'ok');
   }
 
-  // -- Wave 12.2b: clip fades (fades.ts) --------------------------------
-
-  /** Grab a fade handle at an audio clip's top corner (Draw / Paint / Select tools). */
   private beginFadeDrag(p: Ptr): boolean {
     const tool = usePlaylistView.getState().tool;
     if (tool !== 'draw' && tool !== 'paint' && tool !== 'select') return false;
@@ -1545,7 +1461,6 @@ export class PlaylistController {
     try {
       this.els?.overlay.releasePointerCapture(e.pointerId);
     } catch {
-      /* not captured */
     }
     const finish = () => {
       if (this.fadeDrag === d) this.fadeDrag = null;
@@ -1568,7 +1483,6 @@ export class PlaylistController {
     finish();
   }
 
-  /** A clip as drawn: with the fade being dragged. */
   private fadeShown(c: Clip): Clip {
     const d = this.fadeDrag;
     return d && d.moved && !d.crossfade && d.clipId === c.id ? withFade(c, d.which, d.len) : c;
@@ -1586,7 +1500,6 @@ export class PlaylistController {
     ctx.fillText(text, pt.x + 10, pt.y - 6);
   }
 
-  /** Crossfade an audio clip with the one touching it from the left (menu, Alt-drag). */
   async crossfadeWithPrevious(clipId: string, length?: number): Promise<void> {
     const r = await dispatch<{ kind: CrossfadeKind; length: number }>('playlist.crossfade', { id: clipId, length: length ? Math.max(1, Math.round(length)) : undefined });
     if (r.ok && r.data) flashHint(`Crossfade ${fadeLabel(r.data.length, ticksPerBeat(this.ts))}${r.data.kind === 'dip' ? ': no audio past the cut, so a short dip' : ''}`, 'ok');
@@ -1601,8 +1514,6 @@ export class PlaylistController {
     const r = await dispatch('playlist.setFades', { updates: clips.map((c) => ({ id: c.id, fadeIn: 0, fadeOut: 0 })) }, { label: 'Remove fades' });
     if (r.ok) flashHint(`Removed fades from ${clips.length} clip${clips.length === 1 ? '' : 's'}`, 'ok');
   }
-
-  // -- Wave 12.2b: ruler markers (markers.ts) ----------------------------
 
   private markerAt(x: number, y: number): Marker | null {
     const p = this.project;
@@ -1625,7 +1536,7 @@ export class PlaylistController {
     this.rulerL.dirty = true;
     const m = d ? this.project?.playlist.markers[d.id] : undefined;
     if (!d || !m) return;
-    if (!d.moved) this.locateTo(m.tick); // a click on a marker jumps there
+    if (!d.moved) this.locateTo(m.tick);
     else if (d.tick !== d.orig) void moveMarker(m, d.tick, this.ts);
   }
 
@@ -1639,14 +1550,12 @@ export class PlaylistController {
     if (this.els) editMarkerInline(this.els.rulerHost, m, tickToX(this.tv, m.tick));
   }
 
-  /** Move the song position (ruler click, marker jump). */
   locateTo(tick: number): void {
     this.localPlayhead = tick;
     locateSim(tick);
     void window.krypt.engine.locate(tick).catch(() => undefined);
   }
 
-  /** Time signature of the project (for dialogs). */
   get timeSig(): TimeSig {
     return this.ts;
   }
@@ -1668,7 +1577,6 @@ export class PlaylistController {
     openPanel('pianoRoll');
   }
 
-  /** Released right-click: the clip's menu (selecting it first), or the empty-space menu. */
   private openRightMenu(m: RightPress): void {
     const c = m.clipId ? this.clip(m.clipId) : undefined;
     if (c) {
@@ -1684,7 +1592,6 @@ export class PlaylistController {
     this.onEmptyMenu?.(m.clientX, m.clientY, trackId, this.lastClickTick ?? 0);
   }
 
-  /** Empty-space menu: drop a pattern at the clicked cell. */
   async placePattern(trackId: string, tick: number, patternId: string): Promise<void> {
     await dispatch('playlist.addClip', { kind: 'pattern', trackId, start: Math.max(0, Math.round(tick)), patternId });
   }
@@ -1693,26 +1600,19 @@ export class PlaylistController {
     return this.clip(id);
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Playhead + frame
-  // ────────────────────────────────────────────────────────────────────
-
   private songPlayhead(): number | null {
     const f = telemetry.frame;
     if (!f) {
-      // no engine telemetry (browser mock, engine down): follow the simulated transport
       if (playState.playing() && this.project?.transport.mode === 'song') return playState.tick();
       return this.localPlayhead;
     }
     return f.mode === 'song' ? telemetry.playheadTick() : null;
   }
 
-  /** The user scrolled or zoomed by hand: follow-playhead pauses briefly. */
   private noteUserView(): void {
     this.userViewAt = performance.now();
   }
 
-  /** FL-style page follow: when the playing playhead leaves the view, jump a page so it's back near the left edge. */
   private followPlayhead(now: number): void {
     if (!usePlaylistView.getState().follow || this.drag || this.rulerDrag || now - this.userViewAt < 2000) return;
     if (!playState.playing()) return;
@@ -1757,7 +1657,6 @@ export class PlaylistController {
     this.updatePlayheads();
   }
 
-  /** Waveform peaks arrived: repaint (Playlist.tsx wires this to editors/peaks). */
   invalidateContent(): void {
     this.contentL.dirty = true;
   }
@@ -1867,7 +1766,7 @@ export class PlaylistController {
         paintClip(ctx, p, this.fadeShown(clip), this.tv, y, lh, w, { ...base, selected: this.selection.has(c.id), glow: this.glow.alpha(c.id, now), trackMuted });
       });
     }
-    this.takes.paint(ctx, w, h, dpr); // takes: lanes under expanded tracks
+    this.takes.paint(ctx, w, h, dpr);
   }
 
   private paintOverlay(): void {
@@ -1878,7 +1777,7 @@ export class PlaylistController {
     const d = this.drag;
     const ids = this.lanes.ids;
     const base = { dpr, ts: p.transport.timeSig, bpm: p.transport.bpm, glow: 0 };
-    this.takes.paintOverlay(ctx); // takes: swipe preview
+    this.takes.paintOverlay(ctx);
     const ghostClip = (lane: number, start: number, len: number, patternId: string) => {
       if (lane < 0 || lane >= ids.length) return;
       const c: Clip = { id: '__preview', trackId: ids[lane], kind: 'pattern', start, length: len, offset: 0, mute: false, color: null, patternId };
@@ -2015,7 +1914,6 @@ export class PlaylistController {
     });
   }
 
-  /** Automation value at a song tick for an automation clip (tooltips / tests). */
   static valueAt(points: AutomationPoint[], c: Clip, songTick: number): number {
     return evalAutomation(points, songTick - c.start + c.offset);
   }

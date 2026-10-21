@@ -1,6 +1,3 @@
-// Controller maps (shared/live/controllers.ts): settings validation, the templates, the ControllerRunner state
-// machine (presses with hysteresis, dead zone, CC modes, transpose, commands, releasing), pad-input learning, the
-// virtual-MIDI byte check, labels, and the midi_setup tool adding / removing maps without MIDI hardware.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import {

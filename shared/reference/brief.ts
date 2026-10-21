@@ -1,12 +1,3 @@
-// The reference brief: everything study_reference reads from one song the
-// user gives, as numbers an agent builds an ORIGINAL song from: tempo (the
-// reading that fits the genre), key, swing, the section plan in bars with
-// relative energy, the drum feel, the chord loop as roman numerals, the mix
-// numbers and the closest genres. Plus adaptPlaybook: a genre playbook that
-// follows the reference (its tempo, key, swing, section plan, loudness and
-// contrast), which get_playbook builds from and review_song checks against.
-// Pure: the analyzer's AudioAnalysis in, data + text out.
-
 import type { AudioAnalysis, ChordQuality, DrumHit } from '../analyzer/protocol';
 import type { BeatChord, DrumGrid } from '../library/types';
 import type { Playbook, PlaybookSection, PlaybookTargets, SectionKind, TransitionKind } from '../playbooks/types';
@@ -18,20 +9,15 @@ import { drumFeel, feelLine, FEEL_ROLES } from './drums';
 import { guessGenres, guessLine, readingFor } from './genre';
 import type { PlannedSection, ReferenceBrief, ReferenceSection } from './types';
 
-/** Song length cap for a plan (review_song renders at most 256 bars). */
 export const MAX_PLAN_BARS = 256;
-/** Sections snap to this many bars (phrases). */
 const PHRASE = 4;
-/** A section this close to the loudest one (LU) is a peak (drop / hook / chorus). */
 const PEAK_LU = 1.8;
-/** Kick-aware energy needs at least this many kicks per bar in the busiest section (else the song has no kick to go by). */
 const MIN_KICK_RATE = 1;
 
 const r1 = (x: number): number => Math.round(x * 10) / 10;
 const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const mod12 = (x: number): number => ((x % 12) + 12) % 12;
 
-/** Power-average of section loudness weighted by duration. */
 function meanLufs(items: Array<{ lufs: number; w: number }>): number {
   const tot = items.reduce((s, x) => s + x.w, 0);
   if (tot <= 0) return items[0]?.lufs ?? -60;
@@ -39,10 +25,6 @@ function meanLufs(items: Array<{ lufs: number; w: number }>): number {
   return r1(10 * Math.log10(Math.max(1e-7, p)));
 }
 
-/**
- * Analyzer sections with beats; labels renamed A, B, C … by first appearance. With drum hits, each section's kick
- * rate (kicks per bar): mastered songs can be almost as loud in a breakdown as in the drop, but the kick drops out.
- */
 export function referenceSections(a: AudioAnalysis, hits?: readonly DrumHit[] | null): ReferenceSection[] {
   const raw = (a.sections ?? []).filter((s) => s && isNum(s.startSec) && isNum(s.endSec) && s.endSec > s.startSec).sort((x, y) => x.startSec - y.startSec);
   const names = new Map<string, string>();
@@ -73,13 +55,6 @@ function round3(x: number | null): number | null {
   return x === null ? null : Math.round(x * 1000) / 1000;
 }
 
-/**
- * The reference's sections in bars at `bpm`: boundaries snap to 4-bar phrases (sections that collapse merge into
- * the one before), the length is capped at 256 bars. Energy: 1 for the loudest section and ~0.1 lower per LU; when
- * the song has a kick, a section without it counts lower (× 0.6 with no kick at all), since a mastered breakdown can
- * be nearly as loud as the drop. At a reading of the detected tempo (×1, ×2, ×½) the analysed beat grid places the
- * boundaries; at any other tempo the sections keep their durations. Empty with fewer than 3 sections or no tempo.
- */
 export function sectionPlan(b: Pick<ReferenceBrief, 'sections' | 'detectedBpm' | 'beatsPerBar' | 'endBeat' | 'durationSec'>, bpm: number | null): PlannedSection[] {
   if (!bpm || b.sections.length < 3) return [];
   const bpb = b.beatsPerBar || 4;
@@ -96,7 +71,6 @@ export function sectionPlan(b: Pick<ReferenceBrief, 'sections' | 'detectedBpm' |
     const last = cuts[cuts.length - 1];
     if (!cuts.length) cuts.push({ bar: 0, label: s.label, parts: [part] });
     else if (at <= last.bar || at >= endBar) {
-      // Collapsed onto the previous phrase (or past the end): merge; the longer material names it.
       last.parts.push(part);
       if (part.w > last.parts.slice(0, -1).reduce((x, p) => x + p.w, 0)) last.label = s.label;
     } else cuts.push({ bar: at, label: s.label, parts: [part] });
@@ -120,19 +94,15 @@ export function sectionPlan(b: Pick<ReferenceBrief, 'sections' | 'detectedBpm' |
   return live.map(({ kick: _k, ...p }) => p);
 }
 
-// ── Harmony ─────────────────────────────────────────────────────────────
-
 const NOTE_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 const MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11];
 const MINOR_SCALE = [0, 2, 3, 5, 7, 8, 10];
 
-/** "Am", "F", "Cmaj7", "G7", "Dsus". */
 export function chordName(root: number, quality: ChordQuality): string {
   const suffix: Record<ChordQuality, string> = { maj: '', min: 'm', '7': '7', maj7: 'maj7', m7: 'm7', dim: 'dim', sus: 'sus', '5': '5' };
   return `${NOTE_NAMES[mod12(root)]}${suffix[quality] ?? ''}`;
 }
 
-/** The chord's triad (sevenths as their triad; sus and fifths as root + fifth) inside the key's scale (major / natural minor). */
 export function diatonic(root: number, quality: ChordQuality, tonic: number, minor: boolean): boolean {
   const scale = minor ? MINOR_SCALE : MAJOR_SCALE;
   const iv = mod12(root - tonic);
@@ -144,15 +114,10 @@ export function diatonic(root: number, quality: ChordQuality, tonic: number, min
 const KEY_NAMES = (minor: boolean, tonic: number): string => (minor ? ['Cm', 'C#m', 'Dm', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'Bbm', 'Bm'] : ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'])[mod12(tonic)];
 
 export interface ChordLoopInfo {
-  /** The loop's chords by name, starting on the key's tonic chord when it is in the loop. */
   chords: Array<{ root: number; quality: ChordQuality }> | null;
   changesPerBar: number | null;
 }
 
-/**
- * The most repeated 4-chord window (heard at least twice), independent of any key, with chord changes per bar
- * (at the tempo reading `factor` × detected).
- */
 export function chordLoopChords(chords: BeatChord[], bpb: number, factor: number): ChordLoopInfo {
   const seq: BeatChord[] = [];
   for (const c of chords) {
@@ -168,7 +133,6 @@ export function chordLoopChords(chords: BeatChord[], bpb: number, factor: number
   const counts = new Map<string, { loop: Array<{ root: number; quality: ChordQuality }>; n: number }>();
   for (let i = 0; i + 4 <= seq.length; i++) {
     const w = seq.slice(i, i + 4).map((c) => ({ root: mod12(c.root), quality: c.quality }));
-    // Rotation-invariant id: the lexically smallest rotation.
     const ids = w.map((c) => chordName(c.root, c.quality));
     const rots = ids.map((_, r) => [...ids.slice(r), ...ids.slice(0, r)].join(' '));
     const id = [...rots].sort()[0];
@@ -182,7 +146,6 @@ export function chordLoopChords(chords: BeatChord[], bpb: number, factor: number
   return { chords: best && best.n >= 2 ? best.loop : null, changesPerBar: changes };
 }
 
-/** A loop's chords as roman numerals in a key, rotated to start on the tonic chord when the loop has it. */
 export function loopNumerals(loop: ReadonlyArray<{ root: number; quality: ChordQuality }>, key: string): { numerals: string[]; chords: string[] } | null {
   const k = parseKey(key);
   if (!k) return null;
@@ -194,11 +157,6 @@ export function loopNumerals(loop: ReadonlyArray<{ root: number; quality: ChordQ
   return { numerals: canon, chords: rot.map((c) => chordName(c.root, c.quality)) };
 }
 
-/**
- * Keys whose scale holds every chord of the loop, when the detected key doesn't (a tuned kick or a drone can pull
- * the pitch profile off the song's key; the chords say where home is). Empty when the detected key fits, or the loop
- * fits no key. Relative pairs come together (e.g. ["Am", "C"]).
- */
 export function chordKeys(loop: ReadonlyArray<{ root: number; quality: ChordQuality }> | null, detected: string | null): string[] {
   if (!loop || new Set(loop.map((c) => chordName(c.root, c.quality))).size < 3) return [];
   const fits = (tonic: number, minor: boolean) => loop.every((c) => diatonic(c.root, c.quality, tonic, minor));
@@ -206,7 +164,6 @@ export function chordKeys(loop: ReadonlyArray<{ root: number; quality: ChordQual
   if (d && fits(d.root, d.scale === 'minor')) return [];
   const out: string[] = [];
   for (const minor of [true, false]) for (let t = 0; t < 12; t++) if (fits(t, minor)) out.push(KEY_NAMES(minor, t));
-  // Keys with the loop's chord on their tonic first (home is usually in the loop).
   const inLoop = (k: string) => {
     const pk = parseKey(k)!;
     return loop.some((c) => mod12(c.root) === pk.root && (pk.scale === 'minor' ? c.quality === 'min' || c.quality === 'm7' : c.quality === 'maj' || c.quality === 'maj7'));
@@ -214,14 +171,12 @@ export function chordKeys(loop: ReadonlyArray<{ root: number; quality: ChordQual
   return out.sort((a, b) => Number(inLoop(b)) - Number(inLoop(a))).slice(0, 4);
 }
 
-/** The key to use from a choice of chord-fitting keys: the mode the genre prefers (its first common key), else the first. */
 export function pickKey(keys: readonly string[], preferMinor: boolean | null): string | null {
   if (!keys.length) return null;
   if (preferMinor === null) return keys[0];
   return keys.find((k) => parseKey(k)?.scale === (preferMinor ? 'minor' : 'major')) ?? keys[0];
 }
 
-/** Whether a playbook prefers minor keys (its first common key, else its first mode). */
 export function prefersMinor(pb: Pick<Playbook, 'keys'> | null): boolean | null {
   if (!pb) return null;
   const k = pb.keys.common[0] ? parseKey(pb.keys.common[0]) : null;
@@ -230,30 +185,22 @@ export function prefersMinor(pb: Pick<Playbook, 'keys'> | null): boolean | null 
   return m ? /minor|aeolian|dorian|phrygian/.test(m) : null;
 }
 
-/** Kept for callers that want numerals straight from beat chords in a known key. */
 export function chordLoop(chords: BeatChord[], key: string | null, bpb: number, factor: number): { loop: string[] | null; changesPerBar: number | null } {
   const info = chordLoopChords(chords, bpb, factor);
   const n = info.chords && key ? loopNumerals(info.chords, key) : null;
   return { loop: n?.numerals ?? null, changesPerBar: info.changesPerBar };
 }
 
-// ── The brief ───────────────────────────────────────────────────────────
-
 export interface BriefOptions {
   name: string;
-  /** The genre the user asked for (wins over the guess). */
   genre?: GenreId | null;
-  /** Playbooks to compare with (genre guess, tempo reading, section kinds). */
   playbooks: readonly Playbook[];
-  /** A better drum grid than the mix onsets (the library's deep pass on the drum stem), when there is one. */
   drums?: DrumGrid | null;
-  /** Drum hits from the drum stem (study_reference with a stem model), instead of the full mix's onsets. */
   drumHits?: { hits: DrumHit[]; source: 'mix' | 'stem' } | null;
 }
 
 const BAND_KEYS = ['sub', 'low', 'lowMid', 'highMid', 'high'] as const;
 
-/** The analyzer's swing (0..1, detected tempo's 16ths) as set_swing percent; under 0.1 is straight (its resolution). */
 export function swingPercent(swing: number | null | undefined): number | null {
   return isNum(swing) ? (swing < 0.1 ? 0 : Math.round(Math.min(1, swing) * 100)) : null;
 }
@@ -295,7 +242,6 @@ export function referenceBrief(a: AudioAnalysis, opts: BriefOptions): ReferenceB
     keyConfidence: a.key && isNum(a.key.confidence) ? Math.round(a.key.confidence * 100) / 100 : null,
     keyAlternatives,
     keyFromChords,
-    // Swing is measured on the detected tempo's 16ths, so it only means the same thing at that reading.
     swing: isNum(a.swing) ? Math.round(a.swing * 1000) / 1000 : null,
     swingPercent: factor === 1 ? swingPercent(a.swing) : null,
     beatsPerBar: bpb,
@@ -321,7 +267,6 @@ export function referenceBrief(a: AudioAnalysis, opts: BriefOptions): ReferenceB
   };
 }
 
-/** The guess is a close call: the top genres within a few hundredths (and not all one family). */
 export function closeCall(b: Pick<ReferenceBrief, 'genres'>): { close: boolean; family: boolean } {
   const g = b.genres;
   if (g.length < 2) return { close: false, family: false };
@@ -329,8 +274,6 @@ export function closeCall(b: Pick<ReferenceBrief, 'genres'>): { close: boolean; 
   const near = g.filter((x) => g[0].score - x.score < 0.04);
   return { close, family: near.length >= 2 && near.every((x) => sameFamily(x.id, g[0].id)) };
 }
-
-// ── Section kinds and the adapted playbook ──────────────────────────────
 
 const KIND_LABEL: Record<SectionKind, string> = {
   intro: 'Intro',
@@ -357,15 +300,6 @@ function genericKind(plan: readonly PlannedSection[], i: number): SectionKind {
   return e < 0.5 ? 'break' : 'verse';
 }
 
-/**
- * The kind of each planned section in a playbook's vocabulary. Energy decides first, then the song's shape:
- * - a short section (≤ 8 bars, not quiet) right before a peak, with other material, is the build (loud risers and
- *   snare rolls included);
- * - the loudest sections are the playbook's peak kind (drop / chorus / hook);
- * - a long section well under the peaks (≤ 0.65: mastered EDM breakdowns stay loud but lose the kick) is its break;
- * - the first and last sections of a song with 4+ sections are its intro and outro, unless the first one's material
- *   comes back as a peak mid-song (a song that opens on its chorus).
- */
 export function planKinds(plan: readonly PlannedSection[], pb: Pick<Playbook, 'arrangement'>): SectionKind[] {
   const has = new Set(pb.arrangement.map((s) => s.kind));
   const top = Math.max(0, ...pb.arrangement.map((s) => s.energy));
@@ -400,7 +334,6 @@ function defaultTransitions(prev: number, e: number, kind: SectionKind): Transit
   return ['crash'];
 }
 
-/** The reference's plan as playbook sections: each takes the parts / transitions of the playbook's section of the same kind. */
 export function planSections(plan: readonly PlannedSection[], kinds: readonly SectionKind[], pb: Pick<Playbook, 'arrangement'>): PlaybookSection[] {
   const seen = new Map<SectionKind, number>();
   const labels = new Map<string, number>();
@@ -428,7 +361,6 @@ export function planSections(plan: readonly PlannedSection[], kinds: readonly Se
   });
 }
 
-/** A playbook arrangement scaled to a song length (4-bar phrases, at least 4 bars per section). */
 export function scaleArrangement(arr: readonly PlaybookSection[], totalBars: number): PlaybookSection[] {
   const sum = arr.reduce((s, x) => s + x.bars, 0);
   if (!sum || !totalBars) return arr.map((s) => ({ ...s }));
@@ -438,21 +370,13 @@ export function scaleArrangement(arr: readonly PlaybookSection[], totalBars: num
 
 export interface AdaptedPlaybook {
   playbook: Playbook;
-  /** The tempo used and why. */
   bpm: number;
   bpmWhy: string;
   key: string | null;
   swing: number;
-  /** The arrangement follows the reference's sections ('sections'), only its length ('length'), or the playbook ('playbook'). */
   arrangement: 'sections' | 'length' | 'playbook';
 }
 
-/**
- * The playbook following a reference: its tempo (the reading that fits the genre; the genre's tempo when no reading
- * does), its key (when confident), its swing (when measured at that reading), its section plan with the playbook's
- * parts per section kind (else the playbook's arrangement scaled to the reference's length), its loudness (within
- * -16..-7 LUFS) and its section contrast. The user's own words still win in get_playbook.
- */
 export function adaptPlaybook(pb: Playbook, ref: ReferenceBrief): AdaptedPlaybook {
   let bpm = pb.bpm.typical;
   let bpmWhy = `${pb.name} typical: the reference has no steady tempo`;
@@ -471,7 +395,6 @@ export function adaptPlaybook(pb: Playbook, ref: ReferenceBrief): AdaptedPlayboo
       plan = sectionPlan(ref, bpm);
     }
   }
-  // The chords' key when the analyzer's doesn't hold the song's chord loop (re-picked for this genre's mode).
   const fromChords = pickKey(ref.keyAlternatives ?? [], prefersMinor(pb));
   const confident = fromChords ?? (ref.key && (ref.keyConfidence ?? 0) >= 0.35 && parseKey(ref.key) ? ref.key : null);
   let arrangement: PlaybookSection[];
@@ -508,8 +431,6 @@ export function adaptPlaybook(pb: Playbook, ref: ReferenceBrief): AdaptedPlayboo
   };
 }
 
-// ── Text ────────────────────────────────────────────────────────────────
-
 function fmtTime(sec: number): string {
   const s = Math.max(0, Math.round(sec));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -517,7 +438,6 @@ function fmtTime(sec: number): string {
 
 const sgn = (x: number): string => `${x > 0 ? '+' : ''}${x}`;
 
-/** The brief as text for the agent (study_reference). */
 export function briefText(b: ReferenceBrief): string {
   const L: string[] = [];
   L.push(`REFERENCE — "${b.name}" (${fmtTime(b.durationSec)}; estimated from the audio)`);

@@ -1,6 +1,3 @@
-//! Band-limited oscillators: PolyBLEP (Välimäki & Huovilainen 2007) for
-//! steps, PolyBLAMP (Esqueda, Välimäki, Bilbao 2016) for slope corners.
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
     Sine,
@@ -24,7 +21,6 @@ impl Shape {
     }
 }
 
-/// 2-point polynomial BLEP residual for a unit step at phase 0.
 #[inline]
 pub fn poly_blep(t: f64, dt: f64) -> f64 {
     if t < dt {
@@ -38,8 +34,6 @@ pub fn poly_blep(t: f64, dt: f64) -> f64 {
     }
 }
 
-/// 2-point polynomial BLAMP residual for a unit slope change at phase 0
-/// (in units of one sample of slope).
 #[inline]
 pub fn poly_blamp(t: f64, dt: f64) -> f64 {
     if t < dt {
@@ -58,8 +52,6 @@ fn wrap(t: f64) -> f64 {
     t - t.floor()
 }
 
-/// Evaluate a band-limited waveform at phase `t` (0..1) with increment `dt`.
-/// Noise is handled by the caller.
 #[inline]
 pub fn blep_wave(shape: Shape, t: f64, dt: f64) -> f64 {
     let dt = dt.clamp(1e-9, 0.5);
@@ -73,14 +65,10 @@ pub fn blep_wave(shape: Shape, t: f64, dt: f64) -> f64 {
         Shape::Pulse25 => {
             let d = 0.25;
             let naive = if t < d { 1.0 } else { -1.0 };
-            // remove the DC of a 25% pulse (mean = 2d-1 = -0.5)
             naive + poly_blep(t, dt) - poly_blep(wrap(t + 1.0 - d), dt) + 0.5
         }
         Shape::Triangle => {
-            // -1 at t=0 rising to +1 at t=0.5; slope ±4 per cycle
             let naive = 1.0 - 4.0 * (t - 0.5).abs();
-            // slope change of +8/cycle at t=0 and -8/cycle at t=0.5 → 8*dt per
-            // sample; poly_blamp is 2x the unit residual, hence 4*dt.
             naive + 4.0 * dt * (poly_blamp(t, dt) - poly_blamp(wrap(t + 0.5), dt))
         }
         Shape::Noise => 0.0,
@@ -91,7 +79,6 @@ pub fn blep_wave(shape: Shape, t: f64, dt: f64) -> f64 {
 mod tests {
     use super::*;
 
-    /// Energy outside harmonic bins (aliasing) via a naive DFT on harmonics grid.
     fn alias_energy(shape: Shape, f: f64, fs: f64, corrected: bool) -> f64 {
         let n = 8192;
         let dt = f / fs;
@@ -109,7 +96,6 @@ mod tests {
             };
             t = wrap(t + dt);
         }
-        // Goertzel at several inharmonic frequencies between harmonics in the low band
         let mut e = 0.0;
         for k in 1..40 {
             let fa = (k as f64 + 0.5) * f * 0.25 + 37.0;

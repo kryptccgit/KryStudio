@@ -1,14 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// ProjectService: the open project's file identity (path, dirty, recent
-// files), .kstudio open/save, autosave + crash recovery, MIDI import/export,
-// and the project's binary assets (the cover image: electron/project/assets.ts,
-// saved inside the .kstudio zip). Implements ProjectOps (electron/mcp/types.ts)
-// for the MCP server + agent.
-//
-// Dirty = DocHost.version !== the version last saved/loaded.
-// Every method resolves to an ActionResult and never throws.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import type { BrowserWindow } from 'electron';
 import { USER, type DocChange, type DocHost, type DocState } from '@shared/doc/DocHost';
@@ -29,44 +18,29 @@ import { TemplateError, TemplateStore } from './templates';
 import { findTemplate, type ProjectTemplate } from '@shared/templates';
 import { ID_PREFIX, newId } from '@shared/schema/ids';
 
-/**
- * One project tab's state while another tab is in the DocHost (electron/project/tabs.ts): the document +
- * history and this service's per-project fields. `dirty` is kept as a flag because versions keep counting up
- * across switches (DocHost.swap), so a saved version number would mean nothing in the other tab.
- */
 export interface TabState {
   doc: DocState;
   filePath: string | null;
   dirty: boolean;
   lastSavedAt: number | null;
   recovered: boolean;
-  /** Every cover image the tab stored or opened (undo of project.setCover still finds its bytes). */
   assets: StoredAsset[];
 }
 
-/** A project read from disk and checked, not yet in the DocHost (ProjectService.applyLoaded puts it in). */
 export interface LoadedProject {
   project: Project;
   assets: Record<string, Uint8Array>;
-  /** The file path the open project keeps (null: untitled, a demo copy, an imported .json). */
   filePath: string | null;
   dirty: boolean;
-  /** Added to File ▸ Recent when applied. */
   recent: string | null;
-  /** The result message's start; null = `${how} "<name>"`. */
   head: string | null;
   how: 'Opened' | 'Imported' | 'Restored';
-  /** Notes for the user (relinked / missing samples, demo copy …). */
   notes: string[];
 }
 
-/** The project tabs (electron/project/tabs.ts), once attached: New / Open / New from template make or pick tabs. */
 export interface TabsHook {
-  /** A new tab with a fresh project, for main-side callers (Audio → Project, agents): no switch guards. */
   newProjectTab(): ActionResult;
-  /** A new tab from a template, for main-side callers (agents): no switch guards. */
   newTemplateTab(ref: string): Promise<ActionResult<{ template: ProjectTemplate }>>;
-  /** File ▸ Open semantics: a new tab, the untouched new tab replaced, or an already-open file's tab activated. */
   open(p: string | undefined, win?: BrowserWindow | null): Promise<ActionResult>;
 }
 
@@ -75,22 +49,15 @@ export interface ProjectServiceDeps {
   appVersion: string;
   userDataDir: string;
   factoryDir: string;
-  /** Downloaded sound packs ('pack:<id>/…' samples); default userData/packs. */
   packsDir?: string;
   documentsDir: string;
   getSettings(): Settings;
   addRecent(p: string): void;
   log(level: 'info' | 'warn' | 'error', m: string): void;
-  /** Runs before every save (stores third-party plugin states in the document). */
   beforeSave?(): Promise<void>;
-  /**
-   * Folders inside the app (the shipped demos): a project opened from one opens as a template. Save asks where to
-   * keep the user's copy, and dialogs never default into the app's own folders.
-   */
   templateDirs?: string[];
 }
 
-/** `file` lies inside `dir` (case-insensitive on Windows). */
 export function isInside(dir: string, file: string): boolean {
   const norm = (x: string) => (process.platform === 'win32' ? path.resolve(x).toLowerCase() : path.resolve(x));
   const rel = path.relative(norm(dir), norm(file));
@@ -118,13 +85,10 @@ export class ProjectService implements ProjectOps {
   private readonly recovery: RecoveryStore;
   private readonly doc: DocHost;
   private tabs: TabsHook | null = null;
-  /** The active tab's id (recorded in crash-recovery snapshots so a restore knows which tab they belong to). */
   private tabId: string | null = null;
-  /** Recovery snapshots wait for this (the outgoing tab's session file) before they replace the old snapshot. */
   private recoveryGate: Promise<unknown> = Promise.resolve();
   private autosaveHooks = new Set<() => void>();
   private swapping = false;
-  /** The cover images this session stored or opened (the doc references one by name). */
   readonly assets: ProjectAssets;
 
   constructor(private readonly deps: ProjectServiceDeps) {
@@ -135,11 +99,6 @@ export class ProjectService implements ProjectOps {
     this.doc.subscribe((c) => this.onDocChange(c));
   }
 
-  /**
-   * Take a project's assets in (from a file or a recovery snapshot): the cover it references is adopted, or the
-   * reference is dropped when its image is missing or damaged. Mutates `project` (a freshly loaded copy). Returns
-   * a note for the user when the cover was dropped.
-   */
   private takeAssets(project: Project, assets: Record<string, Uint8Array>): string | null {
     this.assets.clear();
     const cover = project.meta.cover;
@@ -153,26 +112,17 @@ export class ProjectService implements ProjectOps {
     return 'its cover image was missing or damaged, so it opened without one';
   }
 
-  // ── Boot / shutdown ─────────────────────────────────────────────────
-
-  /**
-   * Restore a crashed session (snapshot + journal) when it had unsaved
-   * changes; otherwise reopen the crashed session's file, else keep the
-   * fresh default project. Then start journaling + autosave.
-   */
   async boot(restore?: (crashed: RecoveredSession | null) => Promise<boolean>): Promise<void> {
     let restored = false;
     let session: RecoveredSession | null = null;
     try {
       session = this.recovery.crashedLastTime() ? await this.recovery.recover() : null;
-      // The previous session's files go BEFORE this session writes anything.
       await this.recovery.discardPrevious();
     } catch (err) {
       this.deps.log('warn', `Crash recovery failed: ${(err as Error).message}`);
     }
     try {
       if (restore) {
-        // Project tabs: the session restore decides which tab the crashed session belongs to.
         restored = await restore(session);
       } else if (session?.dirty) {
         this.adoptRecovered(session);
@@ -190,13 +140,12 @@ export class ProjectService implements ProjectOps {
     this.emitStatus(true);
   }
 
-  /** Put a crashed session's unsaved project in the DocHost (marked unsaved and recovered). */
   adoptRecovered(session: RecoveredSession): void {
     const note = this.takeAssets(session.project, session.assets);
     if (note) this.deps.log('warn', `Recovered project: ${note}`);
     this.doc.reset(session.project);
     this.filePath = session.projectPath && isFile(session.projectPath) ? session.projectPath : null;
-    this.savedVersion = -1; // recovered edits are unsaved
+    this.savedVersion = -1;
     this.lastSavedAt = null;
     this.recovered = true;
     void this.snapshotNow();
@@ -204,36 +153,28 @@ export class ProjectService implements ProjectOps {
     this.deps.log('warn', `Recovered unsaved changes from the last session (${new Date(session.editedAt).toLocaleString()}).`);
   }
 
-  // ── Project tabs (electron/project/tabs.ts) ──────────────────────────
-
-  /** Route New / Open / New from template through the tabs. */
   attachTabs(tabs: TabsHook): void {
     this.tabs = tabs;
   }
 
-  /** New / New from template open a NEW tab (ProjectOps: Audio → Project and Auto Mashup replace nothing). */
   opensNewTabs(): boolean {
     return this.tabs !== null;
   }
 
-  /** The active tab's id, recorded in crash-recovery snapshots from now on. */
   setTabId(id: string | null): void {
     this.tabId = id;
   }
 
-  /** Recovery snapshots taken from now on wait for `p` before replacing the previous snapshot (never rejects). */
   holdRecoveryUntil(p: Promise<unknown>): void {
     const prev = this.recoveryGate;
     this.recoveryGate = Promise.all([prev, p.catch(() => {})]);
   }
 
-  /** Called on the autosave cadence while the active project is dirty (the tabs keep their session file fresh). */
   onAutosave(cb: () => void): () => void {
     this.autosaveHooks.add(cb);
     return () => this.autosaveHooks.delete(cb);
   }
 
-  /** The active tab's state (document + history + file fields), to keep while another tab is active. */
   capture(): TabState {
     return {
       doc: this.doc.exportState(),
@@ -245,7 +186,6 @@ export class ProjectService implements ProjectOps {
     };
   }
 
-  /** Make a kept tab state the active one: DocHost.swap (a reset that keeps its history) + its file fields. */
   activate(state: TabState): void {
     this.swapping = true;
     try {
@@ -262,10 +202,6 @@ export class ProjectService implements ProjectOps {
     this.emitStatus(true);
   }
 
-  /**
-   * Read a tab's session snapshot (userData/session/tab-<id>.kstudio) without touching the open project: its
-   * project, its file path (kept when the file still exists) and its unsaved state. applyLoaded puts it in.
-   */
   async readSessionSnapshot(file: string, info: { path: string | null; dirty: boolean }): Promise<ActionResult<LoadedProject>> {
     try {
       const decoded = decodeContainer(await readBytes(file));
@@ -280,10 +216,6 @@ export class ProjectService implements ProjectOps {
     }
   }
 
-  /**
-   * Put a read project (readProjectFile / readSessionSnapshot / readTemplate) in the DocHost, replacing what is
-   * there. Synchronous, so a tab switch happens in one step. History starts empty.
-   */
   applyLoaded(l: LoadedProject): ActionResult {
     try {
       const coverNote = this.takeAssets(l.project, l.assets);
@@ -304,7 +236,6 @@ export class ProjectService implements ProjectOps {
     }
   }
 
-  /** Flush the journal; on a clean exit also remove the recovery files. */
   async shutdown(clean: boolean): Promise<void> {
     if (this.autosaveTimer) clearInterval(this.autosaveTimer);
     this.autosaveTimer = null;
@@ -312,11 +243,9 @@ export class ProjectService implements ProjectOps {
       if (clean) await this.recovery.endClean();
       else await this.recovery.flush();
     } catch {
-      /* best effort */
     }
   }
 
-  /** Re-arm the autosave timer after settings.autosaveSec changed. */
   rescheduleAutosave(): void {
     const sec = this.deps.getSettings().autosaveSec;
     if (sec === this.autosaveEverySec && this.autosaveTimer) return;
@@ -331,7 +260,6 @@ export class ProjectService implements ProjectOps {
           try {
             fn();
           } catch {
-            /* a hook never stops autosave */
           }
         }
       }, sec * 1000);
@@ -356,15 +284,12 @@ export class ProjectService implements ProjectOps {
 
   private onDocChange(c: DocChange): void {
     if (c.kind === 'reset') {
-      // Resets come from this service (new/open/recover/tab switch); they snapshot themselves.
       if (!this.swapping) this.emitStatus();
       return;
     }
     this.recovery.appendChange(c.version, c.patches);
     this.emitStatus();
   }
-
-  // ── Status ──────────────────────────────────────────────────────────
 
   status(): ProjectStatus {
     const p = this.doc.project;
@@ -391,19 +316,14 @@ export class ProjectService implements ProjectOps {
       try {
         fn(s);
       } catch {
-        /* ignore */
       }
     }
   }
 
-  // ── New / open ──────────────────────────────────────────────────────
-
-  /** File ▸ New: with tabs attached, a NEW tab (main-side callers: no switch guards); else replace the project. */
   newProject(): ActionResult {
     return this.tabs ? this.tabs.newProjectTab() : this.resetToNew();
   }
 
-  /** Replace the DocHost's project with a fresh default one (the tabs call this for a new tab). */
   resetToNew(): ActionResult {
     try {
       this.doc.reset(createDefaultProject('Untitled'));
@@ -420,7 +340,6 @@ export class ProjectService implements ProjectOps {
     }
   }
 
-  /** File ▸ Open: with tabs attached, the tab rules (tabs.ts); else replace the project. */
   async open(p?: string, win?: BrowserWindow | null): Promise<ActionResult> {
     if (this.tabs) return this.tabs.open(p, win);
     const target = p ?? (await this.pickProjectFile(win));
@@ -428,23 +347,19 @@ export class ProjectService implements ProjectOps {
     return this.loadFile(target);
   }
 
-  /** The Open project dialog; null when cancelled. */
   async pickProjectFile(win?: BrowserWindow | null): Promise<string | null> {
     const picked = await dialogs.openFiles({ title: 'Open project', filters: OPEN_FILTERS, defaultPath: this.defaultDir(), win });
     return picked?.[0] ?? null;
   }
 
-  /** Whether a file opens as a copy (a shipped demo): no file path is kept, so it never matches an open tab. */
   opensAsTemplate(file: string): boolean {
     return this.isTemplate(file);
   }
 
-  /** Load a project file into the DocHost, replacing what is there (the tabs pick which tab first). */
   openInPlace(target: string): Promise<ActionResult> {
     return this.loadFile(target);
   }
 
-  /** Read + check a project file without touching the open project; applyLoaded puts it in. */
   async readProjectFile(target: string): Promise<ActionResult<LoadedProject>> {
     try {
       if (!isFile(target)) return { ok: false, message: `Project not found: ${target}` };
@@ -473,11 +388,8 @@ export class ProjectService implements ProjectOps {
     return r.ok && r.data ? this.applyLoaded(r.data) : { ok: false, message: r.message };
   }
 
-  // ── User templates (Wave 12.2b, ./templates.ts) ──────────────────────
-
   private templateStore: TemplateStore | null = null;
 
-  /** userData/templates (created on first save). */
   get templates(): TemplateStore {
     return (this.templateStore ??= new TemplateStore(path.join(this.deps.userDataDir, 'templates')));
   }
@@ -491,7 +403,6 @@ export class ProjectService implements ProjectOps {
     }
   }
 
-  /** File ▸ Save as template…: the open project (sounds, mixer, patterns, arrangement) under `name`; same name = replace. */
   async saveAsTemplate(name: string): Promise<ActionResult<ProjectTemplate>> {
     if (this.deps.beforeSave) {
       try {
@@ -513,12 +424,10 @@ export class ProjectService implements ProjectOps {
     }
   }
 
-  /** A new, unsaved project from a template (id or name). With tabs attached: in a NEW tab (no switch guards). */
   newFromTemplate(ref: string): Promise<ActionResult<{ template: ProjectTemplate }>> {
     return this.tabs ? this.tabs.newTemplateTab(ref) : this.resetFromTemplate(ref);
   }
 
-  /** Replace the DocHost's project with a new one from a template. Like New: no file path, not dirty, history cleared. */
   async resetFromTemplate(ref: string): Promise<ActionResult<{ template: ProjectTemplate }>> {
     const r = await this.readTemplate(ref);
     if (!r.ok || !r.data) return { ok: false, message: r.message };
@@ -526,7 +435,6 @@ export class ProjectService implements ProjectOps {
     return a.ok ? { ...a, data: { template: r.data.template } } : { ok: false, message: a.message };
   }
 
-  /** Read a template as a fresh, unsaved project (new id, "Untitled") without touching the open project. */
   async readTemplate(ref: string): Promise<ActionResult<{ loaded: LoadedProject; template: ProjectTemplate }>> {
     const t = findTemplate(this.listTemplates(), String(ref ?? ''));
     if (!t) return { ok: false, message: `No template "${String(ref ?? '').slice(0, 64)}"` };
@@ -564,18 +472,12 @@ export class ProjectService implements ProjectOps {
     }
   }
 
-  // ── Save ────────────────────────────────────────────────────────────
-
   save(win?: BrowserWindow | null): Promise<ActionResult<{ path: string }>> {
     if (!this.filePath) return this.saveAs(win);
     const target = this.filePath;
     return this.serialize(() => this.writeTo(target));
   }
 
-  /**
-   * save_project for a never-saved project (agents can't answer a Save dialog): a NEW "<name>.kstudio" in the
-   * folder Save As would open (" (2)" … when taken, so no file is ever overwritten). A saved project refuses: use save.
-   */
   async saveNew(name: string): Promise<ActionResult<{ path: string }>> {
     if (this.filePath && !this.isTemplate(this.filePath)) return { ok: false, message: `This project is already saved as ${path.basename(this.filePath)}` };
     let target: string;
@@ -635,7 +537,6 @@ export class ProjectService implements ProjectOps {
     return { ok: true, message: `Saved "${this.status().name}"`, data: { path: target } };
   }
 
-  /** Keep the previous file version in userData/backups/<projectId>/ (last 10). */
   private async backup(target: string, projectId: string): Promise<void> {
     if (!isFile(target)) return;
     try {
@@ -644,11 +545,9 @@ export class ProjectService implements ProjectOps {
       await copyFile(target, path.join(dir, `${path.basename(target, '.kstudio')}-${stamp}.kstudio`));
       await pruneDir(dir, 10, /\.kstudio$/i);
     } catch {
-      /* a failed backup never blocks saving */
     }
   }
 
-  /** Folder dialogs start in: the project's folder, else the most recent file's, else Documents — never the app's own folders. */
   defaultDir(): string {
     if (this.filePath && !this.isTemplate(this.filePath)) return path.dirname(this.filePath);
     const recent = this.deps.getSettings().recent.find((r) => !this.isTemplate(r));
@@ -658,8 +557,6 @@ export class ProjectService implements ProjectOps {
   private isTemplate(file: string): boolean {
     return (this.deps.templateDirs ?? []).some((d) => isInside(d, file));
   }
-
-  // ── MIDI ────────────────────────────────────────────────────────────
 
   async importMidi(p?: string, win?: BrowserWindow | null): Promise<ActionResult<{ patternId: string; channelIds: string[] }>> {
     let target = p;
@@ -700,7 +597,7 @@ export class ProjectService implements ProjectOps {
       this.doc.endGroup(group);
     }
     if (failure) {
-      if (patternId) this.doc.undo(USER); // the whole import is one history entry
+      if (patternId) this.doc.undo(USER);
       return { ok: false, message: `MIDI import failed: ${failure}` };
     }
     const bpm = this.doc.project.transport.bpm;
@@ -740,9 +637,6 @@ export class ProjectService implements ProjectOps {
     }
   }
 
-  // ── ProjectOps (MCP / agent) ────────────────────────────────────────
-
-  /** 'factory:…' → the factory folder, 'pack:<id>/…' → userData/packs/<id>/… (never escaping either), else as is. */
   resolveSamplePath(p: string): string {
     if (isPack(p)) return resolvePackPath(p, this.packsDir());
     return resolveFactoryPath(p, this.deps.factoryDir);
@@ -760,15 +654,11 @@ export class ProjectService implements ProjectOps {
     return [this.deps.factoryDir, ...this.deps.getSettings().browserRoots.map((r) => r.path)];
   }
 
-  // ── Cover image (bytes in main, a CoverRef in the doc) ──────────────
-
-  /** Store normalized cover bytes for this project (deduplicated) and return the reference to put in the doc. */
   storeCover(bytes: Uint8Array, mime: CoverMime, width: number, height: number): CoverRef {
     const a = this.assets.put(bytes, mime);
     return { file: a.file, mime: a.mime, width, height };
   }
 
-  /** The current cover's bytes, or null (no cover, or its bytes are gone). */
   coverImage(): (StoredAsset & CoverRef) | null {
     const ref = this.doc.project.meta.cover;
     const a = ref ? this.assets.get(ref.file) : null;

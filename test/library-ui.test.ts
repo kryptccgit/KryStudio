@@ -1,6 +1,3 @@
-// Reference library renderer logic (src/library/logic.ts): labels, the
-// filters → TrackQuery mapping, the windowed table maths, drops from
-// Explorer, and the numbers behind the style profile charts.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import type { Collection, LibraryQueueState, StyleProfile } from '@shared/library/types';
@@ -88,7 +85,6 @@ test('keys: short / long labels and the filter list', () => {
   const opts = keyFilterOptions();
   assert.equal(opts.length, 3 + 24);
   assert.deepEqual(opts.slice(0, 3).map((o) => o.value), ['', 'minor', 'major']);
-  // spelled like the analyzer: majors Db/Ab, minors C#m/G#m
   for (const k of ['Db', 'Ab', 'C#m', 'G#m', 'F#m', 'Eb', 'Ebm']) assert.ok(opts.some((o) => o.value === k), k);
   assert.ok(!opts.some((o) => o.value === 'Dbm'));
 });
@@ -107,7 +103,6 @@ test('collection lines, progress and totals', () => {
   assert.equal(collectionStatusLine(c), '1,500 tracks · 1,180 analysed · 180 deep · 12 failed · 8 missing');
   assert.equal(collectionStatusLine({ counts: counts({ total: 3, light: 3 }), deep: false }), '3 tracks · all analysed');
   assert.match(collectionStatusLine({ counts: counts(), deep: false }), /^Empty/);
-  // missing files don't count against progress
   assert.equal(collectionProgress(c), 1180 / 1492);
   assert.equal(collectionProgress({ counts: counts() }), 0);
   const t = libraryTotals([{ counts: counts({ total: 2, light: 2 }) } as Collection, { counts: counts({ total: 3, failed: 1, pending: 2 }) } as Collection]);
@@ -138,7 +133,6 @@ test('filters → TrackQuery: blanks dropped, BPM clamped and ordered, limit cap
   assert.equal(all.bpmMin, 20);
   assert.equal(all.text, undefined);
   assert.equal(all.limit, 200);
-  // the page cache key ignores paging only
   assert.equal(queryKey({ ...q, offset: 0, limit: 200 }), queryKey(q));
   assert.notEqual(queryKey({ ...q, desc: false }), queryKey(q));
 });
@@ -151,9 +145,7 @@ test('sorting by header click', () => {
 test('windowed rows and the pages to fetch', () => {
   assert.deepEqual(visibleRange(0, 280, 28, 1500, 0), { first: 0, last: 10 });
   assert.deepEqual(visibleRange(1100 * 28, 280, 28, 1500, 5), { first: 1095, last: 1115 });
-  // past the end (the list shrank): the last rows, not nothing
   assert.deepEqual(visibleRange(1e9, 280, 28, 20, 5), { first: 5, last: 20 });
-  // fewer rows than fit: all of them
   assert.deepEqual(visibleRange(500, 280, 28, 4, 5), { first: 0, last: 4 });
   assert.deepEqual(visibleRange(0, 280, 28, 0), { first: 0, last: 0 });
   assert.deepEqual(pagesFor(0, 10), [0]);
@@ -173,7 +165,6 @@ test('shift-click range selection over loaded rows', () => {
 test('drops from Explorer: audio files, folders, everything else', () => {
   const r = classifyDrop(['D:\\Music\\Dark trap', 'D:\\a\\song.WAV', 'D:\\a\\b.m4a', 'D:\\a\\notes.txt', 'D:\\a\\proj.kstudio', '', '/home/x/Beats', 'E:\\Rips\\Vol.2']);
   assert.deepEqual(r.files, ['D:\\a\\song.WAV', 'D:\\a\\b.m4a']);
-  // "Vol.2" looks like it has an extension but is a folder
   assert.deepEqual(r.folders, ['D:\\Music\\Dark trap', '/home/x/Beats', 'E:\\Rips\\Vol.2']);
   assert.deepEqual(r.ignored, ['D:\\a\\notes.txt', 'D:\\a\\proj.kstudio']);
 });
@@ -204,7 +195,6 @@ test('tempo histogram fills gaps and scales bars', () => {
   assert.equal(bars[0].frac, 0.25);
   assert.ok(Math.abs(bars.reduce((a, b) => a + b.share, 0) - 1) < 1e-9);
   assert.deepEqual(histogramBars([]), []);
-  // positions: lo edge 0, hi edge (last bin + width) 1
   assert.equal(histPosition(bars, 132), 0);
   assert.equal(histPosition(bars, 152), 1);
   assert.equal(histPosition(bars, 142), 0.5);

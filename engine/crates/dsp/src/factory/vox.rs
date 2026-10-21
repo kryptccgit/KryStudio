@@ -1,9 +1,3 @@
-//! Synthetic vocal one-shots (no recorded voices): formant synthesis of
-//! vowels on a glottal-style source ("ah", "oh", "hey", "ooh", "ee", "uh"),
-//! breaths (aspiration noise through the vocal tract), and talking-synth
-//! blips (a saw chord through moving vowel formants). Pitched shots carry
-//! their root note.
-
 use super::kit::*;
 use super::library::{spec, Spec};
 use super::synth::*;
@@ -11,7 +5,6 @@ use super::transitions::choir;
 
 const PLATE: Rev = rev(2.0, 0.45, 1.3);
 
-/// A single sung vowel with a small scoop into the note.
 fn shot(note: f32, len: f32, vowel: Vowel, attack: f32, rel_at: f32, rel: f32, breath: f32, scoop: f32, seed: u32) -> Vec<f32> {
     let n = ns(len);
     let f = hz(note);
@@ -31,13 +24,10 @@ fn shot(note: f32, len: f32, vowel: Vowel, attack: f32, rel_at: f32, rel: f32, b
     )
 }
 
-/// A short plate folded back to mono (a single voice is a mono source).
 fn plate(x: &[f32], wet: f32, tail: f32) -> Chans {
     vec![reverb_mono(x, &PLATE.pre(12.0).low(250.0).damp(8000.0), wet, tail)]
 }
 
-/// "Hey": an aspirated onset, then eh → ee with the pitch falling at the end.
-/// `voices` > 1 stacks slightly different takes into a small crowd.
 fn hey(note: f32, voices: usize, seed: u32) -> Chans {
     let len = 0.5;
     let n = ns(len);
@@ -82,7 +72,6 @@ fn hey(note: f32, voices: usize, seed: u32) -> Chans {
     out
 }
 
-/// Breath: aspiration only, through the vocal tract (in = rising, out = sigh).
 fn breath(inhale: bool, seed: u32) -> Chans {
     let len = if inhale { 0.65 } else { 0.85 };
     let n = ns(len);
@@ -108,13 +97,11 @@ fn breath(inhale: bool, seed: u32) -> Chans {
     );
     hp(&mut x, 350.0);
     if inhale {
-        // in-breaths are brighter and narrower
         eq(&mut x, HighShelf, 4000.0, 0.7, 4.0);
     }
     plate(&x, 0.08, 0.3)
 }
 
-/// Talking synth: a saw chord through vowel formants gliding along `path`.
 fn talk(notes: &[f32], len: f32, path: &'static [(f32, Vowel)], bend: f32, crush_bits: f32, seed: u32) -> Chans {
     let n = ns(len);
     let src = mono_sum(&supersaw(notes, n, 2, 0.0, seed, |_| 0.08, move |u| bend * smooth01((u - 0.7) / 0.3)));

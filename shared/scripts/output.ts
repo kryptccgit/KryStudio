@@ -1,8 +1,3 @@
-// What comes back out of the sandbox is untrusted: validate it strictly
-// (zod: an array of at most 4096 notes with finite numbers), then clamp
-// every field into its range. A wrong shape is an error that names the
-// note and the field; an out-of-range value is clamped, not refused.
-
 import { z } from 'zod';
 import { PPQ } from '../schema/time';
 import { SCRIPT_LIMITS, type ScriptNote } from './types';
@@ -24,17 +19,12 @@ export const zScriptNoteOut = z.object({
 
 export const zScriptOutput = z.union([z.array(z.unknown()), z.object({ notes: z.array(z.unknown()) })]);
 
-/** Ticks a note may start at or last (4096 bars of 4/4). */
 export const MAX_SCRIPT_TICK = 4096 * 4 * PPQ;
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
 export type CleanOutput = { ok: true; notes: ScriptNote[] } | { ok: false; message: string };
 
-/**
- * Validate and clamp a run's return value: an array of notes, or { notes: [...] }. vel is 0..1; a vel above 1 is
- * read as a MIDI velocity (0..127). Unknown fields are ignored.
- */
 export function cleanScriptOutput(raw: unknown): CleanOutput {
   if (raw === undefined || raw === null) return { ok: false, message: 'run() returned nothing: return an array of notes ({ tick, dur, key, vel })' };
   const shape = zScriptOutput.safeParse(raw);

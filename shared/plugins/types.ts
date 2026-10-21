@@ -1,17 +1,5 @@
-// Plugin / parameter descriptors. The SOURCE OF TRUTH is the Rust engine
-// (engine/crates/dsp): `krypt-studio-engine --dump-catalog` writes
-// shared/plugins/catalog.gen.json, which the UI, the MCP tools and the
-// command layer import. Never hand-edit the generated file once the engine
-// produces it.
-
 export type ParamUnit = '' | 'dB' | 'Hz' | 'ms' | 's' | 'st' | 'ct' | '%' | 'x' | 'bpm' | 'deg';
 
-/**
- * How a value maps to a normalized 0..1 knob/automation position:
- *  - linear: norm = (v - min) / (max - min)
- *  - log:    norm = log(v/min) / log(max/min)          (min must be > 0; frequencies, times)
- *  - gain:   linear gain with a fader taper: v = max * norm^3   (min must be 0)
- */
 export type ParamScale = 'linear' | 'log' | 'gain';
 
 export interface ParamSpec {
@@ -22,39 +10,26 @@ export interface ParamSpec {
   default: number;
   unit: ParamUnit;
   scale: ParamScale;
-  /** Quantization step in plain units (e.g. 1 for semitones / enums). */
   step?: number;
-  /** Enum labels: value is the index (min 0, max options.length-1, step 1). */
   options?: string[];
-  /** UI grouping, e.g. 'Envelope', 'Filter', 'Osc 1'. */
   group?: string;
-  /** Defaults to true. */
   automatable?: boolean;
 }
 
 export interface PluginDescriptor {
-  /** Stable id, e.g. 'krypt.triosc'. Stored in the project. */
   id: string;
   name: string;
   kind: 'instrument' | 'effect';
   category: string;
   description: string;
   params: ParamSpec[];
-  /** Instruments that play a sample (sampler, audio clip). */
   usesSample?: boolean;
-  /** Effects with a sidechain input (compressor, ducker). */
   sidechain?: boolean;
-  /** Default wet/dry for a new FX slot (effects only). */
   defaultMix?: number;
-  // ── Third-party plugins only (scanned VST3/CLAP; ids 'vst3:<CID>' / 'clap:<id>') ──
-  // Their params use the plugin's own ids; values are the plugin's plain
-  // values (CLAP) or normalized 0..1 / step indices (VST3), scale 'linear'.
   format?: 'vst3' | 'clap';
   vendor?: string;
   version?: string;
-  /** Absolute path of the .vst3 / .clap the plugin lives in. */
   path?: string;
-  /** The plugin has its own native editor window (plugins.editor). */
   hasEditor?: boolean;
 }
 
@@ -62,8 +37,6 @@ export interface PluginCatalog {
   version: number;
   plugins: PluginDescriptor[];
 }
-
-// ── Value mapping ─────────────────────────────────────────────────────
 
 export function clampToSpec(spec: ParamSpec, v: number): number {
   let x = Math.min(spec.max, Math.max(spec.min, Number.isFinite(v) ? v : spec.default));
@@ -100,7 +73,6 @@ export function fromNormalized(spec: ParamSpec, n: number): number {
   return clampToSpec(spec, v);
 }
 
-/** Human-readable value, e.g. "-6.0 dB", "1.20 kHz", "Saw". */
 export function formatParam(spec: ParamSpec, v: number): string {
   if (spec.options) return spec.options[Math.round(v)] ?? String(v);
   if (spec.scale === 'gain') {

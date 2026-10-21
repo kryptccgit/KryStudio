@@ -1,5 +1,3 @@
-// Factory PLUCK presets: short, decaying melodic notes (riffs, counter-melodies, arps).
-
 import type { InstrumentPreset } from '../../types';
 import { ALG, DIV, FM, HALL, PLATE, POS, ROOM, SH, T, TAPE, TRI, WAVE, chorus, delay, drive, eq, fm, preset, reverb, tri, wave } from './kit';
 

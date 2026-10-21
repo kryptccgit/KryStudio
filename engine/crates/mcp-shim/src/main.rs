@@ -1,21 +1,3 @@
-//! krypt-studio-mcp — the stdio MCP server every agent client launches.
-//!
-//! It relays newline-delimited JSON-RPC between the client (stdin/stdout) and
-//! the running Krypt Studio app (a per-user named pipe on Windows, a Unix domain
-//! socket on macOS / Linux). See docs/MCP.md.
-//!
-//! - Reads `mcp.json` ({pipe, token, appExePath, appArgs}) from Electron's userData
-//!   dir for productName "Krypt Studio" (`%APPDATA%\Krypt Studio` on Windows,
-//!   `~/Library/Application Support/Krypt Studio` on macOS, `~/.config/Krypt Studio`
-//!   on Linux), which the app rewrites at every start. Override with KRYPT_STUDIO_MCP_CONFIG.
-//! - Handshake: the first line on the pipe is {"krypt":"hello","token":…}.
-//! - App not running: discovery (initialize, server/discover, tools/list,
-//!   prompts/list, resources/list) is answered from mcp-manifest.json; the
-//!   first call that needs the app launches it (detached) and waits ~20 s,
-//!   else returns a clear tool error. Background requests (subscriptions/listen)
-//!   never launch it: they are acknowledged and held until the app connects.
-//! - stdout carries only MCP messages; diagnostics go to stderr.
-
 fn main() {
     shim::run();
 }
@@ -79,8 +61,6 @@ mod pipe {
         }
     }
 
-    /// A client end of a named pipe opened for overlapped I/O, so one thread can
-    /// block in a read while another writes (synchronous pipe handles serialize).
     pub struct Pipe {
         h: Handle,
         shut: AtomicBool,
@@ -93,7 +73,6 @@ mod pipe {
     }
 
     impl Pipe {
-        /// Open the pipe. Err(raw os error) so callers can tell "not running" from "busy".
         pub fn open(name: &str) -> Result<Pipe, u32> {
             let w = wide(name);
             for attempt in 0..3 {
@@ -164,7 +143,6 @@ mod pipe {
             Ok(())
         }
 
-        /// Cancel pending I/O so a blocked reader thread wakes up and exits.
         pub fn shutdown(&self) {
             self.shut.store(true, Ordering::SeqCst);
             unsafe { CancelIoEx(self.h, std::ptr::null_mut()) };
@@ -178,8 +156,6 @@ mod pipe {
     }
 }
 
-/// macOS / Linux: the app listens on a Unix domain socket (electron/mcp/index.ts pipeNameFor) with the same
-/// newline-delimited protocol, so the shim needs the same four calls: open, read with a timeout, write, shutdown.
 #[cfg(unix)]
 mod pipe {
     use std::io::{self, Read, Write};
@@ -197,7 +173,6 @@ mod pipe {
     }
 
     impl Pipe {
-        /// Open the socket. Err(ERROR_FILE_NOT_FOUND) when nothing listens (no file, or a stale one).
         pub fn open(name: &str) -> Result<Pipe, u32> {
             match UnixStream::connect(name) {
                 Ok(s) => Ok(Pipe { s, shut: AtomicBool::new(false) }),
@@ -228,7 +203,6 @@ mod pipe {
             (&self.s).write_all(data)
         }
 
-        /// Wake a blocked reader thread so it exits.
         pub fn shutdown(&self) {
             self.shut.store(true, Ordering::SeqCst);
             let _ = self.s.shutdown(Shutdown::Both);
@@ -253,10 +227,6 @@ mod shim {
     const LAUNCH_WAIT: Duration = Duration::from_secs(20);
     const NOT_RUNNING: &str = "Krypt Studio isn't running — start it and retry.";
     const DISCOVERY: [&str; 6] = ["initialize", "server/discover", "tools/list", "prompts/list", "resources/list", "resources/templates/list"];
-    /// Requests a client sends on its own, never because the user asked for
-    /// something. They must not start the app: 2026 clients open
-    /// `subscriptions/listen` at startup and re-open it seconds after the app
-    /// quits, so launching for it reopened Krypt Studio every time it was closed.
     const BACKGROUND: [&str; 1] = ["subscriptions/listen"];
     const SUBSCRIPTION_ID: &str = "io.modelcontextprotocol/subscriptionId";
 
@@ -284,7 +254,6 @@ mod shim {
         launch: bool,
     }
 
-    /// Electron's app.getPath('appData') on this OS (userData = appData/<productName>).
     fn app_data_dir() -> PathBuf {
         let home = || std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
         if cfg!(windows) {
@@ -301,7 +270,6 @@ mod shim {
             return PathBuf::from(p);
         }
         let appdata = app_data_dir();
-        // Electron's app.getPath('userData') = <appData>/<productName>.
         let primary = appdata.join("Krypt Studio").join("mcp.json");
         if primary.exists() {
             return primary;
@@ -340,19 +308,13 @@ mod shim {
         tx: Sender<Event>,
         conn: Option<Conn>,
         gen: u64,
-        /// Cached legacy `initialize` request, replayed after (re)connecting.
         init: Option<Value>,
         initialized: bool,
-        /// Forwarded requests awaiting a response: id → method.
         pending: HashMap<String, (String, bool)>,
-        /// Ids of replayed requests whose responses must not reach the client.
         swallow: HashSet<String>,
         replay_seq: u64,
         last_launch: Option<Instant>,
-        /// Background requests held while the app is closed: (id key, line, modern).
-        /// Handed to the app when something else connects to it.
         parked: Vec<(String, String, bool)>,
-        /// Subscriptions we acknowledged offline; the app's own ack is dropped.
         acked: HashSet<String>,
     }
 
@@ -403,7 +365,6 @@ mod shim {
                 };
                 let hello = json!({ "krypt": "hello", "v": 1, "token": cfg.token, "client": self.opts.client, "shimVersion": VERSION });
                 pipe.write_all(format!("{hello}\n").as_bytes()).map_err(|e| ConnectError::Failed(e.to_string()))?;
-                // Read the welcome line (bytes after it, if any, go to the reader).
                 let mut buf: Vec<u8> = Vec::new();
                 let mut chunk = [0u8; 4096];
                 let deadline = Instant::now() + Duration::from_secs(5);
@@ -423,7 +384,7 @@ mod shim {
                     let code = first.get("code").and_then(|c| c.as_str()).unwrap_or("");
                     if code == "bad_token" && attempt == 0 {
                         std::thread::sleep(Duration::from_millis(300));
-                        continue; // the app restarted and rotated the token: re-read mcp.json
+                        continue;
                     }
                     let m = first.get("message").and_then(|c| c.as_str()).unwrap_or("handshake refused");
                     return Err(ConnectError::Failed(m.to_string()));
@@ -463,7 +424,6 @@ mod shim {
             });
             self.conn = Some(Conn { pipe, gen });
             log("connected to Krypt Studio");
-            // Legacy clients: replay the handshake the app hasn't seen on this connection.
             if let Some(init) = self.init.clone() {
                 self.replay_seq += 1;
                 let id = format!("krypt-shim-replay-{}", self.replay_seq);
@@ -485,8 +445,6 @@ mod shim {
             }
         }
 
-        /// Hold a background request while the app is closed. A listen gets the
-        /// acknowledgement the app would send, narrowed to what it can deliver.
         fn park(&mut self, id: &Value, msg: &Value, line: String, modern: bool) {
             let key = id.to_string();
             if msg.get("method").and_then(|m| m.as_str()) == Some("subscriptions/listen") {
@@ -560,7 +518,6 @@ mod shim {
                 let base = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
                 command().creation_flags(base | CREATE_BREAKAWAY_FROM_JOB).spawn().or_else(|_| command().creation_flags(base).spawn())
             };
-            // macOS / Linux: its own process group, so the client stopping the shim doesn't take the app with it.
             #[cfg(unix)]
             let spawned = {
                 use std::os::unix::process::CommandExt;
@@ -578,7 +535,6 @@ mod shim {
             }
         }
 
-        /// Connect, launching the app if needed. Sends MCP progress while waiting.
         fn ensure_app(&mut self, progress: Option<&Value>) -> Result<(), String> {
             if self.conn.is_some() {
                 return Ok(());
@@ -658,7 +614,6 @@ mod shim {
                     self.pending.remove(&idv.to_string());
                 }
             }
-            // Offline (or the write just failed).
             if method == "notifications/cancelled" {
                 if let Some(rid) = msg.pointer("/params/requestId") {
                     let key = rid.to_string();
@@ -668,7 +623,7 @@ mod shim {
             }
             let Some(idv) = id else { return };
             if method.is_empty() {
-                return; // a response to a server request we can't route any more
+                return;
             }
             if method == "ping" {
                 send_json(&json!({ "jsonrpc": "2.0", "id": idv, "result": {} }));
@@ -685,7 +640,6 @@ mod shim {
                 }
             }
             let progress = msg.pointer("/params/_meta/progressToken").cloned();
-            // An initialize we are about to forward must not also be replayed by attach().
             let held = if method == "initialize" { self.init.take() } else { None };
             let outcome = self.ensure_app(progress.as_ref());
             if held.is_some() {
@@ -718,7 +672,6 @@ mod shim {
                         self.acked.remove(&key);
                     }
                 } else if v.get("method").and_then(|m| m.as_str()) == Some("notifications/subscriptions/acknowledged") {
-                    // Already acknowledged while the app was closed.
                     if let Some(sub) = v.pointer("/params/_meta").and_then(|m| m.get(SUBSCRIPTION_ID)) {
                         if self.acked.remove(&sub.to_string()) {
                             return;

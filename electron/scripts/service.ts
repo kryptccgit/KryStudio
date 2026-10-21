@@ -1,14 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Krypt Script, main side. Shared by the UI (IPC scripts.*, actor user) and
-// the MCP tools write_script / run_script (actor = the agent):
-//   - the catalog: factory scripts, the user library (userData/scripts/*.js,
-//     written atomically) and the scripts kept in the project;
-//   - check: header + compile in the sandbox (+ an optional trial run);
-//   - run: scope (pure) → sandbox (QuickJS) → strict output validation →
-//     the plan (pure), for previews, variations and dry runs;
-//   - apply: run, then ONE doc command, notes.applyScript (one undo step).
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import type { Project } from '@shared/schema/project';
 import type { ActionResult } from '@shared/types';
@@ -34,7 +23,6 @@ import {
 import { describeFsError, listFilesWithExt, readText, removeFile, writeFileAtomic } from '../system/files';
 import { runSandboxed, compileCheck } from './sandbox';
 
-/** Runs a doc command as the caller; throws an Error with a human message on failure. */
 export type ScriptApply = <T = unknown>(cmd: string, args: unknown) => T;
 
 export interface ScriptServiceDeps {
@@ -73,7 +61,6 @@ function where(p: { range: { fromBar: number; bars: number } }): string {
   return bars === 1 ? `bar ${fromBar}` : `bars ${fromBar}–${fromBar + bars - 1}`;
 }
 
-/** A renderer-supplied ScriptRunRequest, checked field by field (never trust IPC payloads). */
 export function cleanRunRequest(v: unknown): ScriptRunRequest | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as Record<string, unknown>;
@@ -99,7 +86,6 @@ export function cleanRunRequest(v: unknown): ScriptRunRequest | null {
   };
 }
 
-/** A prepared run: the plan plus the exact notes.applyScript args. */
 export interface PreparedRun {
   plan: ScriptPlan;
   header: ScriptHeader;
@@ -142,7 +128,6 @@ export class ScriptService {
     return { factory: FACTORY, user: await this.userScripts(), project: this.projectScripts(), libraryDir: this.libraryDir };
   }
 
-  /** By id (factory:…, user:…, scr_…) or by name (this project first, then the library, then the factory). */
   async find(ref: string): Promise<ScriptInfo | null> {
     const r = ref.trim();
     const src = scriptSourceOf(r);
@@ -154,11 +139,9 @@ export class ScriptService {
     return all.find((s) => s.name.toLowerCase() === lower) ?? all.find((s) => s.id.toLowerCase().endsWith(`:${lower}`)) ?? null;
   }
 
-  /** Header + compile; trial = also run it once on a made-up 2-bar context and validate the notes. */
   async check(code: string, opts: { trial?: boolean } = {}): Promise<ScriptCheck> {
     const h = parseScriptHeader(code);
     if (!h.ok) {
-      // still report syntax errors in the same answer
       const compile = typeof code === 'string' && code.trim() && code.length <= SCRIPT_LIMITS.codeChars ? await compileCheck(code) : [];
       const issues = [...h.issues, ...compile.filter((c) => !/needs a function run/.test(c.message) || !h.issues.some((i) => /function run/.test(i.message)))];
       return { ok: false, header: null, issues: issues.sort((a, b) => a.line - b.line) };
@@ -179,10 +162,6 @@ export class ScriptService {
     return { ok: true, header: h.header, issues: [] };
   }
 
-  /**
-   * Run a script for a target (pattern + channel + selection / bars) and plan what notes.applyScript would write.
-   * strict = unknown params are errors (agents). allowSame = a result identical to the notes there is still a plan (previews).
-   */
   async prepare(req: ScriptRunRequest, opts: { strict?: boolean; allowSame?: boolean } = {}): Promise<ActionResult<PreparedRun>> {
     const fail = (message: string): ActionResult<PreparedRun> => ({ ok: false, message });
     let code: string;
@@ -216,7 +195,6 @@ export class ScriptService {
     if (!clean.ok) return fail(`"${name}": ${clean.message}`);
     const args: ApplyScriptArgs = { ...target, kind: h.header.kind, name, seed, notes: clean.notes };
     try {
-      // planned on the document as it is NOW (the run awaited)
       const p = planScriptApply(this.deps.project(), args, { allowSame: opts.allowSame });
       const plan: ScriptPlan = {
         name,
@@ -239,7 +217,6 @@ export class ScriptService {
     }
   }
 
-  /** Previews for the dialog: one plan per seed (the 4 Variations). */
   async previews(req: ScriptRunRequest, seeds: number[]): Promise<Array<ActionResult<ScriptPlan>>> {
     const out: Array<ActionResult<ScriptPlan>> = [];
     for (const seed of seeds.slice(0, 8)) {
@@ -249,7 +226,6 @@ export class ScriptService {
     return out;
   }
 
-  /** Run and write the notes as ONE undo step (notes.applyScript through `apply`, as the caller). */
   async apply(req: ScriptRunRequest, apply: ScriptApply, opts: { strict?: boolean } = {}): Promise<ActionResult<ScriptApplyOutcome>> {
     const prep = await this.prepare(req, { strict: opts.strict });
     if (!prep.ok || !prep.data) return { ok: false, message: prep.message };
@@ -267,7 +243,6 @@ export class ScriptService {
     };
   }
 
-  /** Save to the user library (userData/scripts/<slug>.js, atomic). Same name = update that file. */
   async saveToLibrary(code: string, name?: string): Promise<ActionResult<{ id: string; name: string; path: string; created: boolean }>> {
     const h = parseScriptHeader(code);
     if (!h.ok) return { ok: false, message: `The script has errors:\n${formatIssues(h.issues)}` };

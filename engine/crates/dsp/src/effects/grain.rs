@@ -1,26 +1,3 @@
-//! krypt.grain — granular delay / freeze, plus a spectral blur mode.
-//!
-//! Grain mode: the input is recorded into a 6 s stereo buffer. A scheduler
-//! starts grains `density` times a second (±25 % jitter scaled by Spray);
-//! each grain reads the buffer from `delay` ms ago (+ up to 500 ms of random
-//! Spray offset), at its own speed (Pitch ±24 st), forwards or (by the
-//! Reverse chance) backwards, through a Hann window of `size` ms, with a
-//! random pan (Spray). Reads are fractional (cubic Hermite). Grain start
-//! points are clamped so a grain never reads past the write head. Feedback
-//! writes the (soft-clipped) grain output back into the buffer. Freeze stops
-//! recording: grains keep scattering over the frozen audio. Up to 64 grains;
-//! the sum is normalized by the expected overlap. Zero latency.
-//!
-//! Spectral mode: a 2048-point STFT (hop 512, Hann analysis + synthesis,
-//! both channels packed into one complex FFT) whose bin magnitudes are
-//! smoothed over time (Blur: 0 = transparent … a ~5 s smear). Phases follow
-//! the input; Freeze holds the magnitudes and keeps every bin turning at the
-//! frequency it had when frozen (phase-vocoder rotation), so held chords
-//! sustain. Latency 2048 samples (reported; Mix's dry copy is aligned).
-//!
-//! The RNG is a fixed-seed xorshift reseeded on reset: the same input always
-//! gives the same output (offline renders are reproducible).
-
 use std::sync::Arc;
 
 use rustfft::num_complex::Complex32;
@@ -70,17 +47,13 @@ const WIN_LEN: usize = 512;
 const FFT_N: usize = 2048;
 const HOP: usize = FFT_N / 4;
 const BINS: usize = FFT_N / 2 + 1;
-/// Where the input FIFO restarts after each frame (one frame minus one hop).
 const FIFO_START: usize = FFT_N - HOP;
-/// Spectral-mode latency: a whole frame (the oldest hop of a frame is final only once the frame is in).
 pub(crate) const SPECTRAL_LATENCY: usize = FFT_N;
 
 #[derive(Clone, Copy, Default)]
 struct Grain {
     active: bool,
-    /// read position as a delay behind the write head (pushes)
     d: f64,
-    /// change of `d` per output sample
     dd: f64,
     win: f32,
     win_inc: f32,
@@ -88,7 +61,6 @@ struct Grain {
     gr: f32,
 }
 
-/// The STFT blur / freeze engine (both channels).
 struct Spectral {
     fft: Arc<dyn Fft<f32>>,
     ifft: Arc<dyn Fft<f32>>,
@@ -99,7 +71,6 @@ struct Spectral {
     out_fifo: [Vec<f32>; 2],
     accum: [Vec<f32>; 2],
     rover: usize,
-    /// smoothed magnitude, last input phasor, output phasor, freeze rotation (per channel, per bin)
     mag: [Vec<f32>; 2],
     prev_in: [Vec<Complex32>; 2],
     phasor: [Vec<Complex32>; 2],
@@ -113,7 +84,6 @@ impl Spectral {
         let fft = planner.plan_fft_forward(FFT_N);
         let ifft = planner.plan_fft_inverse(FFT_N);
         let scratch_len = fft.get_inplace_scratch_len().max(ifft.get_inplace_scratch_len());
-        // periodic Hann: 4x-overlapped Hann² sums to exactly 1.5
         let window = (0..FFT_N).map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / FFT_N as f32).cos()).collect();
         let z = Complex32::new(0.0, 0.0);
         let one = Complex32::new(1.0, 0.0);
@@ -151,8 +121,6 @@ impl Spectral {
         self.frozen = false;
     }
 
-    /// One sample in, one sample out (per channel), `SPECTRAL_LATENCY` late.
-    /// (`out_fifo` holds the finished hop of the previous frame.)
     #[inline]
     fn tick(&mut self, x: [f32; 2], smooth: f32, freeze: bool) -> [f32; 2] {
         let r = self.rover;
@@ -170,7 +138,6 @@ impl Spectral {
     }
 
     fn frame(&mut self, smooth: f32, freeze: bool) {
-        // pack L + iR, windowed
         for i in 0..FFT_N {
             let w = self.window[i];
             self.buf[i] = Complex32::new(self.in_fifo[0][i] * w, self.in_fifo[1][i] * w);
@@ -179,14 +146,12 @@ impl Spectral {
         let engage = freeze && !self.frozen;
         self.frozen = freeze;
         let n = FFT_N;
-        // quarter-turn per bin per hop (bin-centre advance at 4x overlap)
         const QUARTER: [Complex32; 4] =
             [Complex32::new(1.0, 0.0), Complex32::new(0.0, 1.0), Complex32::new(-1.0, 0.0), Complex32::new(0.0, -1.0)];
         let mut out = [Complex32::new(0.0, 0.0); 2];
         for k in 0..BINS {
             let a = self.buf[k];
             let b = self.buf[(n - k) % n].conj();
-            // separate the two real channels
             let xs = [(a + b) * 0.5, Complex32::new(0.0, -0.5) * (a - b)];
             for ch in 0..2 {
                 let xk = xs[ch];
@@ -214,14 +179,12 @@ impl Spectral {
                 if !freeze {
                     let s = &mut self.mag[ch][k];
                     *s = m + (*s - m) * smooth;
-                    // ~-200 dBFS: lets a blurred tail end in digital silence
                     if *s < 1e-7 {
                         *s = 0.0;
                     }
                 }
                 out[ch] = p * self.mag[ch][k];
             }
-            // re-pack Y = YL + iYR with Hermitian halves
             let i = Complex32::new(0.0, 1.0);
             self.buf[k] = out[0] + i * out[1];
             if k > 0 && k < n / 2 {
@@ -248,7 +211,6 @@ impl Spectral {
 
 pub struct GrainFx {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     spectral_mode: bool,
@@ -328,7 +290,6 @@ impl GrainFx {
         self.freeze = p.on(P::Freeze as usize);
         self.fb.set(p.get(P::Feedback as usize));
         self.mix.set(p.get(P::Mix as usize));
-        // overlap normalization: coherent grains add up, sprayed ones add in power
         let overlap = (self.density * self.size_s * 0.5).max(1.0);
         self.norm.set(overlap.powf(-(1.0 - 0.5 * self.spray)));
         let blur = p.get(P::Blur as usize);
@@ -350,10 +311,8 @@ impl GrainFx {
         let rev = self.reverse > 0.0 && self.rng.unit() < self.reverse;
         let spray = self.spray;
         let mut d = (self.delay_s as f64 + 0.5 * spray as f64 * self.rng.unit() as f64) * sr;
-        // per output sample the write head moves 1 (0 when frozen), the read head ±rate
         let head = if self.freeze { 0.0 } else { 1.0 };
         let dd = if rev { head + rate } else { head - rate };
-        // keep the whole grain inside recorded audio: never past the write head, never off the buffer's end
         let end = d + dd * len;
         if end < 2.0 {
             d += 2.0 - end;
@@ -408,7 +367,6 @@ impl GrainFx {
         y
     }
 
-    /// Current latency in samples for a mode.
     fn latency_for(spectral: bool) -> usize {
         if spectral {
             SPECTRAL_LATENCY
@@ -432,7 +390,6 @@ impl Effect for GrainFx {
     fn set_param(&mut self, index: usize, value: f32) {
         self.pb.set(index, value);
         if index == P::Mode as usize {
-            // the engine reads latency() right after set_param
             self.spectral_mode = self.pb.idx(index) == 1;
         }
     }

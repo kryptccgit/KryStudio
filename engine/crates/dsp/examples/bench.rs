@@ -1,4 +1,3 @@
-//! Rough CPU cost of each plugin (release): real-time factor per instance.
 use krypt_studio_dsp::{create_effect, create_instrument, descriptors, NoteExtras, PluginKind, ProcessContext, SampleData};
 use std::sync::Arc;
 use std::time::Instant;
@@ -21,7 +20,6 @@ fn main() {
                 let mut inst = create_instrument(d.id, sr, block).unwrap();
                 inst.set_sample(Some(sample.clone()));
                 for b in 0..blocks {
-                    // a 4-note chord every half second (re-triggered), mimicking busy use
                     if b % 94 == 0 {
                         for k in 0..4u8 {
                             inst.note_on(k as usize, 48 + k * 4, (48 + k * 4) as f32, 0.8, NoteExtras::default());

@@ -1,26 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// VocalsService: "Vocals & mashups" for agents (MCP tools) and the
-// playlist clip menu (IPC), one implementation for both.
-//
-//   importUpload  audio bytes → userData/imports/<sha256>.<ext> (atomic,
-//                 deduplicated, checked by the engine's decoder) → a clip
-//                 on a new playlist track
-//   importFile    an allow-listed file → a clip on a new track (in place)
-//   match         move an audio clip onto the project's (or another clip's)
-//                 key with the smallest pitch shift, and make it follow the
-//                 tempo; a clip target that plays at its own tempo becomes
-//                 the project tempo (the bed of a mashup)
-//   tune          Krypt Tune on a clip's mixer insert: added first in the
-//                 chain or the existing one updated; key from the args, the
-//                 vocal, the instrumental or the patterns
-//
-// The maths is pure (shared/music/keymatch.ts, shared/vocals/plan.ts,
-// shared/analyzer/tempo.ts). Every edit goes through commands via `apply`
-// (an agent's call group, or a user group from IPC), so a call is one undo
-// step. Node-only (no Electron import): tests drive it with the fake
-// analyzer.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { USER, type DocHost } from '@shared/doc/DocHost';
@@ -50,13 +27,9 @@ import { removeFile, writeFileAtomic } from '../system/files';
 import { statFile } from '../system/download';
 import type { Apply, RunOptions } from '../analyzer/service';
 
-/** Largest upload import_audio accepts (decoded bytes). */
 export const MAX_IMPORT_BYTES = 60 * 1024 * 1024;
-/** A pattern-key estimate needs at least this confidence to stand for the project. */
 const PATTERN_KEY_MIN = 0.5;
-/** A key read from a vocal's transcribed notes needs at least this fit (Krumhansl r) to be used. */
 const NOTES_KEY_MIN = 0.6;
-/** Tempo follow ratios outside this band are stretched audibly (warned). */
 const BIG_STRETCH = [0.75, 1.34] as const;
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -67,7 +40,6 @@ function fail<T = never>(message: string): ActionResult<T> {
   return { ok: false, message };
 }
 
-/** Names are user data: strip control / bidi characters, cap the length. */
 export function cleanName(s: string, max = 64): string {
   const c = String(s ?? '')
     .replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩]/g, '')
@@ -79,9 +51,6 @@ export function importsDirOf(userDataDir: string): string {
   return path.join(userDataDir, 'imports');
 }
 
-// ── Upload validation (pure) ──────────────────────────────────────────
-
-/** "Vocal take 3.WAV" → { ext: 'wav', title: 'Vocal take 3' }; folders are dropped; the extension must be a supported audio format. */
 export function uploadName(name: string): { ext: string; title: string } | { error: string } {
   const base = String(name ?? '').split(/[\\/]/).pop() ?? '';
   const m = /^(.*)\.([A-Za-z0-9]{2,5})$/.exec(base.trim());
@@ -92,7 +61,6 @@ export function uploadName(name: string): { ext: string; title: string } | { err
   return { ext, title: cleanName(m[1], 64) || 'Imported audio' };
 }
 
-/** Base64 (or a base64 data: URL, or base64url) → bytes, checking the size cap BEFORE decoding. */
 export function decodeBase64Audio(data: string, maxBytes = MAX_IMPORT_BYTES): { bytes: Uint8Array } | { error: string } {
   let s = String(data ?? '').trim();
   const url = /^data:[^,]*,/i.exec(s);
@@ -111,53 +79,35 @@ export function decodeBase64Audio(data: string, maxBytes = MAX_IMPORT_BYTES): { 
   return { bytes: new Uint8Array(buf.buffer, buf.byteOffset, buf.length) };
 }
 
-// ── Service ───────────────────────────────────────────────────────────
-
 export interface VocalsDeps {
   doc: DocHost;
   userDataDir: string;
-  /**
-   * "Ears" (electron/analyzer): analysis, and (optionally) one voice's notes for reading a vocal's key when the
-   * chroma reading is weak. Neither changes the project. null when the analyzer service didn't start.
-   */
   analyzer: {
     analyze(target: AudioTarget, opts?: RunOptions): Promise<ActionResult<AudioAnalysis>>;
     transcribe?(target: AudioTarget, mode?: 'mono' | 'drums', opts?: RunOptions): Promise<ActionResult<TranscriptionResult>>;
   } | null;
-  /** The engine's decoder: frames / rate / channels of an audio file (proves it decodes). */
   sampleInfo(absPath: string): Promise<ActionResult<SampleInfo>>;
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
 }
 
 export interface ImportOptions {
-  /** Start tick on the playlist (default 0 = bar 1). */
   start?: number;
-  /** Clip / channel / track name (default: the file name). */
   name?: string;
 }
 
 export interface MatchOptions {
-  /** What to match: the project (default) or another audio clip. */
   to?: 'project' | { clipId: string };
-  /** Move to the target key (default true). */
   key?: boolean;
-  /** Follow the target tempo (default true). */
   tempo?: boolean;
-  /** Explicit pitch in semitones (−24..24) instead of the detected key move. */
   semitones?: number;
-  /** Keep formants on a pitch shift (default true: voices stay natural). */
   formant?: boolean;
 }
 
 export interface TuneOptions {
   style?: TuneStyle;
-  /** "F#m", "A minor", "D dorian" … (default: detected). */
   key?: string;
-  /** Krypt Tune scale override ("chromatic", "minor pentatonic" …). */
   scale?: string;
-  /** Correction amount 0..1 (default 1). */
   amount?: number;
-  /** Krypt Tune's Mix 0..1 (default: unchanged / 1). */
   mix?: number;
 }
 
@@ -167,7 +117,6 @@ interface FoundKey {
   key: KeyRef;
   confidence: number | null;
   source: KeySourceKind;
-  /** "from the vocal's analysis (Gm, confidence 0.71)" */
   how: string;
 }
 
@@ -190,13 +139,6 @@ export class VocalsService {
     return r;
   }
 
-  // ── Import ──────────────────────────────────────────────────────────
-
-  /**
-   * Store uploaded audio bytes in userData/imports/<sha256>.<ext> (atomic; the same bytes are written once), check
-   * that the engine decodes them, then place them on a new playlist track. A file that doesn't decode is removed
-   * again unless an earlier import made it.
-   */
   async importUpload(bytes: Uint8Array, fileName: string, opts: ImportOptions, apply: Apply): Promise<ActionResult<ImportOutcome>> {
     const n = uploadName(fileName);
     if ('error' in n) return fail(n.error);
@@ -204,7 +146,6 @@ export class VocalsService {
     if (bytes.length > MAX_IMPORT_BYTES) return fail(`The audio is ${mb(bytes.length)}; import_audio takes at most ${mb(MAX_IMPORT_BYTES)} per file. Trim it, or send a compressed file (FLAC, MP3 or OGG).`);
     const hash = crypto.createHash('sha256').update(bytes).digest('hex');
     const abs = path.join(this.importsDir, `${hash}.${n.ext}`);
-    // Never outside userData/imports (the name is a hex hash + an allow-listed extension, but check anyway).
     if (path.dirname(abs) !== this.importsDir) return fail('Refused: the import path left the imports folder');
     const st = await statFile(abs);
     const deduped = !!st && st.size === bytes.length;
@@ -225,7 +166,6 @@ export class VocalsService {
     return this.place({ docPath: abs, abs, title: cleanName(opts.name ?? '', 64) || n.title, hash }, info.data, opts, apply, { deduped, bytes: bytes.length });
   }
 
-  /** Place an allow-listed file (checked by the caller) on a new playlist track, referenced in place. */
   async importFile(file: { docPath: string; abs: string }, opts: ImportOptions, apply: Apply): Promise<ActionResult<ImportOutcome>> {
     const base = path.basename(file.abs);
     const st = await statFile(file.abs);
@@ -236,7 +176,6 @@ export class VocalsService {
     return this.place({ docPath: file.docPath, abs: file.abs, title }, info.data, opts, apply, { deduped: false, bytes: st.size });
   }
 
-  /** The engine's decoder has the final word on whether audio is usable. */
   private async probe(abs: string, label: string): Promise<ActionResult<SampleInfo>> {
     let r: ActionResult<SampleInfo>;
     try {
@@ -245,7 +184,6 @@ export class VocalsService {
       r = fail(errText(err));
     }
     if (r.ok && r.data && r.data.frames > 0 && r.data.sampleRate > 0) return r;
-    // The decoder names the stored file (a content hash in userData/imports): show the file the caller knows instead.
     const why = (r.message ?? 'no audio frames').split(abs).join(label);
     if (/isn'?t running|not running|is starting|restarting/i.test(why)) return fail(`The audio engine isn't running, so "${label}" can't be checked and placed. Try again once it is running (Settings ▸ Audio shows its state). (${why})`);
     return fail(`"${label}" isn't audio Krypt Studio can decode: ${why}. Send a wav, flac, mp3, ogg, aiff or m4a file.`);
@@ -260,7 +198,6 @@ export class VocalsService {
   ): ActionResult<ImportOutcome> {
     const p = this.doc.project;
     const start = Math.max(0, Math.round(opts.start ?? 0));
-    // A new lane right under the last one that holds clips (the top of an empty project), not after 16 empty tracks.
     const used = new Set(Object.values(p.playlist.clips).map((c) => c.trackId));
     let index = 0;
     p.playlist.trackOrder.forEach((t, i) => {
@@ -286,7 +223,6 @@ export class VocalsService {
     const p2 = this.doc.project;
     const durationSec = info.frames / info.sampleRate;
     const track = p2.playlist.trackOrder.indexOf(t.id) + 1;
-    // The same file imported twice shares its sample (and the channel takes the sample's name).
     const name = p2.channels[a.channelId]?.name ?? file.title;
     return {
       ok: true,
@@ -309,12 +245,6 @@ export class VocalsService {
     };
   }
 
-  // ── Keys ────────────────────────────────────────────────────────────
-
-  /**
-   * The key of one voice from its transcribed notes (mono transcription: no model, cached), or null when it can't
-   * be read clearly. A detuned or vibrato-heavy vocal smears a chroma key reading; its notes don't.
-   */
   private async noteKey(target: AudioTarget, run: RunOptions): Promise<PatternKey | null> {
     const a = this.deps.analyzer;
     if (!a?.transcribe) return null;
@@ -324,7 +254,6 @@ export class VocalsService {
     return k && k.confidence >= NOTES_KEY_MIN ? k : null;
   }
 
-  /** A clip's song key as heard: its source mix's key (stems) or its own, shifted by the clip's pitch. */
   private async clipKey(clip: Clip, ch: Channel, run: RunOptions): Promise<ActionResult<{ key: KeyRef | null; confidence: number; how: string; analysis: AudioAnalysis }>> {
     const p = this.doc.project;
     const parent = parentChannel(p, ch);
@@ -340,10 +269,6 @@ export class VocalsService {
     return { ok: true, data: { key, confidence: conf, how, analysis: r.data } };
   }
 
-  /**
-   * The project's key for a clip on `channelId` (excluded, with its whole song): the pitched notes of the patterns
-   * when they say so clearly, else the longest other audio (the instrumental), else a weak pattern guess.
-   */
   private async projectKey(channelId: string, song: string | null, run: RunOptions): Promise<FoundKey | null> {
     const p = this.doc.project;
     const pk = patternKey(p);
@@ -354,7 +279,6 @@ export class VocalsService {
     return null;
   }
 
-  /** The other audio in the project (longest first, at most 3 analysed): the first confident key, else the best one. */
   private async instrumentalKey(excludeChannels: Set<string>, excludeSongs: Set<string>, run: RunOptions): Promise<FoundKey | null> {
     if (!this.deps.analyzer) return null;
     const p = this.doc.project;
@@ -373,8 +297,6 @@ export class VocalsService {
     }
     return best;
   }
-
-  // ── Match ───────────────────────────────────────────────────────────
 
   async match(clipId: string, opts: MatchOptions, apply: Apply, run: RunOptions = {}): Promise<ActionResult<MatchOutcome>> {
     const p0 = this.doc.project;
@@ -408,7 +330,6 @@ export class VocalsService {
     const warnings: string[] = [];
     const notes: string[] = [];
 
-    // Source analysis (a stem reads its tempo and key from its source mix, which is steadier).
     const srcParent = parentChannel(p0, ch);
     const srcWhat = srcParent ? `"${ch.name}" (its source mix "${srcParent.name}")` : `"${ch.name}"`;
     let srcA: AudioAnalysis | null = null;
@@ -417,7 +338,6 @@ export class VocalsService {
       if (!r.ok || !r.data) return fail(r.message ?? 'Analysis failed');
       srcA = r.data;
     }
-    // Target analysis: its key, and its tempo when it plays at its own speed.
     let tgt: { key: KeyRef | null; confidence: number; how: string; analysis: AudioAnalysis } | null = null;
     if (target && ((wantKey && opts.semitones === undefined) || (wantTempo && !followsTempo(catalog, target.ch)))) {
       const r = await this.clipKey(target.clip, target.ch, run);
@@ -425,7 +345,6 @@ export class VocalsService {
       tgt = r.data;
     }
 
-    // ── Key ──
     let semis: number | null = null;
     let fromKey: KeyRef | null = null;
     let srcConf = 0;
@@ -437,7 +356,6 @@ export class VocalsService {
       fromKey = toKeyRef(srcA?.key ?? null);
       keyText = `pitched ${fmtSemitones(semis)} (as asked${fromKey && Number.isInteger(semis) ? `: ${keyLongName(fromKey)} → ${keyLongName(transposeKey(fromKey, semis))}` : ''})`;
     } else if (wantKey) {
-      // The source key: the chroma reading (its source mix for a stem); when that is weak, the key of its own notes.
       const chroma = toKeyRef(srcA?.key ?? null);
       const chromaConf = srcA?.key?.confidence ?? 0;
       fromKey = chroma;
@@ -468,7 +386,6 @@ export class VocalsService {
       }
     }
 
-    // ── Tempo ──
     const P = p0.transport.bpm;
     let follows = P;
     let adopt: number | null = null;
@@ -496,12 +413,9 @@ export class VocalsService {
     }
     if (semis === null && !read) return fail(`Couldn't match "${ch.name}": ${warnings.join(' ')}`);
 
-    // ── Apply (one undo step via the caller's group) ──
     const before = this.doc.version;
     try {
       if (adopt && target) {
-        // The target becomes the tempo master: it follows the project tempo at its own tempo (so it plays unstretched),
-        // other audio that plays at its own speed is rescaled so it still shows the same audio, then the tempo moves.
         apply('channels.setGenParams', { id: target.ch.id, params: { tempo_sync: 1, src_bpm: adopt } });
         const keep = rescaleForTempo(this.doc.project, this.doc.catalog, P, adopt, new Set([target.ch.id]));
         if (keep) apply(keep.cmd, keep.args);
@@ -555,12 +469,6 @@ export class VocalsService {
     };
   }
 
-  // ── Tune ────────────────────────────────────────────────────────────
-
-  /**
-   * The key a vocal is tuned to: its own reading (after its pitch shift) when that is clear, else the
-   * instrumental's, else the patterns', else the key of the vocal's transcribed notes, else the best weak reading.
-   */
   private async tuneKey(ch: Channel, clip: Clip | null, run: RunOptions): Promise<ActionResult<FoundKey> & { warnings?: string[] }> {
     const p = this.doc.project;
     const pitch = channelPitch(this.doc.catalog, ch);
@@ -686,7 +594,6 @@ export class VocalsService {
   }
 }
 
-/** An Apply for UI calls: every command folds into ONE user history entry; finish(false) rolls a partial edit back. */
 export function userGroupApply(doc: DocHost, label: string): { apply: Apply; finish(ok: boolean): void } {
   const groupId = doc.beginGroup(USER, label);
   return {

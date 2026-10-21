@@ -1,5 +1,3 @@
-// MIDI generators (shared/music/generate) + the notes.generate command:
-// determinism, keys, voicings, following chords, Euclid, undo.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -31,8 +29,8 @@ function fresh() {
   const p = createDefaultProject('Gen');
   const host = new DocHost(p, CATALOG, { strict: true });
   const pat = p.transport.activePatternId!;
-  const keys = p.channelOrder[5]; // Keys (triosc)
-  const bass = p.channelOrder[4]; // 808
+  const keys = p.channelOrder[5];
+  const bass = p.channelOrder[4];
   const hat = p.channelOrder[2];
   const exec = <T = unknown>(cmd: string, args: Record<string, unknown>) => host.exec<T>(cmd, { patternId: pat, ...args }, { actor: USER });
   const notes = (ch: string): Note[] => Object.values(host.project.patterns[pat].notes[ch] ?? {}).sort((a, b) => a.tick - b.tick || a.key - b.key);
@@ -51,7 +49,6 @@ function gen(kind: GeneratorKind, options: Record<string, unknown> = {}, c: Part
 
 const sig = (ns: Array<{ tick: number; key: number; dur: number; vel: number }>) => ns.map((n) => `${n.tick}:${n.key}:${n.dur}:${n.vel}`).join(' ');
 
-// Am | F | C | G, close triads, one per bar.
 const AM_F_C_G = [
   [57, 60, 64],
   [57, 60, 65],
@@ -63,8 +60,6 @@ function writeChords(f: ReturnType<typeof fresh>, ch: string) {
   assert.equal(f.exec('notes.replace', { channelId: ch, notes: ns }).ok, true);
 }
 const CHORD_PCS = AM_F_C_G.map((ks) => ks.map(pc));
-
-// ── Euclid ────────────────────────────────────────────────────────────
 
 test('Euclid: E(3,8) = x..x..x., E(5,8), E(4,16), edges and rotation', () => {
   assert.equal(euclidString(euclid(3, 8)), 'x..x..x.');
@@ -92,8 +87,6 @@ test('rhythm generator: Euclid hits land on the pattern, 8th rate, accents, roll
   assert.ok(ghosts.notes.length > 4 && ghosts.notes.some((n) => n.vel < 0.4) && ghosts.notes.every((n) => n.key === 42));
 });
 
-// ── Determinism ───────────────────────────────────────────────────────
-
 test('every generator: same seed → same notes; another seed → another take', () => {
   for (const kind of GENERATOR_KINDS) {
     const a = gen(kind, {}, { seed: 1234 });
@@ -109,8 +102,6 @@ test('every generator: same seed → same notes; another seed → another take',
   assert.deepEqual(vs, [0, 1, 2, 3].map((i) => variationSeed(77, i)), 'variation seeds are stable');
 });
 
-// ── Keys ──────────────────────────────────────────────────────────────
-
 test('chords, arps and melodies stay in the key (every 7-note scale, every preset, many seeds)', () => {
   const seven = Object.keys(SCALES).filter((s) => SCALES[s].length === 7);
   for (const scale of seven) {
@@ -125,7 +116,6 @@ test('chords, arps and melodies stay in the key (every 7-note scale, every prese
       for (const p of PROGRESSIONS) for (const n of gen('chords', { progression: p.id, extensions: 'sevenths' }, { key }).notes) assert.ok(inKey(n.key, key), `${p.id} in ${root} ${scale}`);
     }
   }
-  // the melody keeps to pentatonic / blues scales too
   for (const scale of ['minorPentatonic', 'majorPentatonic', 'blues']) {
     for (let seed = 1; seed <= 5; seed++) for (const n of gen('melody', { feel: '16ths' }, { key: { root: 2, scale }, seed }).notes) assert.ok(inKey(n.key, { root: 2, scale }), `${scale}: ${n.key}`);
   }
@@ -147,8 +137,6 @@ test('melody: range, contour and call and response', () => {
     assert.throws(() => runGenerator('melody', o.ok ? o.options : (null as never), ctx()), /lowest|range/);
   }
 });
-
-// ── Chords: voicings and voice leading ────────────────────────────────
 
 test('chords: close voicings are voice-led (no voice jumps more than a fifth), open / spread are wider', () => {
   for (const p of PROGRESSIONS) {
@@ -199,8 +187,6 @@ test('chords: numerals, presets, rhythm and names', () => {
   assert.match(typo.ok ? '' : typo.message, /Unknown chords option "voicng"/);
 });
 
-// ── Following the chords in a pattern ─────────────────────────────────
-
 test('chord detection reads stacked notes on any channel', () => {
   const f = fresh();
   writeChords(f, f.keys);
@@ -219,7 +205,6 @@ test('arp follows the chords already in the pattern (another channel, or replaci
   const arp = f.notes(f.bass);
   assert.equal(arp.length, 64, '16ths over 4 bars');
   for (const n of arp) assert.ok(CHORD_PCS[Math.floor(n.tick / BAR)].includes(pc(n.key)), `arp note ${n.key} at ${n.tick} is not in the chord`);
-  // on the chord channel itself: the chords become the arp (detected before they are replaced)
   const same = f.exec('notes.generate', { channelId: f.keys, kind: 'arp', options: { style: 'converge' } });
   assert.equal(same.ok, true, same.message);
   const ks = f.notes(f.keys);
@@ -269,8 +254,6 @@ test('melody lands on chord tones on strong beats when the pattern has chords', 
   assert.ok(hits / strong > 0.85, `chord tones on ${hits}/${strong} strong beats`);
 });
 
-// ── The command ───────────────────────────────────────────────────────
-
 test('notes.generate: one undo step, bar range, replace vs merge, selection, key from the pattern', () => {
   const f = fresh();
   const seedNotes = [{ tick: 0, key: 60, dur: 240 }, { tick: BAR, key: 62, dur: 240 }, { tick: 2 * BAR + 480, key: 64, dur: 240 }];
@@ -288,14 +271,12 @@ test('notes.generate: one undo step, bar range, replace vs merge, selection, key
   assert.equal(f.host.undo(USER).ok, true);
   assert.deepEqual(f.notes(f.hat).map((n) => n.id).sort(), [...before].sort(), 'one undo restores the channel');
 
-  // merge keeps everything; identical notes are not stacked
   const m = f.exec<{ skipped: number }>('notes.generate', { channelId: f.hat, kind: 'rhythm', options: { steps: 4, pulses: 4, rate: '4th', note: 60 }, range: { fromBar: 1, bars: 1 }, mode: 'merge' });
   assert.equal(m.ok, true, m.message);
   assert.equal(m.data!.skipped, 1, 'the existing C4 on beat 1 is not doubled');
   assert.equal(f.notes(f.hat).length, 3 + 3);
   f.host.undo(USER);
 
-  // selection: replaces just the selected notes, range = their bars
   const sel = f.notes(f.hat).filter((n) => n.tick >= 2 * BAR).map((n) => n.id);
   const s = f.exec<{ removed: number; range: { fromBar: number } }>('notes.generate', { channelId: f.hat, kind: 'melody', ids: sel, seed: 3 });
   assert.equal(s.ok, true, s.message);
@@ -303,7 +284,6 @@ test('notes.generate: one undo step, bar range, replace vs merge, selection, key
   assert.equal(s.data!.range.fromBar, 3);
   assert.ok(f.notes(f.hat).filter((n) => n.tick >= 2 * BAR).every((n) => n.tick < 3 * BAR), 'stays inside bar 3');
 
-  // key: given > the pattern's notes > the project > A minor
   writeChords(f, f.keys);
   const guessed = guessKey(f.host.project, f.pat);
   assert.equal(guessed.source, 'pattern');
@@ -333,7 +313,6 @@ test('notes.generate: human errors, nothing written', () => {
     assert.match(r.message ?? '', re);
   }
   assert.equal(f.host.version, v, 'failed generates change nothing');
-  // a fixed-length pattern grows to fit the range
   f.host.exec('patterns.set', { id: f.pat, length: BAR }, { actor: USER });
   const g = f.exec<{ extendedTo: number }>('notes.generate', { channelId: f.keys, kind: 'chords', range: { fromBar: 1, bars: 2 } });
   assert.equal(g.ok, true, g.message);

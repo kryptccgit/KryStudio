@@ -1,17 +1,10 @@
-// Ranking presets and samples for a request ("a dark pluck for future bass").
-// Shared by the MCP tools, the default-instrument choice for channels agents
-// create by name, get_playbook's palette and the renderer's preset browser.
-// Pure + deterministic: same inputs, same order.
-
 import { resolveGenre, sameFamily, type GenreId } from './genres';
 import type { ChainRole, FactorySample, InstrumentRole, Preset, SampleKind } from './types';
 
 export interface SoundQuery {
-  /** Free words matched against name, description, tags, role, plugin ("dark supersaw"). */
   text?: string;
   role?: InstrumentRole | ChainRole;
   kind?: Preset['kind'];
-  /** Genre id or any alias ("big room"). */
   genre?: string;
   tags?: string[];
   plugin?: string;
@@ -23,7 +16,6 @@ export interface SampleQuery {
   kind?: SampleKind;
   genre?: string;
   tags?: string[];
-  /** Only tempo-synced FX / loops of exactly this many bars (closest when none match exactly). */
   bars?: number;
 }
 
@@ -43,7 +35,6 @@ function textScore(q: string[], hay: string): number {
   return s;
 }
 
-/** Score one preset (higher = better); -Infinity = excluded by a hard filter. */
 export function scorePreset(p: Preset, q: SoundQuery): number {
   if (q.kind && p.kind !== q.kind) return -Infinity;
   if (q.plugin && (p.kind !== 'instrument' || p.plugin !== q.plugin)) return -Infinity;
@@ -57,7 +48,6 @@ export function scorePreset(p: Preset, q: SoundQuery): number {
   }
   const genre = resolveGenre(q.genre);
   s += genreScore(genre, p.genres);
-  // The designer's go-to sound for this role in this genre beats an equally tagged one (ties used to fall to id order).
   if (genre && p.kind === 'instrument' && p.defaultFor?.includes(genre) && (!q.role || p.role === q.role)) s += 15;
   for (const t of q.tags ?? []) if (p.tags.includes(t.toLowerCase())) s += 6;
   const hay = `${p.name} ${p.description} ${p.tags.join(' ')} ${p.role} ${p.kind === 'instrument' ? `${p.plugin} ${(p.alsoRoles ?? []).join(' ')}` : 'chain'}`.toLowerCase();
@@ -65,21 +55,16 @@ export function scorePreset(p: Preset, q: SoundQuery): number {
   const ts = textScore(tw, hay);
   if (tw.length && ts === 0 && !q.role) return -Infinity;
   s += ts;
-  // User presets first among equals: they are the user's own taste.
   if (source === 'user') s += 1;
-  // Racks (Wave 12.2) are bigger, multi-part sounds: picked by role only when nothing plainer fits, or when asked for.
   if (isRackPreset(p) && !tw.includes('rack') && !q.plugin) s -= 12;
-  // A recorded instrument from an installed sound pack beats its synth stand-in (callers gate out uninstalled packs).
   if (p.kind === 'instrument' && p.requires) s += 2;
   return s;
 }
 
-/** A preset that is (or holds) a rack: an instrument / drum rack, or a chain with an effect rack. */
 export function isRackPreset(p: Preset): boolean {
   return p.kind === 'instrument' ? !!p.rack || p.plugin === 'krypt.rack' || p.plugin === 'krypt.drumrack' : p.fx.some((f) => !!f.rack || f.type === 'krypt.fxrack');
 }
 
-/** Presets best-first. */
 export function rankPresets<T extends Preset>(presets: readonly T[], q: SoundQuery, limit = 30): T[] {
   return presets
     .map((p) => ({ p, s: scorePreset(p, q) }))
@@ -89,7 +74,6 @@ export function rankPresets<T extends Preset>(presets: readonly T[], q: SoundQue
     .map((x) => x.p);
 }
 
-/** The single best preset for a role (+ genre / tags), or null. */
 export function pickPreset<T extends Preset>(presets: readonly T[], role: InstrumentRole | ChainRole, genre?: string | null, tags?: string[]): T | null {
   return rankPresets(presets, { role, genre: genre ?? undefined, tags }, 1)[0] ?? null;
 }
@@ -109,7 +93,6 @@ export function scoreSample(x: FactorySample, q: SampleQuery): number {
   return s + ts;
 }
 
-/** Factory samples best-first. */
 export function rankSamples(samples: readonly FactorySample[], q: SampleQuery, limit = 30): FactorySample[] {
   return samples
     .map((x) => ({ x, s: scoreSample(x, q) }))
@@ -119,10 +102,6 @@ export function rankSamples(samples: readonly FactorySample[], q: SampleQuery, l
     .map((r) => r.x);
 }
 
-/**
- * The role a channel NAME implies ("Supersaw Lead" → lead, "808" → 808, "Chords" → chord), or null. Used when an
- * agent creates a channel by name without choosing a sound.
- */
 export function roleFromName(name: string): InstrumentRole | null {
   const n = name.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ');
   const has = (re: RegExp) => re.test(n);

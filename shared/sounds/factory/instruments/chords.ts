@@ -1,5 +1,3 @@
-// Factory STAB and CHORD presets: rhythmic chord hits and sustained chord progressions.
-
 import type { InstrumentPreset } from '../../types';
 import {
   ALG, DIV, FM, HALL, LFO, PLATE, POS, ROOM, SH, T, TAPE, TRI, WAVE,

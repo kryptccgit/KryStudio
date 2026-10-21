@@ -1,5 +1,3 @@
-// The renderer's sound-pack logic (src/sounds/packsLogic.ts): which preset needs which pack, installed or not,
-// the words / sizes / progress / buttons of a pack card, and the browser mock's simulated downloads.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import type { PackEntryState, PacksState } from '@shared/packs/types';
@@ -121,7 +119,6 @@ test('browser mock: a download progresses over a few seconds, then installs; can
   const rm = await api.remove(first.id);
   assert.equal(rm.ok, true);
   assert.equal(rm.data?.packs[0].status, 'available');
-  // Cancel mid-way.
   const p = api.install(first.id);
   await new Promise((res) => setTimeout(res, 400));
   assert.equal((await api.cancel(first.id)).ok, true);
@@ -129,7 +126,6 @@ test('browser mock: a download progresses over a few seconds, then installs; can
   assert.equal(c.ok, false);
   assert.match(c.message ?? '', /cancelled/);
   assert.equal((await api.state()).packs[0].status, 'available');
-  // A failure (devtools hook) leaves the error on the card.
   (globalThis as unknown as { __kryptMockPacks: { failNext(): void } }).__kryptMockPacks.failNext();
   const f = await api.install(first.id);
   assert.equal(f.ok, false);

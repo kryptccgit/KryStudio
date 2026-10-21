@@ -1,24 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// "More like this" in main (research/13 §12.1): resolve a sound the user
-// (Browser right-click → window.krypt.sounds.similar) or an agent
-// (find_samples / find_presets {like}) points at to a timbre fingerprint,
-// then rank the library around it (shared/sound-match/similar.ts).
-// Node-only, no Electron import.
-//
-//   findSimilar(d: SimilarDeps, source: SimilarSource, q?: SimilarQuery, run?) → Promise<ActionResult<SimilarResult>>
-//
-// Source → fingerprint:
-//   preset id        the factory index (presets are rendered by the engine at build time); a user preset that plays
-//                    one sample is measured from that sample; other user presets can't be compared yet (a sentence)
-//   'factory:…'      the factory index, else measured through the analyzer
-//   'pack:<id>/…'    the pack cache (userData/analysis/fingerprints-packs.json), measured on first use
-//   absolute file    only where the caller's file-access rule allows it (the Browser folders for the UI, the agent
-//                    File access policy for MCP); measured through the analyzer (cached per file by the analyzer)
-// Candidates: the factory index (presets + samples that can play here) + installed pack samples, which are
-// measured lazily: at most `maxNewPackSamples` (default 24) per call; `pending` says how many are left, so the
-// caller asks again (the Browser does it automatically, showing progress; agents are told to ask again).
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import type { ActionResult, SimilarItem, SimilarQuery, SimilarResult, SimilarSource } from '@shared/types';
 import { AUDIO_EXTENSIONS, isAudioFile } from '@shared/audio/formats';
@@ -34,25 +13,17 @@ import { fingerprintServiceFor, playableSource, presetLookup, type FingerprintFn
 
 export interface SimilarDeps {
   svc: FingerprintService;
-  /** Instrument presets (user + factory). */
   preset(id: string): InstrumentPreset | undefined;
-  /** Whether a candidate can play here (its pack is installed, its file is on disk). */
   playable(s: FingerprintSource): boolean;
-  /** Factory + installed pack samples (names, kinds, root notes). */
   samples(): readonly FactorySample[];
   resolveSamplePath(p: string): string;
-  /** The analyzer's fingerprint cmd; absent = only the index and the pack cache. */
   fingerprint?: FingerprintFn;
-  /** The caller's file-access rule for an absolute user file: the path to read, or a sentence why not. */
   userFile(p: string): { abs: string } | { error: string };
-  /** The kind a user file's name / folders suggest (find_samples' classifier); anything not a sample kind is ignored. */
   classify?(p: string): string | null;
 }
 
 export interface SimilarRunOptions extends RunOptions {
-  /** New pack samples measured per call at most (default 24; 0 = cached ones only). */
   maxNewPackSamples?: number;
-  /** Pack-sample measuring progress (done of this call's batch). */
   onMeasured?(done: number, total: number): void;
 }
 
@@ -66,12 +37,10 @@ interface Resolved {
   fp: SoundFingerprint;
   kind: SimilarKind;
   name: string;
-  /** The library entry it is (excluded from the results); null for a user file. */
   self: FingerprintSource | null;
   inferred: boolean;
 }
 
-/** Measure an audio file through the analyzer (whole file, pitch on). */
 async function measure(d: SimilarDeps, abs: string, name: string, run?: RunOptions): Promise<ActionResult<SoundFingerprint>> {
   if (!d.fingerprint) return { ok: false, message: `"${name}" can't be measured in this session: the audio analyzer isn't available (see the log).` };
   try {
@@ -94,7 +63,6 @@ async function resolveSource(d: SimilarDeps, source: SimilarSource, index: reado
     const name = p?.name ?? id;
     const role = p?.role ?? (hit!.source as Extract<FingerprintSource, { kind: 'preset' }>).role;
     if (hit) return { ok: true, data: { fp: hit.fp, kind: { kind: 'preset', role }, name, self: hit.source, inferred: false } };
-    // A preset the index doesn't know (yours): a one-sample preset sounds like its sample.
     if (p?.sample && p.plugin === 'krypt.sampler') {
       let abs = '';
       try {
@@ -124,7 +92,6 @@ async function resolveSource(d: SimilarDeps, source: SimilarSource, index: reado
       if (!r.fp) return { ok: false, message: `"${name}" ${r.problem ?? "couldn't be measured"}.` };
       return { ok: true, data: { fp: r.fp, kind: { kind: 'sample', sampleKind: meta.kind }, name, self: { kind: 'sample', path: p, sampleKind: meta.kind }, inferred: false } };
     }
-    // A factory sound the index doesn't list (a newer kit): measure it.
     let abs = '';
     try {
       abs = d.resolveSamplePath(p);
@@ -138,7 +105,6 @@ async function resolveSource(d: SimilarDeps, source: SimilarSource, index: reado
     return { ok: true, data: { fp: m.data, kind: { kind: 'sample', sampleKind: kind }, name, self: kind ? { kind: 'sample', path: p, sampleKind: kind } : null, inferred: false } };
   }
 
-  // A file of the user's own.
   const access = d.userFile(p);
   if ('error' in access) return { ok: false, message: access.error };
   const name = baseName(access.abs);
@@ -146,7 +112,6 @@ async function resolveSource(d: SimilarDeps, source: SimilarSource, index: reado
   if (!m.ok || !m.data) return { ok: false, message: m.message };
   let named: string | null = null;
   try {
-    // The file name and its two closest folders ("Kicks/Hard 01.wav").
     named = d.classify?.(access.abs.split(/[\\/]/).slice(-3).join('/')) ?? null;
   } catch {
     named = null;
@@ -156,7 +121,6 @@ async function resolveSource(d: SimilarDeps, source: SimilarSource, index: reado
   return { ok: true, data: { fp: m.data, kind: { kind: 'sample', sampleKind: guess?.kind ?? null }, name, self: null, inferred: !!guess } };
 }
 
-/** "More like this": see the top of this file. Never throws. */
 export async function findSimilar(d: SimilarDeps, source: SimilarSource, q: SimilarQuery = {}, run: SimilarRunOptions = {}): Promise<ActionResult<SimilarResult>> {
   try {
     const { index, problem } = d.svc.index();
@@ -170,7 +134,6 @@ export async function findSimilar(d: SimilarDeps, source: SimilarSource, q: Simi
     const { fp, kind, name, self, inferred } = src.data;
     const effScope = kind.kind === 'sample' && !kind.sampleKind ? 'any' : scope;
 
-    // Candidates: the factory index + installed pack samples of the kinds searched (measured lazily).
     let candidates: FingerprintEntry[] = index.entries;
     const notes: string[] = [];
     let pending = 0;
@@ -219,10 +182,6 @@ export async function findSimilar(d: SimilarDeps, source: SimilarSource, q: Simi
   }
 }
 
-/**
- * The Browser's file rule for "More like this" from the UI: an absolute audio file inside one of the Browser's
- * folders (the same rule as browser.list), that is still there. Network / device paths are refused.
- */
 export function browserFileAccess(roots: () => readonly string[]): SimilarDeps['userFile'] {
   return (p) => {
     const name = path.basename(p) || p;
@@ -234,7 +193,6 @@ export function browserFileAccess(roots: () => readonly string[]): SimilarDeps['
   };
 }
 
-/** SimilarDeps over MainDeps (the factory index, pack cache and analyzer of this session) with a file-access rule. */
 export function similarDepsFor(deps: MainDeps, userFile: SimilarDeps['userFile'], classify?: SimilarDeps['classify']): SimilarDeps {
   const preset = presetLookup(deps);
   return {

@@ -1,19 +1,8 @@
-// Pure maths for the warp UI (waveform overlay + playlist ticks): the
-// source-seconds ↔ beats mapping a channel plays with right now, the beat
-// grid to draw, drag clamping and labels. No React, no window (unit-tested
-// in test/warp.test.ts).
-//
-// Mapping (mirrors shared/schema/warp.ts): with 2+ markers, the markers
-// (piecewise linear, edge segments extrapolated); with 0 or 1, the Stretch
-// params' rate (`tickBpm`, shared/analyzer/tempo audioTickBpm), shifted so
-// the single marker's sec lands on its beat.
-
 import { beatToSec, secToBeat, type WarpMarker } from '@shared/schema/warp';
 
 export interface WarpMapping {
   beatAt(sec: number): number;
   secAt(beat: number): number;
-  /** true when the markers define the timing (2+). */
   warped: boolean;
 }
 
@@ -33,10 +22,6 @@ export interface GridLine {
   bar: boolean;
 }
 
-/**
- * Beat-grid lines across a waveform `width` px wide showing `durationSec` of source. Every beat when beats are at
- * least 6 px apart, else only bars (and nothing when even bars would be under 6 px apart). At most 2000 lines.
- */
 export function gridLines(map: WarpMapping, durationSec: number, width: number, barQuarters: number): GridLine[] {
   if (!(durationSec > 0) || !(width > 0)) return [];
   const b0 = map.beatAt(0);
@@ -54,7 +39,6 @@ export function gridLines(map: WarpMapping, durationSec: number, width: number, 
   return out;
 }
 
-/** A dragged marker's sec, kept strictly between its neighbours (and inside the file). */
 export function clampDragSec(markers: WarpMarker[], index: number, sec: number, durationSec: number | null): number {
   const eps = 0.001;
   const lo = index > 0 ? markers[index - 1].sec + eps : 0;
@@ -63,12 +47,10 @@ export function clampDragSec(markers: WarpMarker[], index: number, sec: number, 
   return Math.min(hi, Math.max(lo, sec));
 }
 
-/** Round a beat to a grid in quarter notes (0.25 = a 16th). */
 export function snapBeat(beat: number, step = 0.25): number {
   return Math.round(beat / step) * step;
 }
 
-/** "5.1" = bar 5, beat 1 (in quarter notes); "5.2.50" for a beat halfway through beat 2. */
 export function beatLabel(beat: number, barQuarters: number): string {
   const bar = barQuarters > 0 ? barQuarters : 4;
   const b = Math.round(beat * 1000) / 1000;

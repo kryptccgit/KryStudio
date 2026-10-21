@@ -1,7 +1,3 @@
-// "Find similar": the tracks that sound most like one library track
-// (feature-vector similarity: tempo, key, drums, loudness, ...), within its
-// collection or the whole library, with a score bar per result.
-
 import { useEffect, useState, type ReactNode } from 'react';
 import { AudioWaveform, Loader2, ListPlus, LocateFixed, Radar, RotateCcw } from 'lucide-react';
 import type { LibraryTrack } from '@shared/library/types';

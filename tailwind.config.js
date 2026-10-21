@@ -1,10 +1,8 @@
-/** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './popout.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        // Krypt brand tokens — see kryptguidelines.md §3.
         'krypt-black': '#000000',
         'krypt-void': '#0A0A0F',
         'krypt-surface': '#141419',

@@ -1,40 +1,27 @@
-//! From parsed SFZ to a [`MultiSampleSet`], independent of where the audio
-//! comes from: `plan` lists the distinct sample ranges to decode, the caller
-//! decodes them (load.rs: files, in parallel; tests: in memory), `assemble`
-//! maps the regions onto the results and writes the report.
-
 use super::set::{tail_fade_frames, MsSample, MultiSampleSet, Region};
 use super::sfz::{self, SfzParsed};
 use std::collections::HashMap;
 
-/// One range to decode, shared by every region that uses it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PlanJob {
-    /// `default_path` + `sample`, forward slashes, relative to the .sfz.
     pub sample: String,
-    /// First file frame kept.
     pub offset: u64,
-    /// Exclusive end frame (None = to the end of the file).
     pub end: Option<u64>,
 }
 
 #[derive(Debug, Default)]
 pub struct Plan {
     pub jobs: Vec<PlanJob>,
-    /// Per parsed region: its job, or None (never plays: `end=-1`, empty range, generator).
     pub region_job: Vec<Option<usize>>,
-    /// Regions using SFZ generators (`sample=*sine` …), unsupported.
     pub generators: usize,
 }
 
-/// What decoding a job produced.
 pub enum JobResult {
     Ok(MsSample),
     Missing,
     Failed(String),
 }
 
-/// List the distinct sample ranges the regions need.
 pub fn plan(parsed: &SfzParsed) -> Plan {
     let mut p = Plan::default();
     let mut index: HashMap<PlanJob, usize> = HashMap::new();
@@ -46,10 +33,9 @@ pub fn plan(parsed: &SfzParsed) -> Plan {
         }
         let end = match r.end {
             Some(e) if e < 0 => {
-                p.region_job.push(None); // end=-1: the region never plays
+                p.region_job.push(None);
                 continue;
             }
-            // SFZ `end` is the last frame played (inclusive).
             Some(e) => Some((e as u64).saturating_add(1)),
             None => None,
         };
@@ -71,7 +57,6 @@ fn mb(bytes: usize) -> f64 {
     bytes as f64 / (1024.0 * 1024.0)
 }
 
-/// Parser warnings as report lines.
 pub fn parse_report(name: &str, parsed: &SfzParsed) -> Vec<(&'static str, String)> {
     let mut report = Vec::new();
     for w in &parsed.warnings {
@@ -83,8 +68,6 @@ pub fn parse_report(name: &str, parsed: &SfzParsed) -> Vec<(&'static str, String
     report
 }
 
-/// Map regions onto decoded jobs. Missing / broken files only silence their
-/// regions (reported); no playable region at all is an error.
 pub fn assemble(name: &str, parsed: &SfzParsed, plan: &Plan, results: Vec<JobResult>, load_ms: f64) -> Result<MultiSampleSet, String> {
     let mut report = parse_report(name, parsed);
     if plan.generators > 0 {
@@ -159,7 +142,6 @@ pub fn assemble(name: &str, parsed: &SfzParsed, plan: &Plan, results: Vec<JobRes
     Ok(set)
 }
 
-/// Keep `[offset, end)` of a whole sample (in-memory sources).
 pub fn slice_sample(s: &MsSample, offset: u64, end: Option<u64>) -> MsSample {
     let a = (offset as usize).min(s.frames);
     let b = end.map(|e| (e as usize).min(s.frames)).unwrap_or(s.frames).max(a);
@@ -169,9 +151,6 @@ pub fn slice_sample(s: &MsSample, offset: u64, end: Option<u64>) -> MsSample {
     MsSample { data, channels: ch, frames, sample_rate: s.sample_rate, root_key: s.root_key, tail_fade: tail_fade_frames(frames, s.sample_rate, b < s.frames) }
 }
 
-/// Build a set from SFZ text and in-memory samples: `provide(sample)` returns
-/// the whole sample a region names (None = missing). Tests and generated
-/// instruments; files go through load.rs.
 pub fn from_sfz_text(name: &str, text: &str, mut provide: impl FnMut(&str) -> Option<MsSample>) -> Result<MultiSampleSet, String> {
     let parsed = sfz::parse(text);
     if parsed.regions.is_empty() {

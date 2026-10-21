@@ -1,5 +1,3 @@
-//! Standard base64 (RFC 4648, with padding) for plugin state blobs.
-
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 pub fn encode(data: &[u8]) -> String {
@@ -26,7 +24,6 @@ fn val(c: u8) -> Option<u32> {
     } as u32)
 }
 
-/// Decodes padded or unpadded base64 (whitespace ignored).
 pub fn decode(s: &str) -> Result<Vec<u8>, String> {
     let clean: Vec<u8> = s.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=').collect();
     let mut out = Vec::with_capacity(clean.len() * 3 / 4);

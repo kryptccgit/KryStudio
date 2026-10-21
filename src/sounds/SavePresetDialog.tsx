@@ -1,10 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// "Save preset…" (a channel's sound) and "Save chain as preset…" (a mixer
-// insert's effects): name, role, genres, tags, description (+ include
-// effects for a channel). Main writes the file (window.krypt.sounds); the
-// dialog stays open with a toast when that fails.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useMemo, useState, type ReactNode } from 'react';
 import { Layers, Save } from 'lucide-react';
 import { pluginById } from '@shared/plugins/catalog';
@@ -50,7 +43,6 @@ interface MetaState {
   description: string;
 }
 
-/** Name, genres, tags and description: the part both dialogs share. */
 function MetaFields({ meta, set, roleField }: { meta: MetaState; set: (patch: Partial<MetaState>) => void; roleField: ReactNode }) {
   const nameErr = validatePresetName(meta.name);
   const tagList = parseTagList(meta.tags);
@@ -102,8 +94,6 @@ function MetaFields({ meta, set, roleField }: { meta: MetaState; set: (patch: Pa
     </>
   );
 }
-
-// ── Channel sound ─────────────────────────────────────────────────────
 
 function SaveChannelForm({ channelId, close }: { channelId: string; close: () => void }) {
   const p = getProject();
@@ -189,8 +179,6 @@ export function openSavePresetDialog(channelId: string, doc?: Document | null): 
     render: (close) => <SaveChannelForm channelId={channelId} close={close} />,
   });
 }
-
-// ── Insert chain ──────────────────────────────────────────────────────
 
 function SaveChainForm({ insertId, close }: { insertId: string; close: () => void }) {
   const ins = getProject().mixer.inserts[insertId];

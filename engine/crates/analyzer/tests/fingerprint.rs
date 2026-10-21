@@ -1,5 +1,3 @@
-//! `fingerprint` (research/15 §3.1): timbre features on synthetic sounds.
-
 mod common;
 
 use common::*;
@@ -54,7 +52,7 @@ fn sine_440_is_pitched_and_tonal() {
     assert!(fp.flatness < 0.02, "flatness {}", fp.flatness);
     assert!((fp.centroid_hz - 440.0).abs() < 30.0, "centroid {}", fp.centroid_hz);
     assert!((fp.rolloff_hz - 440.0).abs() < 30.0, "rolloff {}", fp.rolloff_hz);
-    assert_eq!(fp.bands.low_mid, 0.0); // 440 Hz lies in 250-500
+    assert_eq!(fp.bands.low_mid, 0.0);
     assert!((fp.peak_db - -6.02).abs() < 0.1, "peak {}", fp.peak_db);
     assert!((fp.rms_db - -9.03).abs() < 0.1, "rms {}", fp.rms_db);
     assert!((fp.crest_db - 3.01).abs() < 0.1, "crest {}", fp.crest_db);
@@ -62,7 +60,6 @@ fn sine_440_is_pitched_and_tonal() {
     assert!(fp.attack_ms < 10.0, "attack {}", fp.attack_ms);
     assert_eq!(fp.width, 0.0);
     assert!((fp.length_sec - 1.0).abs() < 0.01);
-    // pitch: false → no f0, same harmonicity.
     let np = fingerprint_channels(&[sine(440.0, 1.0, 0.5)], SR, None, false, &JobCtx::detached()).unwrap().whole.unwrap();
     assert!(np.f0_hz.is_none());
     assert!((np.harmonicity - fp.harmonicity).abs() < 1e-6);
@@ -85,7 +82,6 @@ fn white_noise_is_flat_and_unpitched() {
     assert!(fp.flatness > 0.85, "flatness {}", fp.flatness);
     assert!(fp.harmonicity < 0.4, "harmonicity {}", fp.harmonicity);
     assert!(fp.f0_hz.is_none());
-    // White noise: energy ∝ bandwidth, so the widest band (high) is loudest.
     assert_eq!(fp.bands.high, 0.0);
     assert!(fp.centroid_hz > 7000.0, "centroid {}", fp.centroid_hz);
     assert!(fp.rolloff_hz > 14_000.0, "rolloff {}", fp.rolloff_hz);
@@ -116,7 +112,6 @@ fn kick_is_low_short_and_snappy() {
 #[test]
 fn pad_is_sustained_with_slow_attack() {
     let mut p = saw_pad(&[(&[57.0, 60.0, 64.0], 2.0)], 12.0, 0.0, 2500.0, 0.15);
-    // 400 ms linear fade-in.
     let ramp = (0.4 * SR) as usize;
     for (i, v) in p.iter_mut().enumerate().take(ramp) {
         *v *= i as f32 / ramp as f32;
@@ -124,10 +119,8 @@ fn pad_is_sustained_with_slow_attack() {
     let fp = fp1(&p);
     eprintln!("pad: {fp:?}");
     all_finite(&fp);
-    // Detuned saws beat (a real pad's envelope moves), so not quite 1.
     assert!(fp.sustain > 0.6, "sustain {}", fp.sustain);
     assert!(fp.attack_ms > 250.0 && fp.attack_ms < 450.0, "attack {}", fp.attack_ms);
-    // A steady organ-like tone with the same fade-in: sustain ≈ 1.
     let mut o = tone(220.0, 2.0, &[0.5, 0.3, 0.2]);
     for (i, v) in o.iter_mut().enumerate().take(ramp) {
         *v *= i as f32 / ramp as f32;
@@ -154,7 +147,6 @@ fn stereo_width() {
     assert!(mono.width < 1e-6);
     assert_eq!(single.width, 0.0);
     assert_eq!(anti.width, 1.0);
-    // Half-correlated → in between.
     let r2: Vec<f32> = l.iter().zip(noise(5, 1.0, 0.3)).map(|(a, b)| 0.7 * a + 0.3 * b).collect();
     let mid = fp_ch(&[l, r2]);
     assert!(mid.width > 0.02 && mid.width < 0.6, "{}", mid.width);
@@ -162,7 +154,6 @@ fn stereo_width() {
 
 #[test]
 fn segments_from_a_file() {
-    // 0..1 s sine 220, 1..1.5 s silence, 1.5..2 s noise; 48 kHz stereo.
     let sr = 48_000u32;
     let s = |secs: f32| (secs * sr as f32) as usize;
     let mut x = vec![0f32; s(2.0)];
@@ -192,7 +183,7 @@ fn segments_from_a_file() {
     let f = &res.segments;
     assert!((f[0].f0_hz.unwrap() - 220.0).abs() < 1.5, "{:?}", f[0].f0_hz);
     assert!((f[0].length_sec - 0.5).abs() < 0.01);
-    assert_eq!(f[1].length_sec, 0.0, "silent segment"); // silence → zeroed
+    assert_eq!(f[1].length_sec, 0.0, "silent segment");
     assert_eq!(f[1].peak_db, -120.0);
     assert!(f[2].flatness > 0.8 && f[2].f0_hz.is_none(), "{:?}", f[2]);
     assert!((f[2].length_sec - 0.4).abs() < 0.01, "clipped at EOF: {}", f[2].length_sec);
@@ -202,7 +193,6 @@ fn segments_from_a_file() {
     for fp in f {
         all_finite(fp);
     }
-    // JSON shape: camelCase, f0Hz present (null when unpitched), no `whole`.
     let v = serde_json::to_value(&res).unwrap();
     assert!(v.get("whole").is_none());
     let s0 = &v["segments"][0];
@@ -213,7 +203,6 @@ fn segments_from_a_file() {
         assert!(s0["bands"].get(k).is_some(), "missing bands.{k}");
     }
     assert!(v["segments"][2]["f0Hz"].is_null());
-    // Whole file: segments empty, whole present.
     let whole = run(&FingerprintArgs { path: path.display().to_string(), segments: None, pitch: Some(false), highpass_hz: None }, &JobCtx::detached()).unwrap();
     assert!(whole.segments.is_empty());
     let w = whole.whole.unwrap();
@@ -245,7 +234,6 @@ fn many_segments_report_progress_and_bad_input_is_named() {
 
 #[test]
 fn speed_per_half_second_segment() {
-    // 200 half-second segments of a pitched, noisy signal at 48 kHz stereo.
     let sr = 48_000.0;
     let n = (sr * 30.0) as usize;
     let mut r = Rng::new(4);
@@ -268,8 +256,6 @@ fn sub_len() -> usize {
 
 #[test]
 fn highpass_removes_a_ringing_kick_under_a_hat() {
-    // A hat-like noise burst over a loud 50 Hz kick tail: unfiltered the low end dominates (low rolloff);
-    // high-passed at 2 kHz the measurement describes the hat.
     let sr = SR;
     let n = sub_len();
     let sub = sine(50.0, 0.12, 0.8);

@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Record my voice (research/21 §voices): clone the user's OWN voice on
-// Fish Audio. Why (only your own voice), the consent line and a short
-// passage to read, then a live take through the existing recorder (arm
-// audio, play, ~30 s, stop: the take lands on the playlist like any
-// recording), then a consent checkbox + a name → cloneMyVoice. Never a
-// file upload: the recording must be made here, from the microphone.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, useState } from 'react';
 import { Check, Circle, Cloud, Loader2, Mic, RotateCcw, ShieldCheck, Square, TriangleAlert, UserRound } from 'lucide-react';
 import { CONSENT_LINE } from '@shared/voice/types';
@@ -42,8 +33,6 @@ export function openRecordVoice(doc?: Document | null): void {
   });
 }
 
-// ── The recording session (outside React: it must clean up when the dialog closes) ──
-
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 const session = {
@@ -56,7 +45,6 @@ const session = {
     try {
       await window.krypt.record.setArmed(false);
     } catch {
-      /* the transport button shows the arm state */
     }
     if (this.restoreMode) {
       const rec = recordingSettings(useSettings.getState().settings);
@@ -65,7 +53,6 @@ const session = {
     }
   },
 
-  /** Arm audio recording and start the transport. Returns an error message or null. */
   async start(): Promise<string | null> {
     this.before = audioClipIds(getProject());
     this.lastTakeId = useLiveInput.getState().record.lastTake?.id ?? null;
@@ -93,7 +80,6 @@ const session = {
     return null;
   },
 
-  /** Stop, wait for the take to land on the playlist, and find its WAV. */
   async stop(): Promise<{ take: Take | null; message: string }> {
     this.active = false;
     await window.krypt.engine.transport('stop').catch(() => undefined);
@@ -125,13 +111,10 @@ const session = {
   },
 };
 
-/** Take the recording off the playlist (its audio-clip channel and clip). The WAV stays in your recordings folder. */
 async function removeTake(take: Take): Promise<void> {
   const r = await dispatch('channels.remove', { ids: [take.channelId] }, { label: 'Remove the voice recording' });
   if (r.ok) toast.info('The recording was taken off the playlist');
 }
-
-// ── View ──────────────────────────────────────────────────────────────
 
 function useRecLive(active: boolean): { rec: 'countIn' | 'recording' | null; level: number } {
   const [s, set] = useState<{ rec: 'countIn' | 'recording' | null; level: number }>({ rec: null, level: 0 });

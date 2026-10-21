@@ -1,7 +1,3 @@
-// Map DocHost patches → engine entity upserts/deletes. Granularity is the
-// ENTITY (a whole Pattern / Channel / Clip / Insert): coarse enough to be
-// simple and robust, fine enough that a note drag only resends one pattern.
-
 import type { Patch } from 'immer';
 import type { Project } from '../schema/project';
 import type { EntityDelete, EntityKind, EntityUpsert } from './protocol';
@@ -27,17 +23,17 @@ function locate(path: (string | number)[]): Touched | null {
     case 'playlist':
       if (b === 'clips' && c) return { kind: 'clip', id: c };
       if (b === 'tracks' && c) return { kind: 'track', id: c };
-      return null; // markers, trackOrder: irrelevant to audio
+      return null;
     case 'session':
       if (b === 'scenes' && c) return { kind: 'scene', id: c };
       if (b === 'clips' && c) return { kind: 'launchClip', id: c };
-      return { kind: 'session' }; // quantize, sceneOrder, or the whole session added / removed
+      return { kind: 'session' };
     case 'mixer':
       if (b === 'inserts' && c) return { kind: 'insert', id: c };
       if (b === 'masterId') return { kind: 'mixer' };
       return null;
     default:
-      return null; // meta, channelOrder, patternOrder: not audio-relevant
+      return null;
   }
 }
 
@@ -66,16 +62,10 @@ function lookup(p: Project, t: Touched): unknown | undefined {
     case 'launchClip':
       return p.session?.clips[t.id!];
     case 'session':
-      // The engine drops launch clips / scenes not listed here (covers a whole session being removed).
       return { quantize: p.session?.quantize ?? '1bar', sceneOrder: p.session?.sceneOrder ?? [], clipIds: Object.keys(p.session?.clips ?? {}) };
   }
 }
 
-/**
- * Compute the engine diff for a batch of patches, reading entity values from
- * the post-change project. `resolveSample` lets main rewrite sample paths
- * (factory: → absolute) before they reach the engine.
- */
 export function projectPatches(
   next: Project,
   patches: Patch[],
@@ -86,7 +76,6 @@ export function projectPatches(
     const t = locate(p.path);
     if (t) seen.set(`${t.kind}:${t.id ?? ''}`, t);
     if (p.path.length === 1 && p.path[0] === 'session' && next.session) {
-      // The whole session was replaced / added: send every scene and launch clip.
       for (const id of Object.keys(next.session.scenes)) seen.set(`scene:${id}`, { kind: 'scene', id });
       for (const id of Object.keys(next.session.clips)) seen.set(`launchClip:${id}`, { kind: 'launchClip', id });
     }

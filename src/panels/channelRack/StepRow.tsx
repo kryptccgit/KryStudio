@@ -1,11 +1,3 @@
-// The step grid of one channel row, and the mini piano-roll preview shown
-// instead when the channel holds real piano-roll notes (FL behaviour).
-//
-// Paint: left-press decides on/off from the first cell, drag paints along
-// the row; right-press erases; Shift+click toggles an accent. Every gesture
-// is ONE undo entry, and cells flip instantly (optimistic) before the
-// document round-trip lands.
-
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { Note } from '@shared/schema/project';
 import { TICKS_PER_STEP } from '@shared/schema/time';
@@ -27,7 +19,6 @@ export interface StepInfo {
   ids: string[];
 }
 
-/** Steps (16th-grid notes of one pitch) by index, or null if the channel holds piano-roll material. */
 export function analyzeSteps(notes: Record<string, Note> | undefined): { steps: Map<number, StepInfo>; isSteps: boolean; key: number | null } {
   const steps = new Map<number, StepInfo>();
   if (!notes) return { steps, isSteps: true, key: null };
@@ -72,7 +63,6 @@ export const StepGrid = memo(function StepGrid({
   const [pending, setPending] = useState<Map<number, boolean>>(() => new Map());
   const g = useRef<{ gesture: Gesture; mode: 'on' | 'off'; visited: Set<number>; last: number; el: HTMLElement } | null>(null);
 
-  // Drop optimistic overrides once the document agrees (or after the gesture ends).
   useEffect(() => {
     if (!pending.size || g.current) return;
     setPending(new Map());
@@ -105,7 +95,6 @@ export const StepGrid = memo(function StepGrid({
     const step = stepAt(e.clientX, el);
     const existing = notesAtStep(channelId, patternId, step);
     if (e.button === 0 && e.shiftKey) {
-      // Accent toggle on a single step.
       const gesture = beginGesture('Accent step');
       if (existing.length) {
         const accent = existing.every((n) => n.vel >= 0.95);
@@ -123,7 +112,6 @@ export const StepGrid = memo(function StepGrid({
     try {
       el.setPointerCapture(e.pointerId);
     } catch {
-      /* ignore */
     }
     g.current = { gesture: beginGesture(mode === 'on' ? 'Paint steps' : 'Erase steps'), mode, visited: new Set(), last: step, el };
     apply(step);
@@ -169,7 +157,6 @@ export const StepGrid = memo(function StepGrid({
       onPointerUp={finish}
       onPointerCancel={finish}
       onContextMenu={(e) => {
-        // right-click erases steps here (FL); the channel menu lives on the row's left side
         e.preventDefault();
         e.stopPropagation();
       }}
@@ -180,7 +167,6 @@ export const StepGrid = memo(function StepGrid({
   );
 });
 
-/** Read-only piano-roll preview of a channel's notes; click opens the Piano Roll. */
 export const MiniRoll = memo(function MiniRoll({
   channelId,
   notes,

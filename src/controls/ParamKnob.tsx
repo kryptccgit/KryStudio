@@ -1,15 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Document-bound controls. A control addressed by a ParamRef resolves its
-// spec (paramSpecFor), reads its value (getParamValue) and writes through
-// `params.set` with coalesceKey 'knob:<ref>' so one drag = ONE undo entry.
-//
-//   <ParamKnob paramRef={`channel/${id}/volume`} size={18} />
-//   <ParamControl paramRef={`insert/${i}/slot/${s}/mode`} />   // auto: knob / toggle / select
-//   <SpecKnob spec={GLIDE} value={ch.poly.glideMs} onCommit={...} />  // non-ParamRef values
-//
-// (`ref` is reserved by React, hence `paramRef`.)
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, useState } from 'react';
 import { ClipboardCopy, ClipboardPaste, Link2, RotateCcw, Spline } from 'lucide-react';
 import { CATALOG } from '@shared/plugins/catalog';
@@ -25,8 +13,6 @@ import { toast } from '../app/notify';
 import { useLiveParam } from '../live/automationFollow';
 import { controllerMenuItems } from '../live/controllerMenu';
 import { cls } from '../utils/format';
-
-// ── Gesture plumbing (local value while dragging, rAF-coalesced writes) ─
 
 export function useGestureValue(spec: ParamSpec | null, docValue: number | null, commit: (plain: number) => unknown) {
   const [local, setLocal] = useState<number | null>(null);
@@ -79,7 +65,6 @@ export function useGestureValue(spec: ParamSpec | null, docValue: number | null,
       await flush();
       setLocal(null);
     },
-    /** One-shot write (typed value, reset, paste). */
     commitNow: async (plain: number) => {
       pending.current = plain;
       await flush();
@@ -88,21 +73,17 @@ export function useGestureValue(spec: ParamSpec | null, docValue: number | null,
   };
 }
 
-// ── ParamRef binding ──────────────────────────────────────────────────
-
 export function useParam(paramRef: string) {
   const spec = useProject((p) => paramSpecFor(p, CATALOG, paramRef));
   const docValue = useProject((p) => getParamValue(p, CATALOG, paramRef));
   const g = useGestureValue(spec, docValue, (value) =>
     dispatch('params.set', { ref: paramRef, value }, { coalesceKey: `knob:${paramRef}`, label: spec ? `Set ${spec.name}` : undefined }),
   );
-  // Automated params follow their automation clip while the song plays (src/live/automationFollow.ts).
   const live = useLiveParam(paramRef);
   if (spec && live.norm !== null && !g.gesturing) return { spec, ...g, value: fromNormalized(spec, live.norm), norm: live.norm, automated: live.automated, following: true };
   return { spec, ...g, automated: live.automated, following: false };
 }
 
-/** Small pink dot on automated controls (pulses while it follows the clip). */
 function AutomatedMark({ following, children }: { following: boolean; children: React.ReactNode }) {
   return (
     <span className="relative inline-flex">
@@ -199,7 +180,6 @@ function TypeInValue({ spec, value, onCommit, onCancel }: { spec: ParamSpec; val
   );
 }
 
-/** The FL-style right-click menu every parameter control shares. */
 export function paramMenuItems(paramRef: string | null, spec: ParamSpec, value: number, commit: (plain: number) => void, extra: MenuItem[] = []): MenuItem[] {
   const items: MenuItem[] = [
     { type: 'header', label: spec.name },
@@ -228,14 +208,11 @@ export function paramMenuItems(paramRef: string | null, spec: ParamSpec, value: 
         onSelect: () => void createAutomationClip(paramRef),
       },
       { label: 'Copy ParamRef', icon: Link2, detail: paramRef, onSelect: () => void copyText(paramRef, 'ParamRef') },
-      // Live input: MIDI-learn ("Link to controller…") + unlink.
       ...controllerMenuItems(paramRef, spec.name),
     );
   }
   return items.concat(extra);
 }
-
-// ── Components ────────────────────────────────────────────────────────
 
 interface ParamProps {
   paramRef: string;
@@ -353,7 +330,6 @@ export function ParamSlider({ paramRef, width = 80, height = 12, ...rest }: Para
   );
 }
 
-/** Picks the right control for a spec: on/off → toggle, enum → select, else a knob. */
 export function ParamControl({ paramRef, size = 36, ...rest }: ParamProps & { size?: number }) {
   const { p, onContextMenu } = useBound(paramRef);
   if (!p.spec) return null;
@@ -396,10 +372,6 @@ export function ParamControl({ paramRef, size = 36, ...rest }: ParamProps & { si
   return <ParamKnob paramRef={paramRef} size={size} showLabel showValue {...rest} />;
 }
 
-/**
- * A knob over a value that isn't a ParamRef (glide time, root key, cut
- * group...). The caller commits with its own command + coalesceKey.
- */
 export function SpecKnob({
   spec,
   value,

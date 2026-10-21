@@ -1,11 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 
-// ──────────────────────────────────────────────────────────────────────
-// In-app modal system. Electron disables window.prompt/confirm/alert at the
-// renderer level — calling them is a silent no-op. Anything that needs user
-// input flows through here (kryptguidelines §3.7).
-// ──────────────────────────────────────────────────────────────────────
-
 interface ConfirmOpts {
   title: string;
   message: string;
@@ -24,7 +18,6 @@ interface PromptOpts {
   validate?: (value: string) => string | null;
 }
 
-/** Several answers (Save / Don't save / Cancel): resolves the chosen id, or null for Cancel / Esc / a click outside. */
 export interface ChooseOpts {
   title: string;
   message: string;

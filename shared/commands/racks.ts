@@ -1,28 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Device racks, macros, the drum rack and the slicer (Wave 12.2,
-// research/16-ableton-parity.md §2.3; data: shared/schema/rack.ts).
-// Command ids `rack.*` (the Channel Rack step tools in ./rack.ts use
-// `notes.*`, so the namespace is free).
-//
-// A rack lives on a channel generator ('krypt.rack' / 'krypt.drumrack',
-// `Generator.rack`) or on a mixer slot ('krypt.fxrack', `FxSlot.rack`).
-// Every command addresses it with { channelId } or { insertId, slotId }.
-// A rack plugin without a `rack` object (a channel just created with
-// channels.add type 'krypt.rack') is treated as an empty rack.
-//
-// Macro VALUES are the rack's own params macro1..8, set through the normal
-// ParamRef path (`channel/<ch>/gen/macroN`, `insert/<i>/slot/<s>/macroN`:
-// params.set, automation, controller links). Inner device params are edited
-// with rack.setInstrumentParams / rack.setDeviceParams (no inner ParamRef
-// scope in v1: automate a macro mapped onto the inner param instead).
-//
-// v1 limits enforced here: stock plugins only (no VST3 / CLAP, no audio
-// clip player), no racks inside racks, ≤ MAX_RACK_CHAINS chains, ≤
-// MAX_FX_SLOTS devices per chain. Params are clamped to the catalog specs.
-// Pure: no I/O; the slicer gets its slice times from main (analyzer onsets,
-// a grid or the caller) and the randomizer its seed from the caller.
-// ──────────────────────────────────────────────────────────────────────
-
 import { z } from 'zod';
 import { defineCommand, must, plural, CommandError, type CommandContext, type CommandDef } from './types';
 import { DEFAULT_CHANNEL_VOLUME, MAX_FX_SLOTS, MAX_INSERTS, defaultNote, paletteColor, type Channel, type FxSlot, type Generator, type Project } from '../schema/project';
@@ -51,10 +26,7 @@ import { SLICER_PLUGIN } from '../schema/slicer';
 import type { PresetRack } from '../sounds/types';
 import { zPresetRack } from '../sounds/schema';
 
-// ── Constants / small helpers ─────────────────────────────────────────
-
 export const RACK_ID_PREFIX = { chain: 'chn', map: 'mmap', variation: 'var' } as const;
-/** Most slices one slice_to_pads call makes (each is a pad + a chain). */
 export const MAX_SLICES = 64;
 export const MAX_VARIATIONS = 64;
 const AUDIOCLIP = 'krypt.audioclip';
@@ -73,17 +45,14 @@ function isThirdParty(type: string): boolean {
 }
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-/** MIDI note name with C4 = 60 (the app's convention). */
 export function midiNoteName(n: number): string {
   return `${NOTE_NAMES[((n % 12) + 12) % 12]}${Math.floor(n / 12) - 1}`;
 }
 
 const shortName = (desc: PluginDescriptor | undefined, fallback: string): string => (desc ? desc.name.replace(/^Krypt /, '') : fallback);
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
-/** JSON copy (structuredClone throws on Immer drafts). */
 const copy = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-/** Deterministic PRNG (mulberry32) for rack.randomizeMacros. */
 export function seededRandom(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -95,7 +64,6 @@ export function seededRandom(seed: number): () => number {
   };
 }
 
-/** The sample pool entry for `path`: an existing SampleRef with that path, else a new one. */
 export function samplePoolId(d: Project, path: string, ctx: CommandContext): string {
   const existing = Object.values(d.samples).find((s) => s.path === path);
   if (existing) return existing.id;
@@ -105,8 +73,6 @@ export function samplePoolId(d: Project, path: string, ctx: CommandContext): str
   return id;
 }
 
-// ── Finding a rack ────────────────────────────────────────────────────
-
 const targetShape = {
   channelId: z.string().optional().describe('The channel holding an instrument / drum rack.'),
   insertId: z.string().optional().describe('With slotId: the mixer slot holding an effect rack.'),
@@ -115,16 +81,12 @@ const targetShape = {
 
 export interface RackHost {
   rack: RackDef;
-  /** The rack device's own params (macro1..8 live here). */
   params: Record<string, number>;
   type: string;
-  /** "Keys" / "Insert 3 slot 2" for messages. */
   where: string;
-  /** ParamRef prefix of the rack device (`channel/<ch>/gen/` or `insert/<i>/slot/<s>/`). */
   refPrefix: string;
 }
 
-/** The rack at { channelId } or { insertId, slotId }; a rack plugin without a rack object gets an empty one. */
 export function rackHost(d: Project, a: { channelId?: string; insertId?: string; slotId?: string }, catalog?: PluginCatalog): RackHost {
   if (a.channelId) {
     const ch = must(d.channels[a.channelId], `Channel ${a.channelId} not found`);
@@ -152,9 +114,6 @@ function chainOf(host: RackHost, chainId: string): RackChain {
   return must(host.rack.chains[chainId], `Chain ${chainId} isn't in the rack on ${host.where}`);
 }
 
-// ── Validation ────────────────────────────────────────────────────────
-
-/** A stock instrument a rack chain may hold (v1). */
 export function checkRackInstrument(catalog: PluginCatalog, type: string, kind: RackKind, where = 'A rack chain'): PluginDescriptor {
   if (kind === 'effect') throw new CommandError("An effect rack has no instruments: its chains process the insert's audio. Add effects to the chain instead.");
   if (isRackPlugin(type)) throw new CommandError('Racks inside racks are not supported yet: put the instrument itself in the chain');
@@ -166,7 +125,6 @@ export function checkRackInstrument(catalog: PluginCatalog, type: string, kind: 
   return desc;
 }
 
-/** A stock effect a rack chain may hold (v1). */
 export function checkRackEffect(catalog: PluginCatalog, type: string, where = 'A rack chain'): PluginDescriptor {
   if (isRackPlugin(type)) throw new CommandError('Racks inside racks are not supported yet: add the effects to the chain itself');
   if (isThirdParty(type)) throw new CommandError(`${where} can only hold Krypt Studio's stock effects for now (third-party plugins can't go in racks yet)`);
@@ -181,7 +139,6 @@ function checkZone(z0: RackZone): RackZone {
   return { keyLo: z0.keyLo, keyHi: z0.keyHi, velLo: z0.velLo, velHi: z0.velHi };
 }
 
-/** The macro target exists and names a real param; returns its display name. */
 function checkTarget(rack: RackDef, t: MacroTarget, catalog: PluginCatalog): string {
   const chain = must(rack.chains[t.chainId], `Chain ${t.chainId} isn't in this rack`);
   if (t.kind === 'chain') return `${chain.name} ${t.param}`;
@@ -201,7 +158,6 @@ function checkTarget(rack: RackDef, t: MacroTarget, catalog: PluginCatalog): str
 const sameTarget = (a: MacroTarget, b: MacroTarget): boolean =>
   a.chainId === b.chainId && a.kind === b.kind && a.param === b.param && (a.kind !== 'device' || (b.kind === 'device' && a.deviceId === b.deviceId));
 
-/** Remove the macro maps matching `drop`; returns how many went. */
 function pruneMaps(rack: RackDef, drop: (t: MacroTarget) => boolean): number {
   let n = 0;
   for (const m of rack.macros) {
@@ -214,8 +170,6 @@ function pruneMaps(rack: RackDef, drop: (t: MacroTarget) => boolean): number {
   }
   return n;
 }
-
-// ── Building chains ───────────────────────────────────────────────────
 
 export interface ChainInput {
   name?: string;
@@ -230,17 +184,14 @@ export interface ChainInput {
   devices?: Array<{ type: string; params?: Record<string, number>; mix?: number; enabled?: boolean }>;
 }
 
-/** A sampler pad plays its slice at the recorded pitch whatever its note (drum racks). */
 const PAD_SAMPLER_DEFAULTS: Record<string, number> = { keyTrack: 0, oneShot: 1 };
 
-/** Next free pad note of a drum rack (from `base`), or null when every note up to 127 is taken. */
 export function nextPadNote(rack: RackDef, base = DRUM_RACK_BASE_NOTE): number | null {
   const used = new Set(Object.values(rack.chains).map((c) => c.zone?.keyLo).filter((n): n is number => n !== undefined));
   for (let n = base; n <= 127; n++) if (!used.has(n)) return n;
   return null;
 }
 
-/** The drum-rack pad on `note` (its zone is exactly that key). */
 export function padChain(rack: RackDef, note: number): RackChain | undefined {
   return rack.chainOrder.map((id) => rack.chains[id]).find((c) => c?.zone && c.zone.keyLo === note && c.zone.keyHi === note);
 }
@@ -272,7 +223,6 @@ function makeInstrument(d: Project, catalog: PluginCatalog, kind: RackKind, inst
   return { type: inst.type, params, sampleId };
 }
 
-/** Build one chain (validated, params clamped, samples pooled). Not inserted. */
 export function makeChain(d: Project, catalog: PluginCatalog, rack: RackDef, input: ChainInput, ctx: CommandContext, where = 'A rack chain'): RackChain {
   const devices = input.devices ?? [];
   if (devices.length > MAX_FX_SLOTS) throw new CommandError(`${where} has ${devices.length} devices; a chain holds at most ${MAX_FX_SLOTS}`);
@@ -328,12 +278,6 @@ function insertChain(rack: RackDef, chain: RackChain, index?: number): void {
   rack.chainOrder.splice(Math.min(index ?? rack.chainOrder.length, rack.chainOrder.length), 0, chain.id);
 }
 
-// ── Spec (presets / build_rack) → RackDef ─────────────────────────────
-
-/**
- * Build a RackDef from an id-free spec (presets, build_rack). Validates everything (stock plugins, limits, params,
- * macro targets) and pools inner samples by path. Throws CommandError naming `label` on any problem.
- */
 export function rackFromSpec(d: Project, catalog: PluginCatalog, spec: PresetRack, ctx: CommandContext, label = 'The rack'): RackDef {
   const rack = emptyRack(spec.kind);
   if (spec.chains.length > MAX_RACK_CHAINS) throw new CommandError(`${label} has ${spec.chains.length} chains; a rack holds at most ${MAX_RACK_CHAINS}`);
@@ -396,7 +340,6 @@ export function rackFromSpec(d: Project, catalog: PluginCatalog, spec: PresetRac
   return rack;
 }
 
-/** Macro values (macro1..8) for a rack device, clamped (catalog spec when present, else 0..1). */
 export function macroParams(catalog: PluginCatalog, type: string, params: Record<string, number> | undefined): Record<string, number> {
   const desc = findPlugin(catalog, type);
   const out: Record<string, number> = {};
@@ -409,12 +352,6 @@ export function macroParams(catalog: PluginCatalog, type: string, params: Record
   return out;
 }
 
-// ── Helpers for wrapping ──────────────────────────────────────────────
-
-/**
- * Automation clips aimed at a device's own params (not its macros) lose their target; returns how many.
- * Params INSIDE the rack it held go too (`channel/<ch>/rack/…`, `insert/<i>/slot/<s>/rack/…`): the device is replaced.
- */
 function unassignAutomation(d: Project, prefix: string, inner: string | null = `${prefix.replace(/gen\/$/, '')}rack/`): number {
   let n = 0;
   for (const aut of Object.values(d.automations)) {
@@ -425,7 +362,6 @@ function unassignAutomation(d: Project, prefix: string, inner: string | null = `
     }
     if (!aut.target?.startsWith(prefix)) continue;
     const param = aut.target.slice(prefix.length);
-    // Macros stay; so do refs inside the rack when the caller keeps them (inner = null).
     if ((MACRO_PARAM_IDS as readonly string[]).includes(param) || param.includes('/')) continue;
     aut.target = null;
     n++;
@@ -433,10 +369,6 @@ function unassignAutomation(d: Project, prefix: string, inner: string | null = `
   return n;
 }
 
-/**
- * Wrapping a device in a rack: automation aimed at its own params (`from` + paramId) follows it inside the rack
- * (`to` + paramId, a rack ParamRef, Wave 12.2b). Params `keep` rejects are unassigned instead. Returns [moved, cleared].
- */
 function retargetAutomation(d: Project, from: string, to: string, keep: (param: string) => boolean): [number, number] {
   let moved = 0;
   let cleared = 0;
@@ -455,12 +387,10 @@ function retargetAutomation(d: Project, from: string, to: string, keep: (param: 
   return [moved, cleared];
 }
 
-/** `channel/<ch>/rack/` or `insert/<i>/slot/<s>/rack/`: where a rack's inner ParamRefs start (shared/schema/params.ts). */
 export function innerRefBase(host: Pick<RackHost, 'refPrefix'>): string {
   return `${host.refPrefix.replace(/gen\/$/, '')}rack/`;
 }
 
-/** Automation aimed at params inside a rack that just went away (`prefix` + rest, `drop(rest)`) loses its target. */
 function unassignInner(d: Project, prefix: string, drop: (rest: string) => boolean = () => true): number {
   let n = 0;
   for (const aut of Object.values(d.automations)) {
@@ -494,8 +424,6 @@ function newInsert(d: Project, name: string, color: string, ctx: CommandContext)
   return id;
 }
 
-/** A new channel (own insert) playing `gen`. */
-/** A new channel playing `gen`, on its own new mixer insert. */
 export function addChannelWithInsert(d: Project, name: string, gen: Generator, ctx: CommandContext): Channel {
   const color = paletteColor(d.channelOrder.length);
   const insertId = newInsert(d, name, color, ctx);
@@ -518,8 +446,6 @@ export function addChannelWithInsert(d: Project, name: string, gen: Generator, c
   d.channelOrder.push(id);
   return ch;
 }
-
-// ── Zod pieces ────────────────────────────────────────────────────────
 
 const zZone = z.object({
   keyLo: z.number().int().min(0).max(127),
@@ -547,8 +473,6 @@ const zMacroTarget = z.union([
 
 const zMacro = z.number().int().min(1).max(MACRO_COUNT).describe('Macro number 1..8.');
 
-// ── Commands ──────────────────────────────────────────────────────────
-
 export const rackCreate = defineCommand({
   id: 'rack.create',
   label: (a) => (a.wrap === false ? `New ${RACK_NAME[a.kind ?? (a.channelId ? 'instrument' : 'effect')]}` : 'Wrap in rack'),
@@ -568,20 +492,17 @@ export const rackCreate = defineCommand({
         const g = ch.generator;
         if (g.type === AUDIOCLIP) throw new CommandError(`"${ch.name}" plays an audio clip; slice it to pads instead (rack.sliceToPads)`);
         const desc = checkRackInstrument(ctx.catalog, g.type, kind, `"${ch.name}"`);
-        // A drum pad sits on the channel's root key, so the notes and steps it already has keep playing it.
         const zone = kind === 'drum' ? { keyLo: ch.rootKey, keyHi: ch.rootKey, velLo: 0, velHi: 1 } : undefined;
         const chain = makeChain(d, ctx.catalog, rack, { name: g.preset?.name ?? shortName(desc, g.type), zone }, ctx);
         chain.instrument = { type: g.type, params: copy(g.params), sampleId: g.sampleId };
         if (kind === 'drum' && g.type === SAMPLER) chain.instrument.params = sanitizeParams(ctx.catalog, SAMPLER, { ...chain.instrument.params, ...PAD_SAMPLER_DEFAULTS });
         insertChain(rack, chain);
         chainId = chain.id;
-        // Its automation follows the instrument into the rack (channel/<ch>/rack/<chain>/inst/<param>).
         moved = retargetAutomation(d, `channel/${ch.id}/gen/`, `channel/${ch.id}/rack/${chain.id}/inst/`, (p) => desc.params.some((s) => s.id === p))[0];
       }
-      // (Not the refs inside the new rack the wrap just moved there.)
       const cleared = unassignAutomation(d, `channel/${ch.id}/gen/`, null);
       ch.generator = { type: RACK_PLUGIN_FOR[kind], params: {}, sampleId: null, rack };
-      if (kind === 'drum' && !a.wrap) ch.rootKey = DRUM_RACK_BASE_NOTE; // step-sequencer steps play pad 1
+      if (kind === 'drum' && !a.wrap) ch.rootKey = DRUM_RACK_BASE_NOTE;
       return { channelId: ch.id, chainId, clearedAutomation: cleared, movedAutomation: moved };
     }
     if (!a.insertId) throw new CommandError('Say where: a channelId, or an insertId (+ slotId to wrap an effect)');
@@ -609,7 +530,6 @@ export const rackCreate = defineCommand({
       droppedSidechain = slot.sidechainFrom !== null;
       insertChain(rack, chain);
       chainId = chain.id;
-      // The effect's params (and its old wet/dry) now live inside the rack: their automation follows them there.
       const base = `insert/${ins.id}/slot/${slot.id}/`;
       moved = retargetAutomation(d, base, `${base}rack/${chain.id}/dev/${devId}/`, (p) => p === 'mix' || desc.params.some((s) => s.id === p))[0];
     }
@@ -641,7 +561,7 @@ export const rackBuild = defineCommand({
       ch.generator = { type, params: mp, sampleId: null, rack };
       if (a.spec.kind === 'drum') {
         const notes = Object.values(rack.chains).map((c) => c.zone?.keyLo ?? 127);
-        ch.rootKey = notes.length ? Math.min(...notes) : DRUM_RACK_BASE_NOTE; // step-sequencer steps play the first pad
+        ch.rootKey = notes.length ? Math.min(...notes) : DRUM_RACK_BASE_NOTE;
       }
       return { channelId: ch.id, chainIds: [...rack.chainOrder] };
     }
@@ -1018,7 +938,7 @@ export const rackRandomizeMacros = defineCommand({
     const which = new Set(a.macros ?? (mapped.length ? mapped : [1, 2, 3, 4, 5, 6, 7, 8]));
     const rnd = seededRandom(a.seed);
     const values = currentMacros(host, ctx.catalog).map((cur, i) => {
-      const r = rnd(); // drawn for every macro, so a macro's value doesn't depend on which others were picked
+      const r = rnd();
       return which.has(i + 1) ? Math.round((cur + (r - cur) * a.amount) * 1e4) / 1e4 : cur;
     });
     writeMacros(host, ctx.catalog, values);
@@ -1070,12 +990,6 @@ export const rackDrumPad = defineCommand({
   },
 });
 
-// ── Slicer ────────────────────────────────────────────────────────────
-
-/**
- * Clean slice start times (seconds): finite, inside [0, lengthSec), sorted, closer than `minGapSec` merged. A
- * first slice after 0 keeps the lead-in out (as given).
- */
 export function cleanSlices(times: readonly number[], lengthSec: number, minGapSec = 0.01): number[] {
   const out: number[] = [];
   for (const t of [...times].filter((x) => Number.isFinite(x) && x >= 0 && x < lengthSec).sort((a, b) => a - b)) {
@@ -1084,11 +998,6 @@ export function cleanSlices(times: readonly number[], lengthSec: number, minGapS
   return out;
 }
 
-/**
- * Slice times for a loop (pure; main feeds it analyzer onsets). mode 'onsets': the given onsets, thinned to
- * `maxSlices` by keeping the strongest (`strengths`, else the earliest) plus 0 when `includeStart`. mode 'grid':
- * every `division` beats (0.25 = 16ths) at `bpm`. mode 'manual': the given times.
- */
 export function sliceTimes(opts: {
   mode: 'onsets' | 'grid' | 'manual';
   lengthSec: number;
@@ -1114,7 +1023,7 @@ export function sliceTimes(opts: {
   for (const r of raw.filter((x) => Number.isFinite(x.t) && x.t >= 0 && x.t < opts.lengthSec).sort((a, b) => a.t - b.t)) {
     const last = cleaned[cleaned.length - 1];
     if (last && r.t - last.t < gap) {
-      if (r.s > last.s) cleaned[cleaned.length - 1] = r; // keep the stronger of two near hits
+      if (r.s > last.s) cleaned[cleaned.length - 1] = r;
       continue;
     }
     cleaned.push(r);
@@ -1174,7 +1083,6 @@ export const rackSliceToPads = defineCommand({
     if (a.channelId) {
       ch = must(d.channels[a.channelId], `Channel ${a.channelId} not found`);
       if (ch.generator.type === AUDIOCLIP) {
-        // Slicing an audio clip's own channel would orphan its playlist clips: the drum rack goes on a new channel.
         ch = addChannelWithInsert(d, a.name ?? `${sample.name} slices`, { type: DRUM_RACK_PLUGIN, params: {}, sampleId: null, rack }, ctx);
       } else {
         unassignAutomation(d, `channel/${ch.id}/gen/`);
@@ -1182,7 +1090,7 @@ export const rackSliceToPads = defineCommand({
         if (a.name) ch.name = a.name;
       }
     } else ch = addChannelWithInsert(d, a.name ?? `${sample.name} slices`, { type: DRUM_RACK_PLUGIN, params: {}, sampleId: null, rack }, ctx);
-    ch.rootKey = a.baseNote; // step-sequencer steps play the first slice
+    ch.rootKey = a.baseNote;
     let patternId: string | undefined;
     if (a.pattern) {
       const bpm = a.bpm ?? d.transport.bpm;
@@ -1230,9 +1138,6 @@ export const DEVICE_RACK_COMMANDS: CommandDef[] = [
   rackSliceToPads,
 ] as CommandDef[];
 
-// ── Integrity (dangling references inside racks) ─────────────────────
-
-/** Problems inside a project's racks: samples, chain / device order, macro targets. Empty = fine. */
 export function rackIntegrity(p: Project): string[] {
   const errs: string[] = [];
   const check = (rack: RackDef | undefined, where: string): void => {
@@ -1262,7 +1167,6 @@ export function rackIntegrity(p: Project): string[] {
   return errs;
 }
 
-/** Sample ids the racks of a project use (samples.remove keeps them; the pool view counts them). */
 export function rackSampleIds(p: Project): Set<string> {
   const out = new Set<string>();
   const add = (rack: RackDef | undefined): void => {

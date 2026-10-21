@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The tour on screen: the window dims except a cut-out around the step's
-// target, a pulsing gradient ring and a bouncing arrow point at it, and a
-// big instruction card sits beside it (Back / Skip / Do it for me, the
-// progress dots). The dim never takes clicks: the user clicks the real
-// button underneath, menus and dialogs keep working. When the target isn't
-// on screen the card says why and offers a button that fixes it.
-// Also here: the first-launch offer and the tour picker (Help ▸ Tours).
-// ──────────────────────────────────────────────────────────────────────
-
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronLeft, Compass, ExternalLink, SkipForward, WandSparkles, X } from 'lucide-react';
 import { openDialog } from '../components/Dialog';
@@ -38,17 +28,15 @@ import {
 } from './store';
 import type { TourCtx, TourId, TourStep } from './types';
 
-const Z_DIM = 990; // over the Studio, Home and docked windows; under toasts (1000), menus (1050+) and dialogs (1080)
-const Z_CARD = 1095; // over dialogs (the export step), under confirm modals (1100)
+const Z_DIM = 990;
+const Z_CARD = 1095;
 const PAD = 6;
-const GRACE_MS = 700; // a panel that was just opened gets this long to render before "can't find it"
+const GRACE_MS = 700;
 
 const BTN = 'inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-[14px] font-semibold transition outline-none focus-visible:ring-2 focus-visible:ring-krypt-purple/80 disabled:opacity-40';
 const PRIMARY = cls(BTN, 'bg-krypt-gradient text-white shadow-krypt-glow hover:brightness-110 active:scale-[0.98]');
 const GHOST = cls(BTN, 'border border-white/10 bg-white/[0.05] text-white/90 hover:border-white/20 hover:bg-white/10');
 const QUIET = cls(BTN, 'px-3 text-krypt-muted hover:bg-white/5 hover:text-white');
-
-// ── Text: **bold**, `code` and [[Key]] (big key caps) ─────────────────
 
 export function KeyCaps({ keys, big = false }: { keys: string; big?: boolean }) {
   const parts = keys.split('+').filter(Boolean);
@@ -85,8 +73,6 @@ function Rich({ text }: { text: string }) {
   );
 }
 
-// ── Finding the target ────────────────────────────────────────────────
-
 function sized(el: Element): boolean {
   const r = el.getBoundingClientRect();
   return r.width > 2 && r.height > 2;
@@ -100,7 +86,6 @@ function selectorsFor(step: TourStep, run: TourRun): string[] {
     const s = a.selector?.(takeSnapshot(), ctxOf(run));
     if (s) out.push(s);
   } catch {
-    /* fall back to the guide anchor */
   }
   if (a.guide) out.push(`[data-guide="${a.guide}"]`);
   return out;
@@ -111,13 +96,11 @@ function findIn(doc: Document, sels: string[]): HTMLElement | null {
     try {
       for (const el of doc.querySelectorAll<HTMLElement>(sel)) if (sized(el)) return el;
     } catch {
-      /* a bad selector: try the next */
     }
   }
   return null;
 }
 
-/** Something (Home, a floating window, a dialog) sits over the element's centre. Our own card doesn't count. */
 function covered(el: HTMLElement, card: HTMLElement | null): boolean {
   const r = el.getBoundingClientRect();
   const x = Math.min(Math.max(r.left + r.width / 2, 0), window.innerWidth - 1);
@@ -125,7 +108,7 @@ function covered(el: HTMLElement, card: HTMLElement | null): boolean {
   const hit = document.elementFromPoint(x, y);
   if (!hit || hit === el || el.contains(hit) || hit.contains(el)) return false;
   if (card && card.contains(hit)) return false;
-  if (hit.closest('[data-krypt-menu], [data-krypt-dialog], [data-krypt-modal], [data-krypt-tour]')) return false; // passing over it
+  if (hit.closest('[data-krypt-menu], [data-krypt-dialog], [data-krypt-modal], [data-krypt-tour]')) return false;
   return true;
 }
 
@@ -146,7 +129,6 @@ function locate(step: TourStep, sels: string[], card: HTMLElement | null): Locat
     try {
       if (findIn(w.document, sels)) return { state: 'elsewhere', rect: null };
     } catch {
-      /* closing */
     }
   }
   return { state: 'missing', rect: null };
@@ -160,8 +142,7 @@ function useLocated(step: TourStep | null, run: TourRun | null, cardRef: React.R
   useEffect(() => {
     if (!step || !run) return;
     let raf = 0;
-    let last: Located | null = null; // null: always publish the first result (an anchorless step must clear the last ring)
-    // Selectors can depend on the state (the Kick row's id): refresh them a few times a second, not every frame.
+    let last: Located | null = null;
     let sels: string[] = [];
     let selsAt = -Infinity;
     const tick = (): void => {
@@ -194,8 +175,6 @@ function useViewport(): { width: number; height: number } {
   return v;
 }
 
-// ── Highlight: dim with a cut-out, ring, arrow ────────────────────────
-
 function Highlight({ rect, side }: { rect: Rect; side: Side | null }) {
   const box: CSSProperties = { left: rect.left - PAD, top: rect.top - PAD, width: rect.width + PAD * 2, height: rect.height + PAD * 2 };
   const Arrow = side === 'below' ? ArrowUp : side === 'above' ? ArrowDown : side === 'right' ? ArrowLeft : side === 'left' ? ArrowRight : null;
@@ -209,9 +188,7 @@ function Highlight({ rect, side }: { rect: Rect; side: Side | null }) {
           : { left: rect.left - PAD - 38, top: rect.top + rect.height / 2 - 18 };
   return (
     <>
-      {/* the dim: one huge shadow around the cut-out (no clicks taken) */}
       <div aria-hidden="true" className="pointer-events-none fixed rounded-xl transition-all duration-200 motion-reduce:transition-none" style={{ ...box, zIndex: Z_DIM, boxShadow: '0 0 0 200vmax rgba(4,4,10,0.64)' }} />
-      {/* glow + gradient ring */}
       <div aria-hidden="true" className="pointer-events-none fixed animate-pulse rounded-xl motion-reduce:animate-none" style={{ ...box, zIndex: Z_DIM + 1, boxShadow: '0 0 0 4px rgba(168,85,247,0.28), 0 0 32px rgba(168,85,247,0.55)' }} />
       <div
         aria-hidden="true"
@@ -238,8 +215,6 @@ function Highlight({ rect, side }: { rect: Rect; side: Side | null }) {
     </>
   );
 }
-
-// ── The card ──────────────────────────────────────────────────────────
 
 function Dots({ count, index }: { count: number; index: number }) {
   return (
@@ -409,20 +384,17 @@ function TourOverlay({ run }: { run: TourRun }) {
   const [cardH, setCardH] = useState(320);
   const [searching, setSearching] = useState(true);
 
-  // A short grace period per step before "can't find it" (a panel that was just opened is still rendering).
   useEffect(() => {
     setSearching(true);
     const t = setTimeout(() => setSearching(false), GRACE_MS);
     return () => clearTimeout(t);
   }, [run.tourId, run.index, run.choice]);
 
-  // Done predicates: a cheap poll while the tour runs.
   useEffect(() => {
     const t = setInterval(checkStep, 250);
     return () => clearInterval(t);
   }, []);
 
-  // Esc closes the tour (asks first mid-tour). Menus, dialogs and modals keep their own Esc; Home steps keep theirs.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || e.repeat || e.defaultPrevented) return;
@@ -477,8 +449,6 @@ function TourOverlay({ run }: { run: TourRun }) {
   );
 }
 
-// ── First-launch offer ────────────────────────────────────────────────
-
 const OFFER_DELAY_MS = 1500;
 
 function FirstTourOffer() {
@@ -512,7 +482,6 @@ function FirstTourOffer() {
   );
 }
 
-/** Mounted once in the app shell: the running tour, and the one-time offer of tour 1 after launch. */
 export function TourHost() {
   const run = useTours((s) => s.run);
   const offer = useTours((s) => s.offer);
@@ -520,9 +489,7 @@ export function TourHost() {
   const homeOpen = useHome((s) => s.open);
 
   useEffect(() => {
-    // Home carries its own "Take the tour" card: the floating offer waits for the Studio, and never repeats a "Not now".
     if (!homeReady || homeOpen) return;
-    // Never over an open window (mastering, export, settings …): wait until the Studio is clear, then offer.
     let t = 0;
     const tryOffer = (): void => {
       const s = useTours.getState();
@@ -532,7 +499,7 @@ export function TourHost() {
         t = window.setTimeout(tryOffer, 2000);
         return;
       }
-      markOffered(); // once: shown = offered, whatever the answer
+      markOffered();
       useTours.setState({ offer: true });
     };
     t = window.setTimeout(tryOffer, OFFER_DELAY_MS);
@@ -540,12 +507,9 @@ export function TourHost() {
   }, [homeReady, homeOpen]);
 
   if (run) return <TourOverlay run={run} />;
-  // Home has its own tour card: the floating offer waits (still pending) while Home is showing.
   if (offer && !homeOpen) return <FirstTourOffer />;
   return null;
 }
-
-// ── Picker (Help ▸ Tours ▸ All tours…, Home) ──────────────────────────
 
 function TourList({ close }: { close: () => void }): ReactNode {
   const finished = useTours((s) => s.memory.finished);
@@ -579,7 +543,6 @@ function TourList({ close }: { close: () => void }): ReactNode {
   );
 }
 
-/** A small dialog listing every tour. */
 export function openTourPicker(doc?: Document | null): void {
   openDialog({
     title: 'Tours',

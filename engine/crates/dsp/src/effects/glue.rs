@@ -1,15 +1,3 @@
-//! krypt.glue — VCA-style bus compressor.
-//!
-//! Feed-forward, stereo-linked peak detector (optionally high-passed, so the
-//! kick does not pump the whole bus), a 6 dB soft-knee gain computer in dB
-//! (crate::effects::comp::gain_computer) with switched ratios (2 / 4 / 10),
-//! and smooth branching attack / release on the gain reduction with the
-//! classic switched times. Auto release is program dependent: a fast
-//! release (150 ms) for short peaks and a slow one (1.2 s) that only builds
-//! up under sustained compression (the reduction is the larger of the two).
-//! Range caps the reduction; Mix is a parallel blend (zero latency, so it is
-//! phase-exact). The external sidechain input works like Krypt Comp's.
-
 use super::comp::gain_computer;
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::filters::{Svf, SvfMode};
@@ -56,7 +44,6 @@ pub fn descriptor() -> PluginDescriptor {
 
 pub struct Glue {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     thr: f32,
@@ -71,7 +58,6 @@ pub struct Glue {
     hpf_on: bool,
     hpf: [Svf; 2],
     use_sc: bool,
-    /// gain reduction in dB (>= 0): the main / fast branch and the slow auto-release branch
     gr: f32,
     gr_slow: f32,
     makeup: Smooth,
@@ -133,7 +119,6 @@ impl Glue {
         self.mix.reset(self.mix.target);
     }
 
-    /// Current gain reduction in dB (>= 0), for meters and tests.
     pub fn gain_reduction_db(&self) -> f32 {
         if self.auto {
             self.gr.max(self.gr_slow)
@@ -187,7 +172,6 @@ impl Effect for Glue {
                 self.gr = 0.0;
             }
             let gr = if self.auto {
-                // the slow branch only climbs while compression is sustained
                 let cs = if target > self.gr_slow { self.slow_att } else { self.rel_slow };
                 self.gr_slow += (target.min(self.gr) - self.gr_slow) * cs;
                 if self.gr_slow < 1e-6 {
@@ -214,7 +198,6 @@ impl Effect for Glue {
     }
 
     fn meter(&self) -> Option<f32> {
-        // what the glue applies: the larger branch, blended by its own dry/wet mix
         let gr = self.gain_reduction_db();
         let k = 1.0 - self.mix.cur + self.mix.cur * db_to_gain(-gr);
         Some(if k > 1e-6 && k < 1.0 { -20.0 * k.log10() } else { 0.0 })
@@ -241,13 +224,11 @@ mod tests {
 
     #[test]
     fn ratio_sets_the_steady_state_reduction_on_a_step() {
-        // 20 dB over the threshold: 2:1 → 10 dB, 4:1 → 15 dB, 10:1 → 18 dB
         for (ri, want) in [(0usize, 10.0f32), (1, 15.0), (2, 18.0)] {
             let (g, out) = step(ri, 2, 48000);
             assert!((g.gain_reduction_db() - want).abs() < 0.05, "ratio {ri}: {}", g.gain_reduction_db());
             let got = -20.0 * out[out.len() - 1].log10();
             assert!((got - want).abs() < 0.05, "ratio {ri}: output {got} dB down");
-            // below the threshold (-40 dBFS) nothing happens
             assert!((out[4000] - 0.01).abs() < 1e-7);
         }
     }
@@ -274,11 +255,10 @@ mod tests {
             let mut r = l.clone();
             let ctx = ProcessContext { sample_rate: 48000.0, bpm: 120.0, beats_per_bar: 4.0, playing: true, beat_pos: 0.0, frames: n };
             g.process(&ctx, [&mut l, &mut r], None);
-            // gain reduction left 500 ms after the signal dropped
             -20.0 * (l[hold + 24000] / 0.001).log10()
         };
-        let short = recover(480); // 10 ms peak
-        let long = recover(96000); // 2 s of compression
+        let short = recover(480);
+        let long = recover(96000);
         assert!(short < 1.0, "fast recovery after a peak: {short} dB left");
         assert!(long > 3.0, "slow recovery after sustained compression: {long} dB left");
     }

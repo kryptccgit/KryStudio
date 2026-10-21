@@ -1,8 +1,3 @@
-//! krypt.duck — sidechain-style ducking. Tempo shape: a gain dip at every
-//! grid step locked to `beat_pos` (attack ramp down, curved recovery over the
-//! rest of the step). Sidechain follow: an envelope follower on the
-//! sidechain input drives the dip (attack/release/threshold).
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::{tc_coef, Smooth};
 use crate::params::{param_table, ParamBank};
@@ -39,7 +34,6 @@ const RATE_BEATS: [f64; 4] = [0.5, 1.0, 2.0, 4.0];
 
 pub struct Duck {
     pb: ParamBank<N_PARAMS>,
-    /// snap smoothers on the first block after creation / prepare / reset
     fresh: bool,
     sr: f32,
     mode: usize,
@@ -88,7 +82,6 @@ impl Duck {
         self.thr = p.get(P::Threshold as usize);
     }
 
-    /// Tempo-shape gain at a position within the step (seconds since the step start).
     #[inline]
     fn shape(&self, t: f32, period_s: f32) -> f32 {
         let atk = (self.attack_ms * 0.001).min(period_s * 0.5);

@@ -1,6 +1,3 @@
-// "Start here (step by step)" (research/22-beginner-handholding.md §2): the click-by-click guides for total
-// beginners, one action per step, each with annotated screenshots ({{image:…}}, resources/guides/images).
-// articles.ts puts this group first in the sidebar; the Home Guides card and F1 open its first article.
 import type { GuideArticle } from '../articles';
 import { START } from './start';
 import { WINDOWS } from './windows';

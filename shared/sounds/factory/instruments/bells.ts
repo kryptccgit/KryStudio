@@ -1,5 +1,3 @@
-// Factory BELL presets: FM bells, mallets and tuned percussion.
-
 import type { InstrumentPreset } from '../../types';
 import { ALG, DIV, FM, HALL, PLATE, ROOM, chorus, delay, eq, fm, preset, reverb } from './kit';
 

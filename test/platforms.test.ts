@@ -1,5 +1,3 @@
-// Windows, macOS and Linux builds: the MCP endpoint name on each OS, the native binary names, and the packaging
-// and release config that ships all three (package.json build, .github/workflows/release.yml).
 import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
@@ -14,7 +12,6 @@ function repoRoot(): string {
     try {
       if (statSync(path.join(dir, 'package.json')).isFile()) return dir;
     } catch {
-      /* keep climbing */
     }
     dir = path.dirname(dir);
   }
@@ -29,10 +26,8 @@ test('MCP endpoint: a named pipe on Windows, a short Unix socket elsewhere', () 
     assert.ok(p.startsWith('/') || /^[A-Za-z]:\//.test(p), `${platform}: absolute path, got ${p}`);
     assert.ok(p.endsWith('/krypt-studio-mcp-some-user-dev.sock'), p);
     assert.ok(!p.includes('\\'), `${platform}: forward slashes only, got ${p}`);
-    // macOS caps sun_path at 104 bytes; the per-user temp dir is ~50.
     assert.ok(Buffer.byteLength(path.posix.basename(p)) < 50, p);
   }
-  // Linux never falls back to the shared /tmp, where another user could claim the path first.
   const saved = process.env.XDG_RUNTIME_DIR;
   try {
     delete process.env.XDG_RUNTIME_DIR;

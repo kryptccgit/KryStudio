@@ -1,16 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Auto Mix preset cards (research/20 §1). Pure data + the 'auto' pick.
-//
-// The numbers follow the genre playbooks (shared/playbooks/*: targets.lufs,
-// targets.bands) and the factory master chains (shared/sounds/factory/
-// chains.ts: targetLufs, ceilings), so review_song agrees with the result:
-//   - targetLufs is within 1 LU of the playbook target of every genre the
-//     card lists (review_song calls ±1.5 LU "on target");
-//   - truePeak is the -1 dBTP ceiling every factory master chain uses;
-//   - tone (bands relative to the mids, dB, the engine's Analysis bands)
-//     sits inside each listed genre's band ranges, near their middle.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { AutoMixPreset } from './types';
 import { resolveGenre, genreInText } from '../sounds/genres';
 
@@ -182,7 +169,6 @@ export const AUTO_MIX_PRESETS: readonly AutoMixPreset[] = [
   },
 ];
 
-/** The card a run falls back to when nothing else decides. */
 export const DEFAULT_PRESET_ID = 'balanced';
 
 export function presetById(id: string | null | undefined): AutoMixPreset | null {
@@ -191,7 +177,6 @@ export function presetById(id: string | null | undefined): AutoMixPreset | null 
   return AUTO_MIX_PRESETS.find((p) => p.id === k) ?? AUTO_MIX_PRESETS.find((p) => p.name.toLowerCase() === k) ?? null;
 }
 
-/** The card for a genre (id, alias or free text), or null. */
 export function presetForGenre(genre: string | null | undefined): AutoMixPreset | null {
   if (!genre?.trim()) return null;
   const id = resolveGenre(genre) ?? genreInText(genre);
@@ -199,10 +184,6 @@ export function presetForGenre(genre: string | null | undefined): AutoMixPreset 
   return AUTO_MIX_PRESETS.find((p) => (p.genres as string[]).includes(id)) ?? null;
 }
 
-/**
- * 'auto': the project's genre (meta.genre) first, then what the analysis suggests (a mix that is already loud and
- * bass-heavy reads as trap / club, a quiet dark one as lo-fi), else Balanced. `why` says which.
- */
 export function autoPreset(genre: string | null | undefined, hint?: { lufs?: number | null; subVsMid?: number | null; highVsMid?: number | null } | null): { preset: AutoMixPreset; why: string } {
   const g = presetForGenre(genre);
   if (g) return { preset: g, why: `the project's genre (${String(genre).trim().slice(0, 40)})` };
@@ -216,14 +197,8 @@ export function autoPreset(genre: string | null | undefined, hint?: { lufs?: num
   return { preset: presetById(DEFAULT_PRESET_ID)!, why: 'no genre is set, so the balanced card' };
 }
 
-/** The loudest Auto ever aims (the loudest card, Phonk Slam). */
 export const AUTO_LOUDEST_LUFS = -7;
 
-/**
- * Auto never turns a song down: when Auto picked the card (no style, loudness or reference from the user) and the
- * song is already louder than that card, it keeps the song's loudness (up to AUTO_LOUDEST_LUFS) instead. Users
- * master for "that professional volume": a quieter result reads as broken. null = the card's target stands.
- */
 export function autoKeepsLoudness(cardLufs: number, songLufs: number | null | undefined): { lufs: number; note: string } | null {
   if (typeof songLufs !== 'number' || !Number.isFinite(songLufs) || songLufs <= cardLufs + 0.5) return null;
   const lufs = Math.round(Math.min(songLufs, AUTO_LOUDEST_LUFS) * 10) / 10;

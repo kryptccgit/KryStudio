@@ -1,22 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// PluginService: third-party VST3 + CLAP plugins on the main side.
-//
-//   userData/plugins/cache.json      scan results per file (size+mtime key)
-//   userData/plugins/blocklist.json  files that crashed the scanner (kept
-//                                    across "rescan all"; user-resettable)
-//   userData/plugins/settings.json   user plugin folders
-//   userData/plugins/scan-journal.txt  the file being scanned right now
-//
-// At startup the cache is registered into the shared CATALOG (so DocHost,
-// the MCP tools and every renderer see installed plugins next to the stock
-// ones), then an incremental background rescan runs. Before every engine
-// (re)start the descriptors are sent to the engine (plugins.register), which
-// hosts the plugins out of process in krypt-studio-pluginhost.exe.
-// Engine `plugin` events become toasts (crash / load failure) and doc
-// updates (edits made in a plugin's own window). Before a save the engine's
-// live plugin states are stored on generator.state / slot.state.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import { app } from 'electron';
 import { SYSTEM, USER, type DocHost } from '@shared/doc/DocHost';
@@ -30,7 +11,6 @@ import { EXE_EXT, findBinary } from '../system/paths';
 import { countVst2, dirExists, findCandidates, runScanner, standardPluginFolders, vst2Folders, type PluginCandidate, type PluginFormat } from '../system/plugin-scan';
 
 export const PLUGINHOST_EXE = `krypt-studio-pluginhost${EXE_EXT}`;
-/** VST3 / CLAP hosting is Windows-only for now (the host's shared memory and editor windows are Win32). */
 const HOST_UNSUPPORTED =
   process.platform === 'win32' ? undefined : 'Third-party VST3 / CLAP plugins work on Windows only for now. Every built-in instrument and effect works here.';
 const SCAN_CONCURRENCY = 3;
@@ -52,9 +32,7 @@ export interface PluginServiceDeps {
   doc: DocHost;
   userDataDir: string;
   log(level: 'debug' | 'info' | 'warn' | 'error', m: string): void;
-  /** Main window HWND as a decimal string (owner of plugin editor windows). */
   ownerHwnd(): string | null;
-  /** Fan the state out to every renderer. */
   broadcast(state: PluginManagerState): void;
   pickFolder(): Promise<string | null>;
 }
@@ -62,7 +40,6 @@ export interface PluginServiceDeps {
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 const norm = (p: string): string => path.resolve(p).toLowerCase();
 
-/** Dev: run the host from a %TEMP% copy so cargo can rebuild the original. */
 function launchable(src: string): string {
   if (app.isPackaged) return src;
   const dir = path.join(app.getPath('temp'), 'krypt-studio-pluginhost-shadow');
@@ -99,8 +76,6 @@ export class PluginService {
     this.load();
     registerExternalPlugins(this.descriptors());
   }
-
-  // ── Persistence ─────────────────────────────────────────────────────
 
   private file(name: string): string {
     return path.join(this.dir, name);
@@ -145,15 +120,12 @@ export class PluginService {
     }
   }
 
-  // ── State ───────────────────────────────────────────────────────────
-
   hostExe(): string | null {
     if (HOST_UNSUPPORTED) return null;
     const src = findBinary(PLUGINHOST_EXE);
     return src ? launchable(src) : null;
   }
 
-  /** Installed descriptors: scanned, not blocked; first folder wins on duplicate ids. */
   descriptors(): PluginDescriptor[] {
     const seen = new Set<string>();
     const out: PluginDescriptor[] = [];
@@ -214,7 +186,6 @@ export class PluginService {
       try {
         this.deps.broadcast(this.state());
       } catch {
-        /* a window mid-teardown */
       }
     };
     if (!throttle) {
@@ -227,15 +198,11 @@ export class PluginService {
     this.broadcastTimer = setTimeout(send, wait);
   }
 
-  // ── Engine wiring ───────────────────────────────────────────────────
-
   attachEngine(engine: EngineSupervisor): void {
     this.engine = engine;
     engine.onEvent((e) => this.onEngineEvent(e));
   }
 
-  /** Send host path, owner window and descriptors (before every loadProject). */
-  /** Hand the plugin list to the engine. Returns a warning sentence when it didn't take (also logged), else null. */
   async syncEngine(): Promise<string | null> {
     const e = this.engine;
     if (!e) return null;
@@ -276,7 +243,6 @@ export class PluginService {
     const ev = e as PluginEngineEvent;
     switch (ev.kind) {
       case 'crashed':
-        // Error log lines become toasts in every window.
         this.deps.log('error', ev.message);
         void this.refreshStatus().then(() => this.emit());
         break;
@@ -293,7 +259,6 @@ export class PluginService {
     }
   }
 
-  /** Edits made in a plugin's own window → the document (coalesced, ~20 Hz). */
   private queueParam(key: string, paramId: string, value: number): void {
     if (!Number.isFinite(value)) return;
     this.pendingParams.set(`${key}\u0000${paramId}`, { key, paramId, value });
@@ -318,7 +283,6 @@ export class PluginService {
     }, 50);
   }
 
-  /** Before saving: store every live plugin's state in the document. */
   async beforeSave(): Promise<void> {
     const e = this.engine;
     if (!e || !e.isAlive()) return;
@@ -338,8 +302,6 @@ export class PluginService {
       if (!x.ok) this.deps.log('warn', `Couldn't store plugin states: ${x.message}`);
     }
   }
-
-  // ── Actions ─────────────────────────────────────────────────────────
 
   rescan(opts: { full?: boolean; quiet?: boolean } = {}): Promise<ActionResult<PluginManagerState>> {
     if (this.scanning) return this.scanning;
@@ -372,7 +334,6 @@ export class PluginService {
       if (ok) candidates.push(...(await findCandidates(f.path, f.formats)));
     }
     this.vst2Found = await countVst2(vst2Folders());
-    // Dedupe (a folder can be inside another); keep the first (priority order).
     const seen = new Set<string>();
     const list = candidates.filter((c) => {
       const k = norm(c.path);
@@ -380,7 +341,6 @@ export class PluginService {
       seen.add(k);
       return true;
     });
-    // Forget files that disappeared.
     for (const k of [...this.cache.keys()]) if (!seen.has(k)) this.cache.delete(k);
     const todo = list.filter((c) => {
       const k = norm(c.path);
@@ -417,7 +377,6 @@ export class PluginService {
             entry.plugins = r.plugins;
             break;
           case 'crashed':
-            // Crash → straight to the blocklist (kept across rescans; Retry in the Plugin Manager).
             entry.status = 'blocked';
             entry.message = r.message;
             entry.plugins = r.plugins;

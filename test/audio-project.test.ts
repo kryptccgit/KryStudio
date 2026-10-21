@@ -1,17 +1,3 @@
-// Wave 8a builder (research/15 §3.4): audio_to_project and build_from_reference
-// over a fake analyzer (in process: analysis, stems, transcriptions, sound
-// fingerprints) and a fake transcription core, plus the reference tempo lock
-// on set_tempo and the prompt texts.
-//
-//  - audio_to_project writes channels, patterns per section (sameAs reuse), the
-//    arrangement + markers, the stems (muted) and the vocal (audible) as ONE
-//    history entry, and one undo removes it all;
-//  - cancelling mid-way writes nothing; consent like import_audio; 'new' is
-//    refused while the open project has unsaved changes ('current' works);
-//  - build_from_reference never writes the reference's lead / vocal notes in
-//    'style', and leaves an empty matched Lead channel + the melody shape;
-//  - set_tempo refuses a tempo > 3% off the studied reference (×0.5/×1/×2)
-//    unless override.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -54,8 +40,6 @@ fs.mkdirSync(path.dirname(KICK_SAMPLE), { recursive: true });
 fs.writeFileSync(KICK_SAMPLE, riff('kick'));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// ── Fixtures ────────────────────────────────────────────────────────────
-
 const LEVELS: Analysis = {
   durationSec: 45,
   peakDb: -1,
@@ -74,7 +58,6 @@ const LEVELS: Analysis = {
   spectralCentroidHz: 1800,
 };
 
-/** 24 bars at 128 bpm from 0.5 s, kick on every beat, snare on 2 and 4, an Am F C G loop. */
 function analysis(p: string): AudioAnalysis {
   const beat = 60 / 128;
   const t0 = 0.5;
@@ -117,7 +100,6 @@ const BAR = 4 * PPQ;
 const notesEvery = (bars: number, perBar: number, key: number, dur: number, vel = 0.8) =>
   Array.from({ length: bars * perBar }, (_, i) => ({ tick: Math.round((i * BAR) / perBar), key, dur, vel }));
 
-/** What transcribe-core would return (the fake core): a lead + a vocal part even in 'style', to prove the guard. */
 function transcription(mode: 'exact' | 'style'): SongTranscription {
   return {
     name: 'My Song',
@@ -150,7 +132,6 @@ function transcription(mode: 'exact' | 'style'): SongTranscription {
 const FP: SoundFingerprint = { lengthSec: 0.25, centroidHz: 180, rolloffHz: 400, flatness: 0.1, harmonicity: 0.5, f0Hz: 50, attackMs: 2, decayMs: 180, sustain: 0.1, bands: { sub: 0, low: -3, lowMid: -12, mid: -20, highMid: -24, high: -30 }, crestDb: 12, width: 0, peakDb: -1, rmsDb: -12 };
 
 interface Gate {
-  /** Blocks stemFiles until released (cancel tests). */
   stems?: Promise<void>;
   entered?: () => void;
 }
@@ -191,7 +172,6 @@ function rig(opts: { dirty?: boolean; fileAccess?: FileAccessMode; asker?: Conse
     },
     async fingerprint(file: string, segs?: Array<{ startSec: number; endSec: number }>) {
       calls.push('fingerprint');
-      // Per-section loudness (the section-dynamics pass asks for one segment per section).
       const stem = (Object.keys(STEMS) as StemName[]).find((k) => STEMS[k] === file);
       const rms = stem ? opts.sectionRms?.[stem] : undefined;
       if (rms && segs && segs.length === rms.length) return { ok: true, data: { segments: rms.map((rmsDb) => ({ ...FP, rmsDb })) } };
@@ -249,7 +229,6 @@ function rig(opts: { dirty?: boolean; fileAccess?: FileAccessMode; asker?: Conse
     },
     melodyShape: () => ({ source: 'vocals', notes: 40, medianKey: 69, medianName: 'A4', low: 64, high: 76, rangeSemis: 12, notesPerBar: 4, rhythm: { sixteenths: 0.2, eighths: 0.5, quarters: 0.2, long: 0.1 }, phraseBars: 2, restRatio: 0.3, intervals: { repeats: 0.2, steps: 0.6, leaps: 0.2 }, onBeat: 0.5 }),
   };
-  // The matcher knows a kick sample close to the reference's kick; nothing else (→ role / genre picks).
   const matcher: SoundMatcher = async (_fps, target) =>
     target.kind === 'drum' && target.role === 'kick'
       ? { ok: true, matches: [{ source: { kind: 'sample', path: KICK_SAMPLE, sampleKind: 'kick' }, similarity: 0.91, why: ['close'], tweaks: { pitch: -2, gainDb: -3 } }] }
@@ -271,8 +250,6 @@ const notesOf = (doc: DocHost, channelName: string) => {
   return Object.values(doc.project.patterns).reduce((n, p) => n + Object.keys(p.notes[ch.id] ?? {}).length, 0);
 };
 
-// ── audio_to_project ────────────────────────────────────────────────────
-
 test('audio_to_project: a NEW project with channels, a pattern per section (repeats reused), arrangement, markers, stems muted and the vocal audible, in ONE undo step', async () => {
   const r = rig();
   const out = await r.call('audio_to_project', { path: SONG });
@@ -283,22 +260,18 @@ test('audio_to_project: a NEW project with channels, a pattern per section (repe
   assert.equal(p.transport.mode, 'song');
   assert.deepEqual(channelNames(r.doc).slice(0, 5), ['Kick', 'Snare', 'Bass', 'Chords', 'Lead'], 'the default kit is gone; one channel per part');
   assert.equal(r.seen.mode, 'exact');
-  // Patterns: Intro + Drop 1; Drop 2 replays Drop 1's pattern.
   assert.deepEqual(p.patternOrder.map((id) => p.patterns[id].name), ['Intro', 'Drop 1']);
   const clips = Object.values(p.playlist.clips).filter((c) => c.kind === 'pattern').sort((a, b) => a.start - b.start);
   assert.deepEqual(clips.map((c) => [c.start / BAR + 1, p.patterns[c.patternId!].name]), [[1, 'Intro'], [9, 'Drop 1'], [17, 'Drop 1']]);
   assert.deepEqual(Object.values(p.playlist.markers).map((m) => m.name).sort(), ['Drop 1', 'Drop 2', 'Intro']);
   assert.ok(notesOf(r.doc, 'Lead') > 0, "exact: the song's own lead is transcribed");
-  // Each part on its own insert named after it.
   for (const n of ['Kick', 'Bass', 'Chords']) {
     const ch = Object.values(p.channels).find((c) => c.name === n)!;
     assert.equal(p.mixer.inserts[ch.insertId].name, n);
   }
-  // The matched kick sample + its tweaks.
   const kick = Object.values(p.channels).find((c) => c.name === 'Kick')!;
   assert.equal(p.samples[kick.generator.sampleId!].path, KICK_SAMPLE);
   assert.equal(kick.pitch, -2);
-  // Stems: tempo-synced audio, bar 1 = the first downbeat; vocals audible, the rest muted.
   const audio = Object.values(p.playlist.clips).filter((c) => c.kind === 'audio');
   assert.equal(audio.length, 4);
   for (const c of audio) {
@@ -310,11 +283,9 @@ test('audio_to_project: a NEW project with channels, a pattern per section (repe
     assert.equal(c.start, 0);
     assert.equal(c.offset, Math.round(0.5 * (128 / 60) * PPQ), 'the pickup before bar 1 is skipped');
   }
-  // The bass ducks under the kick (the song pumps: kick on every beat).
   const bass = Object.values(p.channels).find((c) => c.name === 'Bass')!;
   const duck = Object.values(p.mixer.inserts[bass.insertId].slots).find((s) => s.type === 'krypt.duck');
   assert.ok(duck && duck.sidechainFrom === kick.insertId, 'bass sidechained to the kick');
-  // Outcome: sounds + honest notes + the ownership line.
   const o = out.data as { sounds: string[]; notes: string[]; stemsKept: boolean; patterns: number; sections: number };
   assert.ok(o.sounds.some((s) => /^Kick → Matched Kick \(similarity 0\.91\)/.test(s)), o.sounds.join(' | '));
   assert.ok(o.sounds.some((s) => /^Bass → .*picked by role/.test(s)));
@@ -323,7 +294,6 @@ test('audio_to_project: a NEW project with channels, a pattern per section (repe
   assert.equal(o.stemsKept, true);
   assert.equal(o.patterns, 2);
   assert.match(out.text ?? '', /If this isn't your song, use the result for practice and remix study, not for release\./);
-  // Progress went through the stages; ONE history entry; one undo takes it all back.
   assert.ok(r.progress.length >= 5 && r.progress.some((x) => /stems/i.test(x.message)));
   assert.equal(r.doc.getHistory().length, 1, 'one history entry');
   const undo = await r.call('undo_last');
@@ -333,7 +303,6 @@ test('audio_to_project: a NEW project with channels, a pattern per section (repe
 });
 
 test("audio_to_project follows the stems' dynamics: a part drops out where its stem is silent, a quieter repeat gets its own pattern with softer notes", async () => {
-  // Sections: Intro, Drop 1, Drop 2 (Drop 2 repeats Drop 1). Drums silent in the intro; the bass much quieter in Drop 2.
   const r = rig({ sectionRms: { drums: [-60, -10, -10], bass: [-14, -2, -12] } });
   const out = await r.call('audio_to_project', { path: SONG });
   assert.equal(out.ok, true, out.message);
@@ -343,7 +312,6 @@ test("audio_to_project follows the stems' dynamics: a part drops out where its s
   const count = (pat: { notes: Record<string, Record<string, unknown>> }, n: string) => Object.keys(pat.notes[ch(n).id] ?? {}).length;
   assert.equal(count(byName('Intro'), 'Kick'), 0, 'no kick where the drum stem is silent');
   assert.ok(count(byName('Drop 1'), 'Kick') > 0);
-  // Drop 2's bass is 10 dB under Drop 1's: its own pattern, with softer bass notes.
   assert.deepEqual(p.patternOrder.map((id) => p.patterns[id].name), ['Intro', 'Drop 1', 'Drop 2']);
   const vel = (n: string) => Object.values(byName(n).notes[ch('Bass').id] ?? {}).map((x) => (x as { vel: number }).vel);
   const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
@@ -391,7 +359,6 @@ test('audio_to_project: cancelling mid-way writes nothing', async () => {
   assert.equal(r.doc.version, v0, 'the document never changed');
   assert.equal(r.doc.getHistory().length, 0);
   assert.equal(r.svc.busy, null);
-  // An MCP abort does the same.
   const ctrl = new AbortController();
   ctrl.abort();
   const aborted = await r.call('audio_to_project', { path: SONG }, { signal: ctrl.signal });
@@ -444,9 +411,6 @@ test('audio_to_project: file consent works like import_audio (asked outside the 
   assert.deepEqual(browserOnly.calls, []);
 });
 
-// ── build_from_reference + the tempo lock ───────────────────────────────
-
-/** A project with a muted "Reference: My Song" track (as study_reference leaves it). */
 function withReference(r: ReturnType<typeof rig>) {
   const tr = r.doc.project.playlist.trackOrder[0];
   const add = r.doc.exec<{ clipId: string; channelId: string; trackId?: string }>('playlist.addAudio', { path: SONG, name: 'Reference: My Song', trackId: tr, start: 0, frames: 44100 * 46, sampleRate: 44100, channels: 2 }, { actor: USER });
@@ -465,11 +429,9 @@ test('build_from_reference: the instrumental bed in one step, an EMPTY matched L
   assert.equal(r.seen.mine, false);
   assert.equal(agentEntries(r.doc).length, 1, 'one undo step');
   assert.equal(r.doc.project.transport.bpm, 128);
-  // The fake core returned a Lead part: the guard dropped it, and the empty Lead has no notes.
   assert.equal(notesOf(r.doc, 'Lead'), 0, 'no lead notes');
   assert.equal(notesOf(r.doc, 'Vocal'), -1, 'no vocal channel');
   assert.ok(notesOf(r.doc, 'Kick') > 0 && notesOf(r.doc, 'Bass') > 0 && notesOf(r.doc, 'Chords') > 0);
-  // No reference audio in the new song (no stem tracks); the reference stays muted, lined up and synced.
   const stemPaths = new Set(Object.values(STEMS));
   assert.ok(!Object.values(r.doc.project.samples).some((x) => stemPaths.has(x.path)), "no stem of the reference is used in the new song");
   const audio = Object.values(r.doc.project.playlist.clips).filter((c) => c.kind === 'audio' && c.channelId === ref.channelId);
@@ -487,13 +449,10 @@ test('build_from_reference: the instrumental bed in one step, an EMPTY matched L
   assert.ok(text.indexOf('write_pattern an ORIGINAL melody') < text.indexOf('check_originality'));
   assert.ok(text.indexOf('check_originality') < text.indexOf('match_mix'));
   assert.ok(text.indexOf('match_mix') < text.indexOf('review_song'));
-  // Levels from the stems' loudness: bass 2 dB under the drums, chords 6 dB.
   assert.match(text, /Bass -2, Chords -6/);
-  // One undo takes the whole bed away.
   assert.equal((await r.call('undo_last')).ok, true);
   assert.equal(notesOf(r.doc, 'Bass'), -1);
 
-  // mine: true keeps the exact lead.
   const mine = rig();
   withReference(mine);
   const own = await mine.call('build_from_reference', { mine: true });
@@ -524,8 +483,6 @@ test('set_tempo: locked to the studied reference (±3% of ×0.5 / ×1 / ×2) unl
   assert.equal(r.doc.project.transport.bpm, 175);
   assert.equal((await r.call('set_tempo', { time_signature: '3/4' })).ok, true, 'a meter change alone is never locked');
 });
-
-// ── Texts ───────────────────────────────────────────────────────────────
 
 test('SERVER_INSTRUCTIONS and the like prompt send agents to build_from_reference first (still ≤ 2048 characters)', () => {
   assert.ok(SERVER_INSTRUCTIONS.length <= 2048, `${SERVER_INSTRUCTIONS.length} chars`);

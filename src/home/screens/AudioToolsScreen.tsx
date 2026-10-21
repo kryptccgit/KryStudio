@@ -1,8 +1,3 @@
-// Home ▸ Audio Tools: Audio → Project (a whole song into an editable
-// project), Auto Mashup (two songs into one mashup project), Master a song, Krypt Voice, what the on-device audio tools do, where they live (right-click
-// an audio clip), which model each one needs and whether it is installed,
-// plus the analyzer's health and device.
-
 import { AudioLines, AudioWaveform, Blend, BrainCircuit, Cloud, Cpu, Disc3, Gauge, ListMusic, Magnet, MicVocal, Music, Scissors, WandSparkles, type LucideIcon } from 'lucide-react';
 import { shortcutFor } from '../../input/keymap';
 import type { ModelTask } from '@shared/analyzer/models';
@@ -25,7 +20,7 @@ const TOOLS: Array<{ icon: LucideIcon; title: string; menu: string; body: string
     title: 'Detect tempo & key',
     menu: 'Detect tempo & key',
     body: 'Tempo (with half and double-time readings), key, swing, sections and loudness. Use the tempo for your project in one click, or make the clip follow it.',
-    need: null, // Beat This! is built in, and analysis falls back to DSP beat tracking without it
+    need: null,
   },
   {
     icon: Scissors,
@@ -46,7 +41,7 @@ const TOOLS: Array<{ icon: LucideIcon; title: string; menu: string; body: string
     title: 'Tune vocal',
     menu: 'Tune vocal',
     body: 'Krypt Tune, first in the vocal’s effects and set to the key it detects: Natural keeps it human, Pop is tight, Hard is the robotic trap sound.',
-    need: null, // the key comes from Detect tempo & key (built in); Krypt Tune is a stock effect
+    need: null,
   },
   {
     icon: Magnet,
@@ -64,7 +59,6 @@ function needState(a: AnalyzerState | null, task: ModelTask): 'installed' | 'mis
   return ms.some((m) => m.status === 'installed') ? 'installed' : 'missing';
 }
 
-/** The featured tool: a whole song → an editable project (src/audioProject). */
 function AudioToProjectCard({ analyzer }: { analyzer: AnalyzerState | null }) {
   const st = needState(analyzer, 'stems');
   const keys = shortcutFor('file.openAudioProject');
@@ -102,7 +96,6 @@ function AudioToProjectCard({ analyzer }: { analyzer: AnalyzerState | null }) {
   );
 }
 
-/** The second featured tool: two songs → one mashup project (src/mashup). */
 function AutoMashupCard({ analyzer }: { analyzer: AnalyzerState | null }) {
   const st = needState(analyzer, 'stems');
   return (
@@ -139,7 +132,6 @@ function AutoMashupCard({ analyzer }: { analyzer: AnalyzerState | null }) {
   );
 }
 
-/** The third featured tool: master an audio file (or an album) to a loudness target (src/automix, research/20). */
 function MasterSongCard() {
   const { song, album } = masterCardActions();
   return (
@@ -177,7 +169,6 @@ function MasterSongCard() {
   );
 }
 
-/** The fourth featured tool: text and lyrics → a voice in the song (src/voice, research/21). */
 function KryptVoiceCard() {
   const v = useVoice((s) => s.state);
   useEffect(() => {

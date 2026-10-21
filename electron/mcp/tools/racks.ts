@@ -1,11 +1,3 @@
-// Rack tools (Wave 12.2, research/16 §2.3; owned by racks-app): build_rack, set_macro, slice_to_pads, edit_rack.
-//
-// build_rack turns a friendly description (chains by preset or plugin, human param values, pad notes, key /
-// velocity zones, macro maps by chain / device number or name) into the id-free rack spec and runs ONE doc
-// command, rack.build (one undo step with the call's group). set_macro sets macro values through the normal
-// ParamRef path (params.set) and drives variations. slice_to_pads shares electron/racks/slice.ts with the UI.
-// edit_rack changes a rack in place (the rack.* chain / device / macro-map commands) and lists it with ids.
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import type { Project } from '@shared/schema/project';
@@ -27,8 +19,6 @@ const zValue = z.union([z.number(), z.string().max(32), z.boolean()]);
 const zParamsIn = z.record(z.string(), zValue);
 
 const short = (deps: MainDeps, id: string): string => pluginName(deps.doc.catalog, id).replace(/^Krypt /, '');
-
-// ── Finding a rack ────────────────────────────────────────────────────
 
 interface FoundRack {
   target: { channelId: string } | { insertId: string; slotId: string };
@@ -60,7 +50,6 @@ function emptyLike(kind: RackKind): RackDef {
   return { kind, chains: {}, chainOrder: [], macros: Array.from({ length: MACRO_COUNT }, (_, i) => ({ name: `Macro ${i + 1}`, maps: {} })), variations: {}, variationOrder: [] };
 }
 
-/** Effects that end a chain: a new effect rack is inserted before them. */
 const FINAL_STAGE = new Set(['krypt.limiter', 'krypt.clipper']);
 
 function findRack(deps: MainDeps, a: { channel?: string; insert?: string | number; slot?: string | number }): FoundRack {
@@ -105,8 +94,6 @@ function macroLine(rack: RackDef, params: Record<string, number>): string {
     .map((x) => `${x.i + 1} ${safeName(x.m.name, 32)} = ${Math.round((params[MACRO_PARAM_IDS[x.i]] ?? 0) * 100)}% (${plural(x.n, 'target')})`)
     .join('; ');
 }
-
-// ── build_rack ────────────────────────────────────────────────────────
 
 const zDevice = z.object({
   effect: z.string().min(1).max(80).describe('Stock effect id or alias: eq, comp, reverb, delay, drive, filter, chorus, …'),
@@ -209,7 +196,6 @@ function buildChain(deps: MainDeps, caller: ToolCaller, kind: RackKind, c: z.inf
     if (!desc?.usesSample) fail(`${where}: ${desc?.name ?? out.instrument.plugin} doesn't play samples; use instrument "sampler".`);
     out.instrument.sample = agentSamplePath(deps, c.sample, caller).docPath;
     if (!instName || c.instrument === undefined) instName = safeName(c.sample.split(/[\\/:]/).pop()?.replace(/\.[a-z0-9]+$/i, ''), 40);
-    // A pad plays its sample at its own pitch.
     if (kind === 'drum' && out.instrument.plugin === 'krypt.sampler') out.instrument.params = { keyTrack: 0, oneShot: 1, ...out.instrument.params };
   }
   if (c.devices?.length) {
@@ -328,7 +314,6 @@ export const buildRack = defineTool({
     }
     const r = ctx.exec<{ channelId?: string; insertId?: string; slotId?: string; chainIds: string[] }>('rack.build', { ...target, spec, macros: values });
     if (kind === 'effect' && a.slot === undefined && r.insertId && r.slotId) {
-      // A new effect rack goes before a final limiter / clipper (e.g. the master's), never after it.
       const order = deps.doc.project.mixer.inserts[r.insertId].slotOrder;
       let at = order.length - 1;
       while (at > 0 && FINAL_STAGE.has(deps.doc.project.mixer.inserts[r.insertId].slots[order[at - 1]].type)) at--;
@@ -350,8 +335,6 @@ export const buildRack = defineTool({
     };
   },
 });
-
-// ── set_macro ─────────────────────────────────────────────────────────
 
 export const setMacro = defineTool({
   name: 'set_macro',
@@ -428,8 +411,6 @@ export const setMacro = defineTool({
   },
 });
 
-// ── slice_to_pads ─────────────────────────────────────────────────────
-
 export const sliceToPadsTool = defineTool({
   name: 'slice_to_pads',
   title: 'Slice a loop to drum pads',
@@ -489,14 +470,6 @@ export const sliceToPadsTool = defineTool({
     };
   },
 });
-
-// ── edit_rack ─────────────────────────────────────────────────────────
-//
-// Change an existing rack in place (one undo step: the call's group; a failing op rolls the whole call back):
-// chains (add / remove / move / set: name, volume, pan, mute, solo, zone, pad note, choke), a chain's instrument
-// (swap, params, sample), its devices (add / remove / move / set) and macro maps (map / unmap). Chains match by
-// id, name or 1-based number; devices by id, effect name or number (rackRefs.ts). No ops = read the rack: chains,
-// zones, instruments, devices and macro maps with their ids.
 
 const zRef = z.union([z.number().int().min(1), z.string().min(1).max(80)]);
 const zMacroRef = z.union([z.number().int().min(1).max(MACRO_COUNT), z.string().min(1).max(32)]);
@@ -561,7 +534,6 @@ function zoneText(kind: RackKind, z0: { keyLo: number; keyHi: number; velLo: num
   return kind === 'drum' && z0.keyLo === z0.keyHi ? `pad ${midiNoteName(z0.keyLo)}${vel}` : `keys ${midiNoteName(z0.keyLo)}-${midiNoteName(z0.keyHi)}${vel}`;
 }
 
-/** The rack as text: chains (ids, zones, instrument, devices) and macros with their maps. */
 export function describeRack(deps: MainDeps, f: FoundRack): string {
   const p = deps.doc.project;
   const r = f.rack;
@@ -808,7 +780,6 @@ export const editRack = defineTool({
     ops: z.array(zRackOp).max(64).optional(),
     change_label: zLabel,
   }),
-  // No ops = a read: the listing is the answer, not a "No change" (edits that change nothing still fail below).
   readsWhenUnchanged: true,
   summarize: (a) => (a.ops?.length ? `${plural(a.ops.length, 'rack edit')}${a.channel ? ` on ${safeName(a.channel, 30)}` : ''}` : `read rack${a.channel ? ` ${safeName(a.channel, 30)}` : ''}`),
   paths: (a) => (a.ops ?? []).filter((o) => 'sample' in o && typeof o.sample === 'string').map((o) => ({ value: (o as { sample: string }).sample, kind: 'audio' as const })),

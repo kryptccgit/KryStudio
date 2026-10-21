@@ -1,6 +1,3 @@
-// list_packs (read, owned by packs-app): the optional sound packs, their status and the presets they add.
-// Agents never download: they tell the user which pack to get in Home ▸ Sounds. research/12-real-instruments.md.
-
 import { z } from 'zod';
 import type { MainDeps } from '../types';
 import { PACKS } from '@shared/packs/catalog';
@@ -21,7 +18,6 @@ const STATUS_TEXT: Record<PackStatus, string> = {
   failed: 'not downloaded (the last download failed)',
 };
 
-/** Sample counts by kind from the shared catalog (when the packs service isn't wired). */
 function catalogSampleInfo(): PackSamplesInfo {
   const packs = PACKS.filter((p) => p.samples?.length).map((p) => {
     const byKind: Partial<Record<SampleKind, number>> = {};
@@ -31,7 +27,6 @@ function catalogSampleInfo(): PackSamplesInfo {
   return { packs, samples: [] };
 }
 
-/** "140 sounds (foley 60, ambience 40, impact 20 …)": biggest kinds first. */
 export function sampleCountText(count: number, byKind: Partial<Record<string, number>>): string {
   const kinds = Object.entries(byKind)
     .filter((e): e is [string, number] => (e[1] ?? 0) > 0)
@@ -39,7 +34,6 @@ export function sampleCountText(count: number, byKind: Partial<Record<string, nu
   return `${plural(count, 'sound')}${kinds.length ? ` (${kinds.slice(0, 6).map(([k, n]) => `${k} ${n}`).join(', ')}${kinds.length > 6 ? ' …' : ''})` : ''}`;
 }
 
-/** The catalog as "not downloaded" when the packs service isn't wired (tests, a failed start). */
 function catalogEntries(): PackEntryState[] {
   return PACKS.map((p) => ({ id: p.id, name: p.name, description: p.description, author: p.author, licence: p.licence, bytes: p.bytes, ramMb: p.ramMb, contents: p.contents, status: 'available' }));
 }
@@ -65,7 +59,6 @@ export const listPacks = defineTool({
     }
     if (!packs.length) return { ok: true, message: 'This version of Krypt Studio offers no sound packs.', changed: [], warnings, data: { packs: [] } };
 
-    // The presets each pack adds (factory + the user's own presets saved from pack instruments).
     const byPack = new Map<string, InstrumentPreset[]>();
     for (const p of instrumentPresets(soundLibrary(deps).presets)) {
       const id = presetPackId(p);
@@ -75,7 +68,6 @@ export const listPacks = defineTool({
       byPack.set(id, list);
     }
 
-    // The samples each pack adds (sample packs), by kind.
     let sampleInfo: PackSamplesInfo;
     try {
       sampleInfo = deps.packs?.sampleInfo?.() ?? catalogSampleInfo();

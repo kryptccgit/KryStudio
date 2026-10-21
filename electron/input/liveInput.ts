@@ -1,18 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Live input controller (main process): MIDI inputs, the MIDI target, record
-// arm, MIDI-learn / controller links, and applying recorded takes.
-//
-//   renderer ─IPC─▶ this ─NDJSON─▶ engine (owns MIDI + audio input devices)
-//   engine events: midiInputs → renderer list · midiCc → learn / params.set
-//                  recorded   → notes.add / samples.add + playlist.addAudio
-//
-// Every take becomes ONE undo group (actor user), even when pattern mode
-// reports each loop pass separately. Controller twists coalesce per param
-// (`midi:<ref>`), so one twist = one undo entry. Settings (device enables,
-// mappings, record mode, audio input) persist in settings.json; arm state is
-// per session, like FL.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import { USER, type DocHost } from '@shared/doc/DocHost';
 import type { ActionResult, MidiLearnState, MidiMapping, RecordState, Settings } from '@shared/types';
@@ -49,16 +34,13 @@ export interface LiveInputDeps {
   getSettings(): Settings;
   updateSettings(patch: Partial<Settings>): Settings;
   onSettingsChanged(fn: (s: Settings, prev: Settings) => void): () => void;
-  /** Folder for audio takes: `<project dir>/recordings` or `<userData>/recordings`. */
   recordDir(): string;
-  /** Prefix for take files (the project name). */
   projectName(): string;
   broadcast(channel: string, payload: unknown): void;
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
 }
 
 const LEARN_TIMEOUT_MS = 30_000;
-/** Close a take's undo group if its final report never arrives (engine restart). */
 const TAKE_STALE_MS = 20_000;
 
 interface TakeState {
@@ -116,9 +98,6 @@ export class LiveInputController {
     this.finishLearn({ ok: false, message: 'Cancelled' });
   }
 
-  // ── Engine sync ────────────────────────────────────────────────────
-
-  /** Push everything after every engine (re)start. */
   private async sync(): Promise<void> {
     await this.pushMidiInputs();
     await this.d.engine.request({ cmd: 'setMidiTarget', channelId: this.target }, 3000);
@@ -126,7 +105,6 @@ export class LiveInputController {
   }
 
   private engineGone(): void {
-    // The engine lost whatever it was recording; close open undo groups.
     for (const [id, t] of this.takes) this.finishTake(id, t, 'The audio engine stopped during recording.');
     this.input = null;
     this.broadcastStatus();
@@ -161,12 +139,8 @@ export class LiveInputController {
     return r;
   }
 
-  // ── Mic test (Home ▸ Recording Studio) ───────────────────────────────
-
-  /** Input open for the level meter only (not monitored, not recorded). Not persisted. */
   private meter = false;
 
-  /** Open (or close) the audio input just for its level meter: the Recording Studio's mic test. */
   async setMeter(on: boolean): Promise<ActionResult<InputStatus | null>> {
     this.meter = on;
     const inp = audioInputSettings(this.d.getSettings());
@@ -181,9 +155,6 @@ export class LiveInputController {
     return { ok: true, data: this.input, message: on ? `Listening to ${this.input?.name ?? 'the microphone'}` : undefined };
   }
 
-  // ── Record arm ─────────────────────────────────────────────────────
-
-  /** A take is being recorded (its undo group is open): the project tabs refuse a switch meanwhile. */
   isRecordingTake(): boolean {
     return this.takes.size > 0;
   }
@@ -215,8 +186,6 @@ export class LiveInputController {
     return this.d.engine.request<DeviceInfo[]>({ cmd: 'listInputDevices' }, 15_000);
   }
 
-  // ── MIDI inputs / target ───────────────────────────────────────────
-
   async inputs(): Promise<ActionResult<MidiInputInfo[]>> {
     const r = await this.d.engine.request<MidiInputInfo[]>({ cmd: 'listMidiInputs' }, 10_000);
     if (r.ok && r.data) this.d.broadcast(EVENT.midiInputsChanged, r.data);
@@ -226,7 +195,6 @@ export class LiveInputController {
   async setInputEnabled(id: string, enabled: boolean): Promise<ActionResult<MidiInputInfo[]>> {
     if (!id) return { ok: false, message: 'No MIDI device given' };
     const m = midiSettings(this.d.getSettings());
-    // The settings listener pushes the new policy to the engine.
     this.d.updateSettings({ midi: { ...m, inputs: { ...m.inputs, [id]: !!enabled } } });
     const r = await this.pushMidiInputs();
     if (!r.ok) return r;
@@ -241,8 +209,6 @@ export class LiveInputController {
     this.target = id;
     void this.d.engine.request({ cmd: 'setMidiTarget', channelId: id }, 2000);
   }
-
-  // ── MIDI-learn / controller links ──────────────────────────────────
 
   learn(paramRef: string, label?: string): Promise<ActionResult<MidiMapping>> {
     this.finishLearn({ ok: false, message: 'Cancelled: another parameter is waiting for a controller' });
@@ -287,7 +253,6 @@ export class LiveInputController {
       const p = this.learnPending;
       const m = midiSettings(this.d.getSettings());
       const mapping: MidiMapping = { id: newId('map'), device, channel, cc, paramRef: p.paramRef, label: p.label };
-      // One controller drives one parameter, and a re-link replaces the old link.
       const keep = m.mappings.filter((x) => !(x.cc === cc && x.channel === channel && (x.device === device || x.device === null)) && x.paramRef !== p.paramRef);
       this.d.updateSettings({ midi: { ...m, mappings: [...keep, mapping] } });
       this.finishLearn({ ok: true, data: mapping, message: `Linked ${p.label} to CC ${cc} (channel ${channel + 1}, ${device})` });
@@ -307,8 +272,6 @@ export class LiveInputController {
       }
     }
   }
-
-  // ── Engine events ──────────────────────────────────────────────────
 
   private onEngineEvent(e: EngineEvent): void {
     try {
@@ -356,10 +319,8 @@ export class LiveInputController {
     }
   }
 
-  /** Audio takes this recorder wrote in this session (Krypt Voice: only these can become "my voice"). */
   private sessionTakes = new Set<string>();
 
-  /** True when `absPath` is an audio take this recorder wrote, into its recordings folder, in this app session. */
   isSessionTake(absPath: string): boolean {
     return this.sessionTakes.has(path.resolve(String(absPath ?? '')).toLowerCase());
   }
@@ -375,7 +336,7 @@ export class LiveInputController {
     if (!t && !hasNotes && !ev.audio) {
       if (ev.final) {
         const what = ev.error ? ev.error : ev.audio === null ? 'The audio take failed.' : recordingSettings(this.d.getSettings()).mode === 'audio' ? 'No audio was captured.' : 'No notes were played, so nothing was recorded.';
-        this.report(ev.take, false, what); // nothing landed: a warning, never a silent no-op
+        this.report(ev.take, false, what);
       }
       return;
     }
@@ -410,7 +371,7 @@ export class LiveInputController {
         this.addGroups(t, planSongNotesInClip(p, clip, ev.notes, quantize));
         return;
       }
-      t.song = undefined; // the clip was deleted mid-take: fall back to a new pattern
+      t.song = undefined;
     }
     if (!t.song) {
       const clip = songClipFor(p, ev.startTick);
@@ -434,7 +395,6 @@ export class LiveInputController {
       t,
       planned.map((g) => ({ patternId: song.patternId, channelId: g.channelId, notes: g.notes })),
     );
-    // Place (or grow) the pattern's clip at the bar where recording started.
     const p2 = this.d.doc.project;
     const pat = p2.patterns[song.patternId];
     if (!pat) return;
@@ -451,9 +411,6 @@ export class LiveInputController {
     }
   }
 
-  // ── Loop recording → take lanes (docs/ENGINE_PROTOCOL.md §13) ───────
-
-  /** One take group from 2+ passes; false = not a loop take (today's path applies). */
   private addTakeGroup(t: TakeState, passes: TakePassArg[], audio: RecordedTake['audio'] | undefined): boolean {
     const span = passesSpan(passes);
     const trackId = freeTrack(this.d.doc.project, span.start, span.end) ?? undefined;
@@ -489,7 +446,6 @@ export class LiveInputController {
     if (!a || !(a.frames > 0) || !isLoopTake(ev)) return false;
     const passes = audioTakePasses(ev.passes!);
     if (passes.length >= 2) return this.addTakeGroup(t, passes, a);
-    // One usable pass (the rest was a sliver): place it like a normal take, trimmed to that pass.
     const clipId = this.addAudio(t, ev);
     const first = passes[0] ?? { start: Math.round(ev.passes![0].startTick), end: Math.round(ev.passes![0].endTick) };
     const clip = clipId ? this.d.doc.project.playlist.clips[clipId] : undefined;

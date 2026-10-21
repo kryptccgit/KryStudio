@@ -1,11 +1,3 @@
-// Vocals & mashups (electron/vocals, electron/mcp/tools/vocals.ts): the
-// key-match maths, import_audio (Browser-root allow-list, base64 uploads
-// into userData/imports, size cap, extension and decoder checks, dedupe,
-// saving and reopening a project that uses an upload), match_clip and
-// tune_vocal against the fake analyzer (semitones, tempo sync, tempo
-// adoption, presets, never a duplicate Krypt Tune, one undo group), the
-// clip-menu path (one user undo step), the mashup prompt and the registry
-// / docs tool count.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -40,7 +32,6 @@ const OUTSIDE = path.join(TMP, 'outside');
 fs.mkdirSync(USER_ROOT, { recursive: true });
 fs.mkdirSync(OUTSIDE, { recursive: true });
 fs.writeFileSync(path.join(OUTSIDE, 'secret.wav'), 'RIFF secret');
-// Bundled into test/.out/ by scripts/run-tests.mjs: the repo is two levels up.
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 
 const SETTINGS: Settings = {
@@ -49,13 +40,11 @@ const SETTINGS: Settings = {
   browserRoots: [],
   recent: [],
   autosaveSec: 60,
-  // import_audio's refusal below is the 'browser' File access mode.
   mcp: { enabled: true, httpEnabled: false, httpPort: 47800, requireConsentForDestructive: false, fileAccess: 'browser' },
   agent: { model: 'claude-opus-5-5', hasApiKey: false },
   discordRpc: false,
 };
 
-/** The engine's decoder, faked: files that start with "RIFF" decode (8 s, 44.1 kHz stereo), anything else doesn't. */
 async function fakeSampleInfo(p: string, running = true): Promise<ActionResult<SampleInfo>> {
   if (!running) return { ok: false, message: "The audio engine isn't running." };
   let head = '';
@@ -115,7 +104,6 @@ async function rig(opts: { stems?: boolean; engineDown?: boolean } = {}) {
   };
   const caller: ToolCaller = { actor: { kind: 'agent', clientId: 'vox', name: 'Vox Agent' }, session: newSession(), via: 'test' };
   const call = (name: string, args: unknown = {}) => callTool(deps, caller, name, args, { quiet: true });
-  /** An audio clip of a (fake) file in the Browser folder, as a drag from the Browser makes it. */
   const audio = (file: string, track = 0, start = 0): { clipId: string; channelId: string } => {
     const abs = path.join(USER_ROOT, file);
     if (!fs.existsSync(abs)) fs.writeFileSync(abs, `RIFF ${file}`);
@@ -131,7 +119,6 @@ async function rig(opts: { stems?: boolean; engineDown?: boolean } = {}) {
   return { doc, deps, call, audio, vocals, analyzer, supervisor, userData, importsDir: path.join(userData, 'imports'), agentEntries, close: () => supervisor.stop() };
 }
 
-/** A G minor phrase on the Keys synth (pitched), so the patterns say "G minor". */
 function writeGMinor(doc: DocHost): void {
   const p = doc.project;
   const keys = p.channelOrder.find((id) => p.channels[id].name === 'Keys')!;
@@ -144,8 +131,6 @@ const K = (s: string): KeyRef => toKeyRef(s)!;
 const genParams = (doc: DocHost, chId: string) => doc.project.channels[chId].generator.params;
 const pitchSlots = (doc: DocHost, insId: string) => doc.project.mixer.inserts[insId].slotOrder.filter((s) => doc.project.mixer.inserts[insId].slots[s].type === 'krypt.pitch');
 const RIFF = (tag: string) => Buffer.from(`RIFF${tag}${'x'.repeat(64)}`);
-
-// ── Key-match maths ─────────────────────────────────────────────────────
 
 test('keyShift: the smallest move (−6..+6), ties go down', () => {
   const s = (a: string, b: string) => keyShift(K(a), K(b)).semitones;
@@ -160,7 +145,6 @@ test('keyShift: the smallest move (−6..+6), ties go down', () => {
   const r = keyShift(K('Am'), K('Gm'));
   assert.equal(r.relation, 'move');
   assert.equal(keyShortName(r.result), 'Gm');
-  // Every pair of the 24 keys lands within −6..+6 and on the target's notes.
   for (let a = 0; a < 24; a++) {
     for (let b = 0; b < 24; b++) {
       const from = { pc: a % 12, minor: a >= 12 };
@@ -177,7 +161,6 @@ test('keyShift: relative major / minor needs 0 (an Am vocal on a C beat stays pu
   const r = keyShift(K('Am'), K('C'));
   assert.deepEqual([r.semitones, r.relation], [0, 'relative']);
   assert.deepEqual([keyShift(K('C'), K('Am')).semitones, keyShift(K('Em'), K('G')).semitones, keyShift(K('Am'), K('Am')).relation], [0, 0, 'same']);
-  // Different key signature: Am onto Eb major = +3, landing on C minor (Eb's relative minor).
   const e = keyShift(K('Am'), K('Eb'));
   assert.equal(e.semitones, 3);
   assert.equal(keyShortName(e.result), 'Cm');
@@ -260,8 +243,6 @@ test('patternKey and rescaleForTempo (pure)', () => {
   assert.equal(rescaleForTempo(doc.project, doc.catalog, 140, 140), null);
 });
 
-// ── import_audio ────────────────────────────────────────────────────────
-
 test('import_audio: Browser-folder paths are placed in place; anything outside is refused', async () => {
   const { call, doc, importsDir, close } = await rig();
   try {
@@ -307,13 +288,11 @@ test('import_audio: base64 uploads land in userData/imports (content hash, atomi
     assert.deepEqual(fs.readFileSync(sample.path), bytes);
     assert.equal(doc.project.playlist.clips[d.clipId].start, 2 * 3840 + 4 * 240, 'bar 3, step 5');
     assert.equal(agentEntries().length, 1, 'track + clip = one undo group');
-    // Same bytes again (as a data: URL this time): the stored file is reused; a second clip is placed.
     const again = await call('import_audio', { data: `data:audio/wav;base64,${bytes.toString('base64')}`, name: 'other name.wav' });
     assert.equal(again.ok, true, again.message);
     assert.equal((again.data as { deduped: boolean }).deduped, true);
     assert.match(again.message, /imported before/);
     assert.deepEqual(fs.readdirSync(importsDir), [path.basename(sample.path)], 'one file, no temp leftovers');
-    // A name with folders is reduced to its file name; the file still goes to imports only.
     const sneaky = await call('import_audio', { data: RIFF('sneaky').toString('base64'), name: '..\\..\\Windows\\evil.wav' });
     assert.equal(sneaky.ok, true, sneaky.message);
     assert.equal((sneaky.data as { name: string }).name, 'evil');
@@ -346,7 +325,6 @@ test('import_audio: size cap, extension allow-list, bad base64 and undecodable b
     assert.match(notAudio.message, /"fake\.mp3" isn't audio Krypt Studio can decode: Unsupported or corrupt audio file/);
     assert.deepEqual(fs.existsSync(importsDir) ? fs.readdirSync(importsDir) : [], [], 'the undecodable upload was removed again');
     assert.equal(doc.version, v, 'nothing changed in the project');
-    // Pure helpers.
     assert.deepEqual(uploadName('Take 3.FLAC'), { ext: 'flac', title: 'Take 3' });
     assert.ok('error' in decodeBase64Audio('A'.repeat(200), 100));
     assert.deepEqual(Buffer.from((decodeBase64Audio('UklGRg') as { bytes: Uint8Array }).bytes).toString(), 'RIFF', 'unpadded base64 is fine');
@@ -386,7 +364,6 @@ test('a saved project keeps playing its upload: saved with its path + hash, reop
     assert.match(s.hash!, /^[a-f0-9]{64}$/);
     const same = relinkSamples(project, file, (p) => fs.existsSync(p), { importsDir });
     assert.deepEqual([same.relinked, same.missing], [[], []], 'opens with its audio on this PC');
-    // Another profile (different userData): its own imports folder holds the same upload → relinked by hash.
     const other = path.join(TMP, 'other-profile', 'imports');
     fs.mkdirSync(other, { recursive: true });
     const moved = { ...project, samples: Object.fromEntries(Object.entries(project.samples).map(([id, x]) => [id, x.name === 'Keeper' ? { ...x, path: path.join(TMP, 'gone', path.basename(x.path)), relPath: undefined } : x])) };
@@ -402,7 +379,6 @@ test('a saved project keeps playing its upload: saved with its path + hash, reop
 });
 
 test('pipe transport: a 12 MB upload line arrives whole (linear framing); an oversized one gets an error and the connection stays open', async () => {
-  // A fake socket: data events in, writes captured.
   const { EventEmitter } = await import('node:events');
   const sock = Object.assign(new EventEmitter(), { destroyed: false, written: [] as string[], write(s: string) { this.written.push(s); return true; }, end() {}, destroy() {} });
   const t = new PipeTransport(sock as never, Buffer.alloc(0), undefined, 1024 * 1024 * 16);
@@ -418,7 +394,6 @@ test('pipe transport: a 12 MB upload line arrives whole (linear framing); an ove
   assert.ok(Date.now() - t0 < 3000, `framing took ${Date.now() - t0} ms`);
   assert.equal(got.length, 1);
   assert.equal(got[0].params?.arguments?.data?.length, big.length);
-  // Over the cap (16 MB here): skipped, answered with an error for its id, and the next message still works.
   const huge = Buffer.from(`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"import_audio","arguments":{"data":"${'B'.repeat(17 * 1024 * 1024)}"}}}\n{"jsonrpc":"2.0","id":9,"method":"ping"}\n`);
   for (let i = 0; i < huge.length; i += 65536) sock.emit('data', huge.subarray(i, i + 65536));
   assert.equal(sock.written.length, 1);
@@ -429,8 +404,6 @@ test('pipe transport: a 12 MB upload line arrives whole (linear framing); an ove
   assert.equal(errors.length, 1);
   await t.close();
 });
-
-// ── match_clip ──────────────────────────────────────────────────────────
 
 test('match_clip to the project: key from the patterns (−2 st, Am → Gm), tempo at the double-time reading, one undo group', async () => {
   const { call, doc, audio, agentEntries, vocals, close } = await rig();
@@ -453,7 +426,6 @@ test('match_clip to the project: key from the patterns (−2 st, Am → Gm), tem
     const again = await call('match_clip', { clip: clipId });
     assert.equal(again.ok, false);
     assert.match(again.message, /^No change/);
-    // The clip menu path reports the same "already" state in words.
     const menu = await vocals.match(clipId, {}, (cmd, args) => doc.exec(cmd, args, { actor: USER }).data as never);
     assert.match(menu.message!, /already matches the project: pitch −2 st \(A minor → G minor\), following 140 bpm from 192 bpm; nothing changed/);
     const undo = await call('undo_last');
@@ -545,7 +517,6 @@ test('a weak chroma key on one voice: the key of its transcribed notes decides (
   const a = await rig();
   try {
     writeGMinor(a.doc);
-    // The chroma reading says E major (weak, 0.3); the transcribed notes fit C major (r 0.82).
     const v = a.audio('melody key=E keyconf=0.3 bpm=140.wav');
     const r = await a.call('match_clip', { clip: v.clipId, tempo: false });
     assert.equal(r.ok, true, r.message);
@@ -555,7 +526,6 @@ test('a weak chroma key on one voice: the key of its transcribed notes decides (
   } finally {
     await a.close();
   }
-  // An a cappella on its own (no other audio, no patterns): Krypt Tune follows the vocal's notes, after its pitch shift.
   const b = await rig();
   try {
     const v = b.audio('melody key=E keyconf=0.3.wav');
@@ -569,8 +539,6 @@ test('a weak chroma key on one voice: the key of its transcribed notes decides (
     await b.close();
   }
 });
-
-// ── tune_vocal ──────────────────────────────────────────────────────────
 
 test('tune_vocal: Krypt Tune goes FIRST before EQ / Comp, presets set retune + humanize, never duplicated, re-enabled', async () => {
   const { call, doc, audio, agentEntries, close } = await rig();
@@ -619,7 +587,6 @@ test('tune_vocal: key after a pitch shift, from the instrumental when the vocal 
     assert.deepEqual([(a.data as TuneOutcome).key, (a.data as TuneOutcome).root], ['G minor', 7]);
     assert.match(a.message, /G minor \(Am pitched −2 st\)/);
 
-    // The shifted vocal is muted now: only the instrumental speaks for the rest of the project.
     doc.exec('playlist.updateClips', { updates: [{ id: shifted.clipId, mute: true }] }, { actor: USER });
     const weak = audio('weak key=Am keyconf=0.2.wav', 1);
     audio('inst key=Eb bpm=100.wav', 2);
@@ -682,7 +649,6 @@ test('clip menu path: the same service as one USER undo step; a failure leaves n
     g2.finish(bad.ok);
     assert.equal(bad.ok, false);
     assert.equal(doc.version, ver);
-    // Renderer helpers: menu targets and toast lines.
     const other = audio('other key=Am bpm=100.wav', 1);
     assert.deepEqual(matchTargets(doc.project, v.clipId).map((t) => [t.clipId, t.label, t.detail]), [[other.clipId, 'other key=Am bpm=100', 'Track 2 · bar 1']]);
     assert.equal(tuneSentence('Vocal', r.data!), 'Vocal: Krypt Tune added first in its chain · D minor, Hard · key from the vocal');
@@ -695,8 +661,6 @@ test('clip menu path: the same service as one USER undo step; a failure leaves n
     await close();
   }
 });
-
-// ── Registry, prompt, docs ──────────────────────────────────────────────
 
 test('registry + docs: 78 tools incl. import_audio / match_clip / tune_vocal / library_deep; docs/MCP.md and the README agree', () => {
   assert.equal(TOOLS.length, 101);

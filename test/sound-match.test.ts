@@ -1,7 +1,3 @@
-// Sound matching (research/15 §3.2, match-core): the pure maths (similarity, aggregation, eligibility, why,
-// tweaks clamped to the plugin's specs, stem segments), the fingerprint index loader, the pack-sample cache, and
-// the match_sounds MCP tool against a fake analyzer + a fake index (report, apply as one undo step, no reference,
-// no index, no stems).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,8 +19,6 @@ import type { FingerprintResult } from '../electron/analyzer/service';
 import { DEFAULT_SETTINGS } from '../electron/system/settings-store';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'kstudio-match-'));
-
-// ── Fixture fingerprints ──────────────────────────────────────────────
 
 function fp(o: Partial<SoundFingerprint> & { bands?: Partial<SoundFingerprint['bands']> } = {}): SoundFingerprint {
   const { bands, ...rest } = o;
@@ -56,8 +50,6 @@ const CHORD = fp({ lengthSec: 2, centroidHz: 1400, rolloffHz: 4500, flatness: 0.
 const sample = (p: string, kind: SampleKind, f: SoundFingerprint): FingerprintEntry => ({ source: { kind: 'sample', path: p, sampleKind: kind }, fp: f });
 const preset = (id: string, role: Extract<FingerprintEntry['source'], { kind: 'preset' }>['role'], f: SoundFingerprint, note = 60): FingerprintEntry => ({ source: { kind: 'preset', id, role, note }, fp: f });
 
-// ── Similarity ────────────────────────────────────────────────────────
-
 test('similarity: a kick is closer to a kick than to a hat; identical = 1', () => {
   const w = PROFILES.kick;
   const same = compareFingerprints(KICK, KICK, w).similarity;
@@ -76,13 +68,10 @@ test('rankMatches: kicks over hats (eligibility by kind), dark vs bright ranking
   assert.equal((dark[0].source as { path: string }).path, 'factory:drums/kick-dark.wav');
   const bright = rankMatches([fp({ ...KICK_BRIGHT, centroidHz: 400 })], cands, { kind: 'drum', role: 'kick' });
   assert.equal((bright[0].source as { path: string }).path, 'factory:drums/kick-bright.wav');
-  // why: the overall match and a plain difference with numbers
   const darkFirst = bright.find((m) => m.source.kind === 'sample' && m.source.path.includes('dark'))!;
   assert.match(darkFirst.why[0], /^\d+% match/);
   assert.ok(darkFirst.why.some((s) => /darker than the reference kick: centroid 150 Hz vs 400 Hz/i.test(s)), darkFirst.why.join(' | '));
-  // deterministic: same inputs, same order
   assert.deepEqual(rankMatches([KICK], cands, { kind: 'drum', role: 'kick' }), rankMatches([KICK], [...cands].reverse(), { kind: 'drum', role: 'kick' }));
-  // a hat target only sees hats
   const hats = rankMatches([HAT], cands, { kind: 'drum', role: 'hat' });
   assert.deepEqual(hats.map((m) => (m.source as { path: string }).path), ['factory:drums/hat.wav']);
   assert.deepEqual(rankMatches([], cands, { kind: 'drum', role: 'kick' }), [], 'nothing to match');
@@ -103,12 +92,10 @@ test('eligibility: bass → bass / 808 / sub presets, kits never, families rank 
   assert.ok(r[1].why[0].includes('related sound type'));
 });
 
-// ── Aggregation ───────────────────────────────────────────────────────
-
 test('aggregate: median per feature shrugs off outliers and broken measurements', () => {
   const hits: Array<SoundFingerprint | null> = [];
   for (let i = 0; i < 35; i++) hits.push(fp({ ...KICK, centroidHz: 140 + (i % 7) * 4, decayMs: 240 + (i % 5) * 5, f0Hz: 54 + (i % 3) }));
-  for (let i = 0; i < 5; i++) hits.push(fp({ ...HAT, f0Hz: null })); // hats masking a few kicks
+  for (let i = 0; i < 5; i++) hits.push(fp({ ...HAT, f0Hz: null }));
   hits.push(fp({ ...KICK, centroidHz: Number.NaN }), null, fp({ ...KICK, rmsDb: -120 }));
   const a = aggregateFingerprints(hits)!;
   assert.ok(a.centroidHz >= 140 && a.centroidHz <= 170, `centroid ${a.centroidHz}`);
@@ -117,14 +104,10 @@ test('aggregate: median per feature shrugs off outliers and broken measurements'
   assert.equal(a.bands.sub, 0);
   assert.equal(aggregateFingerprints([]), null);
   assert.equal(aggregateFingerprints([null, fp({ centroidHz: -1 })]), null);
-  // mostly unpitched → no f0
   assert.equal(aggregateFingerprints([fp({ f0Hz: 100 }), fp(), fp()])!.f0Hz, null);
-  // the matcher uses the aggregate: the kick-dominated hits still pick the kick
   const r = rankMatches(hits, [sample('factory:a.wav', 'kick', KICK), sample('factory:b.wav', 'kick', fp({ ...KICK, centroidHz: 900, decayMs: 40 }))], { kind: 'drum', role: 'kick' });
   assert.equal((r[0].source as { path: string }).path, 'factory:a.wav');
 });
-
-// ── Tweaks ────────────────────────────────────────────────────────────
 
 function assertTweaksValid(pluginId: string, t: Record<string, number>): void {
   const desc = pluginById(pluginId)!;
@@ -141,25 +124,20 @@ test('tweaks: only params the plugin has, clamped to the spec; cutoff follows br
   const darker = tweaksFor(fp({ ...CHORD, centroidHz: 600 }), CHORD, { plugin: wt, params: { cutoff: 4000 }, drum: false });
   assert.ok(darker.cutoff !== undefined && darker.cutoff < 4000, JSON.stringify(darker));
   assertTweaksValid('krypt.wavetable', darker);
-  // extreme: 20x brighter is capped at ×4 and the spec max
   const brighter = tweaksFor(fp({ ...CHORD, centroidHz: 28000 }), CHORD, { plugin: wt, params: { cutoff: 9000 }, drum: false });
   assert.ok(brighter.cutoff! <= 20000, `${brighter.cutoff}`);
   assertTweaksValid('krypt.wavetable', brighter);
-  // percussive target shorter → ampDecay; sustained → ampRelease
   const pluck = tweaksFor(fp({ ...CHORD, sustain: 0.1, decayMs: 200 }), fp({ ...CHORD, sustain: 0.1, decayMs: 900 }), { plugin: wt, params: {}, drum: false });
   assert.ok(pluck.ampDecay !== undefined && pluck.ampDecay < 600, JSON.stringify(pluck));
   assert.equal(pluck.ampRelease, undefined);
-  // attack: only where it reads the envelope (pads / leads), never on basses / drums
   const slow = fp({ ...CHORD, attackMs: 400 });
   assert.ok(tweaksFor(slow, CHORD, { plugin: wt, params: { ampAttack: 3 }, drum: false, attack: true }).ampAttack! > 200);
   assert.equal(tweaksFor(slow, CHORD, { plugin: wt, params: { ampAttack: 3 }, drum: false }).ampAttack, undefined);
-  // 808 kick: tune toward f0 (octave errors folded), decay, tone, drive, click — all within spec
   const k808 = pluginById('krypt.kick808')!;
   const t808 = tweaksFor(fp({ ...KICK, f0Hz: 49, decayMs: 600, flatness: 0.3, bands: { ...KICK.bands, highMid: -10 } }), fp({ ...KICK, f0Hz: 110 }), { plugin: k808, params: { tune: 0, decay: 900 }, drum: true });
   assert.ok(t808.tune !== undefined && t808.tune < 0 && t808.tune >= -7, `tune ${t808.tune} (110 → 49 Hz is an octave + 2 st down: folded)`);
   assert.ok(t808.decay! > 900 && t808.drive! > 0.25 && t808.click! > 0.2, JSON.stringify(t808));
   assertTweaksValid('krypt.kick808', t808);
-  // a plain sample: channel pitch (no "tune" on the sampler), shortening with ampSustain 0 + ampDecay
   const smp = pluginById('krypt.sampler')!;
   const ts = tweaksFor(fp({ ...KICK, f0Hz: 50, decayMs: 120 }), fp({ ...KICK, f0Hz: 56, decayMs: 500 }), { plugin: smp, params: {}, drum: true });
   assert.ok(ts.pitch !== undefined && ts.pitch < -1.5 && ts.pitch > -2.5, JSON.stringify(ts));
@@ -167,13 +145,11 @@ test('tweaks: only params the plugin has, clamped to the spec; cutoff follows br
   assert.equal(ts.ampSustain, 0);
   assert.ok(ts.ampDecay! >= 300 && ts.ampDecay! <= 400);
   assertTweaksValid('krypt.sampler', ts);
-  // melodic parts never get a pitch tweak; the level match stays within ±6 dB after the offset
   const lead = tweaksFor(fp({ ...CHORD, f0Hz: 440, rmsDb: 0 }), fp({ ...CHORD, f0Hz: 262, rmsDb: -30 }), { plugin: wt, params: {}, drum: false });
   assert.equal(lead.pitch, undefined);
   assert.equal(lead.gainDb, 6);
   const balanced = tweaksFor(fp({ ...CHORD, rmsDb: -10 }), fp({ ...CHORD, rmsDb: -20 }), { plugin: wt, params: {}, drum: false, levelOffsetDb: 9.5 });
   assert.equal(balanced.gainDb, undefined, 'within 1.5 dB after the offset: no level change');
-  // no plugin → only channel tweaks
   for (const k of Object.keys(tweaksFor(KICK_BRIGHT, KICK, { plugin: undefined, params: {}, drum: true }))) assert.ok((CHANNEL_TWEAKS as readonly string[]).includes(k), k);
 });
 
@@ -187,14 +163,12 @@ test('rankMatches: every tweak of every candidate exists on its preset plugin an
   assert.ok(r.some((m) => Object.keys(m.tweaks).length > 0));
 });
 
-// ── Segments ──────────────────────────────────────────────────────────
-
 test('segments: drum hits cut before the next hit, masked hits skipped, louder ones spread over the song', () => {
   const hits: DrumHit[] = [
     { timeSec: 0, role: 'kick', vel: 1 },
     { timeSec: 0.25, role: 'hat', vel: 0.5 },
     { timeSec: 0.5, role: 'snare', vel: 0.9 },
-    { timeSec: 0.51, role: 'kick', vel: 0.8 }, // lands with the snare: masked
+    { timeSec: 0.51, role: 'kick', vel: 0.8 },
     { timeSec: 1, role: 'kick', vel: 0.7 },
   ];
   const k = drumSegments(hits, 'kick');
@@ -219,8 +193,6 @@ test('segments: drum hits cut before the next hit, masked hits skipped, louder o
   assert.deepEqual(chordSegments([{ startSec: 0, endSec: 0.3, root: 0, quality: 'min', confidence: 1 }, { startSec: 4, endSec: 8, root: 3, quality: 'maj', confidence: 0.6 }]), [{ startSec: 4, endSec: 6 }]);
   assert.deepEqual(spread([1, 2, 3, 4, 5], 3), [1, 3, 5]);
 });
-
-// ── Index loader ──────────────────────────────────────────────────────
 
 const INDEX: FingerprintIndex = {
   version: 1,
@@ -309,29 +281,23 @@ test('pack cache: pack samples measured lazily once, cached atomically, re-measu
   const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
   assert.equal(cache.entries.length, 3);
   assert.ok(!fs.readdirSync(path.dirname(cacheFile)).some((f) => f.endsWith('.tmp')), 'atomic write left no temp file');
-  // a new service (app restart) reads the cache: nothing measured again, the miss isn't retried
   const svc2 = svcFor(dir, { fingerprint, packSamples });
   const again = await svc2.packEntries(['kick']);
   assert.equal(again.measured, 0);
   assert.equal(again.entries.length, 2);
   assert.equal(calls.length, 3);
-  // a changed file is measured again
   fs.writeFileSync(path.join(dir, 'packs', 'drums', 'kicks', 'a.wav'), 'RIFF changed');
   const changed = await svc2.packEntries(['kick']);
   assert.equal(changed.measured, 1);
   assert.equal(calls[calls.length - 1], 'a.wav');
-  // match(): pack samples join the factory candidates; no analyzer → factory only, with a note
   const m = await svc2.match([KICK_BRIGHT], { kind: 'drum', role: 'kick' }, { limit: 5 });
   assert.ok(m.ok && m.data!.some((x) => x.source.kind === 'sample' && x.source.path === 'pack:drums/kicks/b.wav'));
-  // no analyzer in the session: factory candidates only, with a note about the unmeasured pack samples
   const noAnalyzer = svcFor(dir, { packSamples: () => [...packSamples(), { path: 'pack:drums/hats/h.wav', kind: 'hat' as const }] });
   fs.writeFileSync(path.join(dir, 'packs', 'drums', 'kicks', 'b.wav'), 'RIFF changed too');
   const fac = await noAnalyzer.match([KICK_BRIGHT], { kind: 'drum', role: 'kick' }, { limit: 5 });
   assert.ok(fac.ok && fac.data!.length > 0);
   assert.ok(fac.notes?.some((n) => /no audio analyzer/.test(n)), JSON.stringify(fac.notes));
 });
-
-// ── match_sounds (fake analyzer + fake index) ─────────────────────────
 
 const FACTORY = path.join(TMP, 'factory');
 const resolve = (p: string) => (p.startsWith('factory:') ? path.join(FACTORY, ...p.slice(8).split('/')) : p);
@@ -370,7 +336,6 @@ const ANALYSIS = {
   sources: [],
 } as AudioAnalysis;
 
-/** The reference sounds: a BRIGHT kick (kick-2 wins), a gritty, bright bass (reese wins), lofi-like chords. */
 function fakeFingerprint(file: string, segs: Array<{ startSec: number; endSec: number }>): SoundFingerprint[] {
   return segs.map((s) => {
     const t = Math.round((s.startSec + 0.005) * 100) / 100;

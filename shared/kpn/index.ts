@@ -1,7 +1,3 @@
-// KPN — Krypt Pattern Notation (research/04 §10). Parser, canonical printer,
-// symbolic stats and the cheat sheet shared by the MCP tools, the built-in
-// agent and the renderer (ghost-note previews).
-
 export * from './types';
 export {
   parse,

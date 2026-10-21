@@ -1,8 +1,3 @@
-// Transport-bar "SYNC" pill (Wave 12.2b): shown while the transport follows an
-// external MIDI clock (Settings → MIDI → Sync). Live state comes from
-// telemetry (`TelemetryFrame.sync`); it re-renders only when it changes.
-// Click: open Settings.
-
 import { useEffect, useState } from 'react';
 import { onFrame } from '../render/frameLoop';
 import { telemetry } from '../live/telemetry';
@@ -11,7 +6,6 @@ import { cls } from '../utils/format';
 
 type SyncLook = { on: boolean; bpm: number | null; running: boolean; locked: boolean };
 
-/** Pill text and hint for a sync state (exported for tests). */
 export function syncLabel(s: SyncLook): { text: string; hint: string } {
   const bpm = s.bpm !== null ? s.bpm.toFixed(1) : '…';
   if (s.bpm === null) return { text: 'SYNC', hint: 'Following an external MIDI clock: waiting for it (start the clock on the other device)' };

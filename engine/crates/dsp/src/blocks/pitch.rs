@@ -1,11 +1,3 @@
-//! Monophonic pitch detection with YIN (A. de Cheveigné and H. Kawahara,
-//! "YIN, a fundamental frequency estimator for speech and music", JASA
-//! 111(4), 2002): squared-difference function, cumulative-mean
-//! normalization, absolute threshold with a walk to the local minimum, and
-//! parabolic interpolation. It runs on an anti-aliased, decimated (~16 kHz)
-//! copy of the input every `hop` decimated samples. All buffers are
-//! allocated in `new`; `push` never allocates.
-
 use super::filters::{Svf, SvfMode, BUTTER_Q_4};
 
 pub struct Yin {
@@ -24,18 +16,13 @@ pub struct Yin {
     tau_max: usize,
     win: usize,
     sr_d: f32,
-    /// CMND threshold for a confident (voiced) estimate.
     pub threshold: f32,
-    /// Minimum RMS of the analysis window to attempt detection.
     pub gate: f32,
-    /// Last estimate in Hz (0 = unvoiced / silent).
     pub freq: f32,
-    /// CMND value at the chosen lag (0 = perfectly periodic).
     pub aperiodicity: f32,
 }
 
 impl Yin {
-    /// Detector for `fmin..fmax` Hz at input rate `sr`.
     pub fn new(sr: f32, fmin: f32, fmax: f32) -> Self {
         let decim = ((sr / 16000.0).floor() as usize).max(1);
         let sr_d = sr / decim as f32;
@@ -73,7 +60,6 @@ impl Yin {
         }
     }
 
-    /// Input samples between two estimates.
     pub fn hop_samples(&self) -> usize {
         self.hop * self.decim
     }
@@ -87,7 +73,6 @@ impl Yin {
         self.aperiodicity = 1.0;
     }
 
-    /// Feed one input sample. Returns true when a new estimate is ready.
     #[inline]
     pub fn push(&mut self, x: f32) -> bool {
         let x = if x.is_finite() { x } else { 0.0 };
@@ -130,7 +115,6 @@ impl Yin {
             self.aperiodicity = 1.0;
             return;
         }
-        // squared difference function
         let win = self.win;
         self.d[0] = 0.0;
         for tau in 1..=self.tau_max {
@@ -142,14 +126,12 @@ impl Yin {
             }
             self.d[tau] = s;
         }
-        // cumulative mean normalized difference
         let mut running = 0.0f32;
         self.d[0] = 1.0;
         for tau in 1..=self.tau_max {
             running += self.d[tau];
             self.d[tau] = if running > 1e-20 { self.d[tau] * tau as f32 / running } else { 1.0 };
         }
-        // first dip under the threshold, walked down to its local minimum
         let mut found = None;
         let mut tau = self.tau_min;
         while tau < self.tau_max {
@@ -200,7 +182,6 @@ mod tests {
                 let mut last = 0.0;
                 for i in 0..(sr * 0.3) as usize {
                     let t = i as f32 / sr;
-                    // a vocal-ish tone: strong 2nd/3rd harmonics
                     let x = 0.3 * (std::f32::consts::TAU * f * t).sin()
                         + 0.25 * (std::f32::consts::TAU * 2.0 * f * t).sin()
                         + 0.2 * (std::f32::consts::TAU * 3.0 * f * t + 0.4).sin();

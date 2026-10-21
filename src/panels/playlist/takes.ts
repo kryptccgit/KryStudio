@@ -1,8 +1,3 @@
-// Take lanes in the playlist (Wave 12.2b): the swipe-comp gesture and the
-// lane painting, kept out of controller.ts (which only forwards pointer
-// events, asks for the layout and calls the painters). Each finished swipe
-// is ONE takes.select command = one undo step.
-
 import type { Clip, Project } from '@shared/schema/project';
 import type { Take, TakeGroup } from '@shared/schema/takes';
 import { dispatch } from '../../doc/store';
@@ -22,7 +17,6 @@ export interface TakeLanesHost {
   tv(): TimeView;
   grid(): number;
   scale(): number;
-  /** Repaint content + overlay. */
   invalidate(): void;
 }
 
@@ -38,7 +32,6 @@ interface Swipe {
   alt: boolean;
 }
 
-/** The fake clip that draws a whole take in its lane (waveform / notes through paintClip). */
 export function takeClip(g: TakeGroup, t: Take): Clip {
   const base = { id: `__take_${t.id}`, trackId: g.trackId, start: t.start, length: Math.max(1, t.end - t.start), offset: Math.max(0, t.start - t.origin), mute: false, color: null };
   return t.source.kind === 'audio'
@@ -52,14 +45,12 @@ export class TakeLanes {
 
   constructor(private readonly h: TakeLanesHost) {}
 
-  /** Subscribe to the expand / collapse state (the controller rebuilds its lanes). */
   subscribe(fn: () => void): () => void {
     return useTakeLanes.subscribe((s, prev) => {
       if (s.open !== prev.open) fn();
     });
   }
 
-  /** The take groups changed since the last call (new groups open their lanes). */
   changed(p: Project): boolean {
     const prev = this.groupsRec;
     if (p.takeGroups === prev) return false;
@@ -70,7 +61,6 @@ export class TakeLanes {
     return true;
   }
 
-  /** Take-lane pixels under a track's clip row. */
   extra(p: Project, trackId: string, scale: number): number {
     if (!useTakeLanes.getState().open[trackId]) return 0;
     return takeLaneCount(p, trackId) * takeLaneH(scale);
@@ -80,12 +70,11 @@ export class TakeLanes {
     return takeLaneAt(this.h.lanes(), y + this.h.scrollY(), takeLaneH(this.h.scale()));
   }
 
-  /** Pointer down on the grid: true = it was on a take lane and is handled here. */
   down(e: PointerEvent, x: number, y: number): boolean {
     const hit = this.hit(y);
     const p = this.h.project();
-    if (!hit || !p || e.button === 1) return false; // middle button: the controller pans
-    if (e.button !== 0) return true; // right click on a lane: nothing to erase here
+    if (!hit || !p || e.button === 1) return false;
+    if (e.button !== 0) return true;
     const trackId = this.h.lanes().ids[hit.track];
     const tick = xToTick(this.h.tv(), x);
     const at = laneTakeAt(p, trackId, hit.lane, tick);
@@ -98,7 +87,6 @@ export class TakeLanes {
     return true;
   }
 
-  /** Pointer move: true = a swipe is running or the pointer is over a take lane (no clip hover). */
   move(x: number, y: number, alt: boolean): boolean {
     const s = this.swipe;
     if (s) {
@@ -120,7 +108,6 @@ export class TakeLanes {
     this.h.invalidate();
   }
 
-  /** Pointer up: commit the swipe. true = handled. */
   up(): boolean {
     const s = this.swipe;
     if (!s) return false;
@@ -137,9 +124,6 @@ export class TakeLanes {
     return true;
   }
 
-  // ── Painting ─────────────────────────────────────────────────────────
-
-  /** Content layer: every visible take lane (after the clips). */
   paint(ctx: CanvasRenderingContext2D, w: number, h: number, dpr: number): void {
     const p = this.h.project();
     if (!p?.takeGroups) return;
@@ -163,9 +147,7 @@ export class TakeLanes {
         ctx.fillRect(0, Math.round((y + lh) * dpr) / dpr - 1 / dpr, w, 1 / dpr);
         for (const { group, take } of laneTakes(p, trackId, k)) {
           const clip = takeClip(group, take);
-          // The whole take, dimmed …
           paintClip(ctx, p, clip, tv, y, lh, w, { ...base, selected: false, ghost: true, label: take.name });
-          // … and at full strength where the comp uses it, with an accent bar on top.
           for (const part of compPartsOf(group, take.id)) {
             const x0 = tickToX(tv, part.start);
             const x1 = tickToX(tv, part.end);
@@ -184,7 +166,6 @@ export class TakeLanes {
     }
   }
 
-  /** Overlay layer: the swipe preview. */
   paintOverlay(ctx: CanvasRenderingContext2D): void {
     const s = this.swipe;
     if (!s || !s.moved) return;
@@ -205,13 +186,11 @@ export class TakeLanes {
     ctx.fillStyle = rgba(C.pink, 0.95);
     ctx.fillRect(x0, y + 1, 1.5, lh - 2);
     ctx.fillRect(x1 - 1.5, y + 1, 1.5, lh - 2);
-    // The same range on the comp row above.
     ctx.fillStyle = rgba(C.pink, 0.12);
     ctx.fillRect(x0, l.tops[i] - this.h.scrollY(), x1 - x0, l.heights[i]);
   }
 }
 
-/** Header-column data for one track's lanes (TakeLaneHeaders). */
 export function laneHeaderInfo(p: Project, trackId: string): Array<{ label: string; inComp: boolean; takes: Array<{ groupId: string; takeId: string; pass: number }> }> {
   const n = takeLaneCount(p, trackId);
   const out: Array<{ label: string; inComp: boolean; takes: Array<{ groupId: string; takeId: string; pass: number }> }> = [];

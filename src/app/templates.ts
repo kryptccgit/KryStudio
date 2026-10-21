@@ -1,10 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// User project templates in the renderer (Wave 12.2b): the list (Home ▸
-// Projects, File ▸ New from template), Save as template…, rename, delete.
-// Files live in main (userData/templates, electron/project/templates.ts);
-// every action ends in a toast.
-// ──────────────────────────────────────────────────────────────────────
-
 import { create } from 'zustand';
 import { cleanTemplateName, findTemplate, type ProjectTemplate } from '@shared/templates';
 import type { ActionResult } from '@shared/types';
@@ -30,7 +23,6 @@ async function call<T extends ActionResult<unknown>>(fn: () => Promise<T>, what:
   }
 }
 
-/** Re-read the template list from main. */
 export async function refreshTemplates(): Promise<void> {
   const r = await call(() => window.krypt.project.templates(), 'Templates');
   if (r.ok) useTemplates.setState({ list: r.data ?? [], error: null });
@@ -38,7 +30,6 @@ export async function refreshTemplates(): Promise<void> {
 }
 
 let started = false;
-/** Load once (menus read the list synchronously). */
 export function ensureTemplates(): void {
   if (started) return;
   started = true;
@@ -50,7 +41,6 @@ const nameRule = (v: string): string | null => {
   return c.ok ? null : c.message;
 };
 
-/** File ▸ Save as template…: asks for a name (the project's by default). Same name = replace, after asking. */
 export async function saveAsTemplate(): Promise<boolean> {
   const status = useProjectStatus.getState().status;
   const suggested = status?.path ? status.name : getProject()?.meta.name && getProject().meta.name !== 'Untitled' ? getProject().meta.name : 'My template';
@@ -78,11 +68,10 @@ export async function saveAsTemplate(): Promise<boolean> {
   return true;
 }
 
-/** A new, unsaved project from a template, in a new tab (the browser mock replaces the project, asking first). */
 export async function newFromTemplate(t: Pick<ProjectTemplate, 'id' | 'name'>): Promise<boolean> {
   if (tabsAvailable()) {
     const ok = await newTab(t);
-    if (!ok) void refreshTemplates(); // a template deleted meanwhile drops out of the list
+    if (!ok) void refreshTemplates();
     return ok;
   }
   if (!(await confirmDiscard(`Start a new project from "${t.name}"`))) return false;

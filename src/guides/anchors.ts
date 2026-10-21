@@ -1,33 +1,17 @@
-// ──────────────────────────────────────────────────────────────────────
-// "Show me" anchors (research/14-sounds-and-guides.md §3). A guide writes
-// [[show:<anchor>|Label]]; clicking it opens the anchor's panel when it has
-// one, scrolls the element with data-guide="<anchor>" into view and
-// pulses a highlight ring around it. The UI puts the data-guide attributes
-// on the real elements; test/guides.test.ts checks that every anchor used
-// in an article is listed here and that every anchor here is set somewhere
-// in src/. Pure data: no React, no window.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { SingletonKind } from '../workspace/panels';
 
 export interface GuideAnchor {
-  /** Opened (wm.open) before the element is looked up. */
   panel?: SingletonKind;
-  /** What the element is, for the toast when it can't be shown ("Couldn't show the step grid: …"). */
   label: string;
-  /** What to do first when it isn't on screen ("open a pattern first"); a generic line otherwise. */
   missing?: string;
 }
 
 export const GUIDE_ANCHORS = {
-  // Title bar + transport
   'titlebar.file': { label: 'the File menu' },
   'titlebar.tools': { label: 'the Tools menu' },
   'titlebar.help': { label: 'the Help menu' },
-  // Tours (src/tours) point at these too
   'titlebar.home': { label: 'the Home button' },
   'titlebar.view': { label: 'the View menu' },
-  // Project tabs (research/19, src/app/tabs/TabStrip.tsx)
   'titlebar.tabs': { label: 'the project tabs' },
   'titlebar.newTab': { label: 'the new-tab button' },
   'transport.play': { label: 'the play button' },
@@ -37,16 +21,13 @@ export const GUIDE_ANCHORS = {
   'transport.timeSig': { label: 'the time signature box' },
   'transport.metronome': { label: 'the metronome button' },
   'transport.agent': { label: 'the AI button' },
-  // Channel Rack
   'channelRack.add': { panel: 'channelRack', label: 'the add-channel button' },
   'channelRack.steps': { panel: 'channelRack', label: 'the step grid', missing: 'add a channel or pick a pattern first' },
   'channelRack.swing': { panel: 'channelRack', label: 'the swing knob' },
   'channelRack.patterns': { panel: 'channelRack', label: 'the pattern picker' },
-  // Piano Roll
   'pianoRoll.tools': { panel: 'pianoRoll', label: 'the piano roll tools' },
   'pianoRoll.generate': { panel: 'pianoRoll', label: 'the Generate button' },
   'pianoRoll.scripts': { panel: 'pianoRoll', label: 'the Scripts button' },
-  // Tools ▸ Scripts… (src/panels/pianoRoll/scriptsDialog.tsx)
   'scripts.picker': { label: 'the script list', missing: 'open the Piano Roll and click the Scripts button first' },
   'scripts.params': { label: "the script's knobs", missing: 'open the Piano Roll and click the Scripts button first' },
   'scripts.variations': { label: 'the Variations', missing: 'open the Piano Roll and click the Scripts button first' },
@@ -54,14 +35,11 @@ export const GUIDE_ANCHORS = {
   'pianoRoll.scale': { panel: 'pianoRoll', label: 'the scale highlight' },
   'pianoRoll.snap': { panel: 'pianoRoll', label: 'the snap setting' },
   'pianoRoll.velocity': { panel: 'pianoRoll', label: 'the velocity lane', missing: 'pick a channel with notes first' },
-  // Playlist
   'playlist.tracks': { panel: 'playlist', label: 'the playlist tracks' },
   'playlist.markers': { panel: 'playlist', label: 'the marker bar' },
   'playlist.grid': { panel: 'playlist', label: 'the playlist lanes' },
   'playlist.takes': { panel: 'playlist', label: 'the take lanes button', missing: 'record a loop in song mode first: each loop pass becomes a take' },
-  // Home (Wave 12.2b): the user's project templates on Home ▸ Projects
   'home.templates': { label: 'your templates', missing: 'open Home ▸ Projects first (the house button in the title bar)' },
-  // Auto Mashup (research/18): the Home ▸ Audio Tools card, and the dialog (src/mashup; show.ts opens them first)
   'home.autoMashup': { label: 'the Auto Mashup card', missing: 'open Home ▸ Audio Tools first (the house button in the title bar)' },
   'mashup.songs': { label: 'the two song slots', missing: 'open Tools ▸ Auto Mashup… first' },
   'mashup.score': { label: 'the compatibility score', missing: 'open Tools ▸ Auto Mashup… first' },
@@ -70,15 +48,12 @@ export const GUIDE_ANCHORS = {
   'mashup.options': { label: 'the mashup options', missing: 'open Tools ▸ Auto Mashup… first' },
   'mashup.plan': { label: 'the plan preview', missing: 'open Tools ▸ Auto Mashup… first' },
   'mashup.build': { label: 'the Build button', missing: 'open Tools ▸ Auto Mashup… first' },
-  // Mixer
   'mixer.master': { panel: 'mixer', label: 'the master insert' },
   'mixer.fxSlots': { panel: 'mixer', label: 'the effect slots' },
   'mixer.chainPresets': { panel: 'mixer', label: 'the chain presets' },
-  // Auto Mix / Auto Master (research/20): the Mixer buttons, the Home ▸ Audio Tools card, and the dialog (src/automix; show.ts opens it first)
   'automix.open': { panel: 'mixer', label: 'the Auto Mix button' },
   'automix.master': { panel: 'mixer', label: 'the Auto Master button on the master strip' },
   'home.masterSong': { label: 'the Master a song card', missing: 'open Home ▸ Audio Tools first (the house button in the title bar)' },
-  // The Audio Tools card in Home's card grid (mastering, stems, Krypt Voice … live there)
   'home.audioTools': { label: 'the Audio Tools card', missing: 'open Home first: the house button in the title bar, or Ctrl+Shift+H' },
   'automix.modes': { label: 'the Auto Mix modes', missing: 'open Tools ▸ Auto Mix… first' },
   'automix.song': { label: 'step 1, Your song', missing: 'open Home ▸ Audio Tools ▸ Master a song… first' },
@@ -88,7 +63,6 @@ export const GUIDE_ANCHORS = {
   'automix.options': { label: 'the Auto Mix options', missing: 'open Tools ▸ Auto Mix… first' },
   'automix.run': { label: 'the Run button', missing: 'open Tools ▸ Auto Mix… first' },
   'automix.ab': { label: 'the Before / After switch', missing: 'run Auto Mix first: the switch is on the result' },
-  // Krypt Voice (research/21): the dialog (src/voice; show.ts opens it first), Sing my notes in the piano roll, Settings ▸ Voice, Home
   'home.kryptVoice': { label: 'the Krypt Voice card', missing: 'open Home ▸ Audio Tools first (the house button in the title bar)' },
   'voice.text': { label: 'the text box', missing: 'open Tools ▸ Krypt Voice… first' },
   'voice.voices': { label: 'the voice list', missing: 'open Tools ▸ Krypt Voice… first' },
@@ -100,23 +74,19 @@ export const GUIDE_ANCHORS = {
   'sing.add': { label: 'the Add to song button', missing: 'open the Piano Roll and click Sing my notes first' },
   'voice.record': { label: 'the consent line and reading passage', missing: 'open Settings ▸ Voice and click Record my voice… first' },
   'settings.voice': { panel: 'settings', label: 'the Voice settings' },
-  // Browser
   'browser.factory': { panel: 'browser', label: 'the factory sounds' },
   'browser.packs': { panel: 'browser', label: 'the sound pack sounds' },
   'browser.presets': { panel: 'browser', label: 'the presets' },
   'browser.similar': { panel: 'browser', label: 'the similar sounds list', missing: 'right-click a sound or a preset in the Browser and choose More like this first' },
-  // Agents, history, settings
   'agent.chat': { panel: 'agent', label: 'the AI chat' },
   'agent.connect': { panel: 'agent', label: 'the Connect tab' },
   'agent.status': { panel: 'agent', label: 'the connected AI apps' },
   'agent.apiKey': { panel: 'agent', label: 'the API key box', missing: 'it shows on the Chat tab until a key is saved' },
   'history.revertAgent': { panel: 'history', label: 'the "revert AI edits" button', missing: 'it appears once an AI agent has edited this project' },
   'settings.audio': { panel: 'settings', label: 'the audio settings' },
-  // Warp (Wave 12.2): in an Audio Clip channel's plugin window
   'warp.markers': { label: 'the warp markers on the waveform', missing: "open an audio clip's channel window first: click the clip's channel name in the Channel Rack" },
   'warp.mode': { label: 'the warp mode', missing: "open an audio clip's channel window first: click the clip's channel name in the Channel Rack" },
   'warp.auto': { label: 'the Auto-warp button', missing: "open an audio clip's channel window first: click the clip's channel name in the Channel Rack" },
-  // Session view (clip launcher)
   'session.grid': { panel: 'session', label: 'the clip slots', missing: 'add a playlist track and a scene first' },
   'session.scenes': { panel: 'session', label: 'the scene column' },
   'session.stopAll': { panel: 'session', label: 'the Stop all button' },
@@ -125,7 +95,6 @@ export const GUIDE_ANCHORS = {
   'session.quantize': { panel: 'session', label: 'the launch quantize setting' },
   'session.fromArrangement': { panel: 'session', label: 'the From arrangement button' },
   'session.gridController': { panel: 'session', label: 'the grid controller settings' },
-  // Racks (Wave 12.2): in a rack's plugin window
   'rack.macros': { label: 'the macro knobs', missing: 'open a rack first: right-click a channel ▸ Wrap in rack, then open its plugin window' },
   'rack.variations': { label: 'the variations', missing: 'open a rack first: right-click a channel ▸ Wrap in rack, then open its plugin window' },
   'rack.chains': { label: 'the chain list', missing: 'open a rack first: right-click a channel ▸ Wrap in rack, then open its plugin window' },

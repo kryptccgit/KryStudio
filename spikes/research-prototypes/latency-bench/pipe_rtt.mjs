@@ -1,4 +1,3 @@
-// Named-pipe round-trip benchmark: parent <-> child process (both Node).
 import net from 'node:net';
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';

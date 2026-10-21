@@ -1,10 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Mixer: master + inserts in insertOrder. Fader, pan, stereo separation,
-// mute/solo, canvas peak meters with hold. FL-style routing: select a strip
-// and every other strip shows a send toggle + level for "selected → this".
-// The selected insert's FX chain sits on the right.
-// ──────────────────────────────────────────────────────────────────────
-
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ArrowDownToLine, Plus, WandSparkles } from 'lucide-react';
@@ -32,7 +25,6 @@ const Strip = memo(function Strip({
   insertId: string;
   index: number;
   selected: boolean;
-  /** The selected insert (routing source), if not this one and not the master. */
   source: string | null;
   faderH: number;
   bank: MeterBank;
@@ -135,7 +127,6 @@ const Strip = memo(function Strip({
         </button>
       </div>
 
-      {/* FL-style routing from the selected strip into this one */}
       <div className="flex h-5 items-center gap-0.5">
         {source && (
           <>
@@ -191,7 +182,6 @@ export function Mixer() {
   return (
     <div className="flex h-full bg-[#0c0c12]">
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Toolbar: Auto Mix (src/automix) */}
         <div className="flex h-7 flex-shrink-0 items-center gap-2 border-b border-white/[0.06] bg-krypt-panel px-2">
           <button
             type="button"

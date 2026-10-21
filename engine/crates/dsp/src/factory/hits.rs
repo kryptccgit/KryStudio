@@ -1,20 +1,12 @@
-//! Wave 7b one-shots: impacts (transient on sample 0), sub drops that land
-//! on a named note (`rootNote` = where they end), and zaps / lasers / blips /
-//! glitches (mostly above 500 Hz).
-
 use super::drums::{clap, cymbal, kick, membrane, snare, Clap, Cym, Drum, Kick, Snare, CLAP, CRASH, DRUM, KICK, SNARE};
 use super::kit::*;
 use super::library::{spec, Spec};
 use super::synth::*;
 
-// ── Impacts ─────────────────────────────────────────────────────────────
-
-/// A falling sine body (`f0` → `f1` Hz with time constant `tau`), -60 dB at `t60`.
 fn boom(f0: f32, f1: f32, tau: f32, t60: f32) -> Vec<f32> {
     tone(ns(t60 + 0.05), 0.0, |t| f1 + (f0 - f1) * (-t / tau).exp(), |t| dec60(t, t60) * smooth01(t / 0.0015))
 }
 
-/// Short band-limited noise burst, decaying with time constant `tau`.
 fn burst(len: f32, tau: f32, lp_hz: f32, seed: u32) -> Vec<f32> {
     let mut nz = Noise::new(seed);
     let mut x: Vec<f32> = (0..ns(len)).map(|i| nz.white() * (-(i as f32) / (tau * SR)).exp()).collect();
@@ -58,8 +50,6 @@ fn clap_impact(seed: u32) -> Chans {
     reverb(&c, &rev(2.0, 0.9, 2.8).pre(15.0).low(250.0).damp(9000.0), 0.45, 2.0)
 }
 
-/// Low brass-like "braam": detuned saws at C1/C2/G2 driven hard, the low
-/// pass snapping open then closing over three seconds.
 fn braam(seed: u32) -> Chans {
     let n = ns(3.5);
     let len = 3.5;
@@ -131,10 +121,6 @@ fn hall_kick(seed: u32) -> Chans {
     out
 }
 
-// ── Sub drops (rootNote = the note they land on) ───────────────────────
-
-/// Sine (plus `harm` of a soft square) gliding from MIDI `n0` to `n1` over
-/// `glide` s along an ease-out curve, then holding; -60 dB at `len`.
 fn sub_to(n0: f32, n1: f32, glide: f32, len: f32, harm: f32, drv: f32, click: f32, seed: u32) -> Vec<f32> {
     let mut x = tone(ns(len + 0.05), harm, |t| hz(n1 + (n0 - n1) * (1.0 - (t / glide).min(1.0)).powi(2)), |t| smooth01(t / 0.002) * dec60(t, len));
     if drv > 0.0 {
@@ -149,10 +135,6 @@ fn sub_to(n0: f32, n1: f32, glide: f32, len: f32, harm: f32, drv: f32, click: f3
     x
 }
 
-// ── Zaps ────────────────────────────────────────────────────────────────
-
-/// Laser: a square / saw mix whose pitch moves exponentially from `f0` to
-/// `f1` over `len`, a resonant band pass tracking it, decaying.
 fn laser(f0: f32, f1: f32, len: f32, fm: f32, seed: u32) -> Vec<f32> {
     let n = ns(len);
     let mut nz = Noise::new(seed);
@@ -175,7 +157,6 @@ fn laser(f0: f32, f1: f32, len: f32, fm: f32, seed: u32) -> Vec<f32> {
     out
 }
 
-/// Ping-pong echo of a mono zap (stereo out).
 fn echo(x: &[f32], d_s: f32, fb: f32, taps: usize) -> Chans {
     let d = ns(d_s);
     let mut l = x.to_vec();
@@ -264,8 +245,6 @@ fn crush_stab(seed: u32) -> Chans {
     vec![x]
 }
 
-/// Tuning across an AM dial: a heterodyne whistle wandering, telephone-band
-/// static, and a station (a chord) fading in and out.
 fn radio_tune(seed: u32) -> Chans {
     let n = ns(1.4);
     let len = 1.4;
@@ -302,7 +281,6 @@ fn radio_tune(seed: u32) -> Chans {
     vec![x]
 }
 
-/// Electric spark: clustered crackle bursts over a mains-style buzz.
 fn spark(seed: u32) -> Chans {
     let n = ns(0.7);
     let mut out: Chans = Vec::new();
@@ -328,7 +306,6 @@ fn spark(seed: u32) -> Chans {
     out
 }
 
-/// Ray gun: a fast vibrato (30 Hz, fading) on a falling FM tone.
 fn ray_gun(seed: u32) -> Chans {
     let n = ns(0.55);
     let len = 0.55;
@@ -360,7 +337,6 @@ pub(crate) fn specs() -> Vec<Spec> {
     v.push(spec("fx/impact/crash-impact.wav", "Crash Impact", "impact", &["bright", "big", "wide", "hard"], &["edm", "house", "pop", "dnb", "dubstep", "tech-house"], || crash_impact(4061)));
     v.push(spec("fx/impact/hall-kick.wav", "Hall Kick Impact", "impact", &["big", "deep", "long", "wide"], &["edm", "techno", "house", "future-bass", "pop"], || hall_kick(4071)));
 
-    // sub drops: root = the note they land on
     let subs: [(&str, &str, f32, f32, f32, f32, f32, f32, f32, &[&'static str]); 6] = [
         ("drop-to-f1-long", "Sub Drop to F1 Long", 43.0, 29.0, 1.6, 3.5, 0.0, 0.0, 0.0, &["deep", "long", "clean", "mono"]),
         ("drop-to-g1-short", "Sub Drop to G1 Short", 45.0, 31.0, 0.35, 1.1, 0.0, 0.0, 0.0, &["deep", "short", "clean", "mono"]),
@@ -379,7 +355,6 @@ pub(crate) fn specs() -> Vec<Spec> {
         );
     }
 
-    // zaps
     let sci: &[&'static str] = &["edm", "dubstep", "dnb", "future-bass", "trap", "techno", "synthwave"];
     v.push(spec("fx/zap/laser-down.wav", "Laser Down", "zap", &["bright", "retro", "short"], sci, || echo(&laser(3200.0, 160.0, 0.28, 0.0, 4201), 0.09, 0.45, 3)).peak(-2.0));
     v.push(spec("fx/zap/laser-down-wide.wav", "Wide Laser Down", "zap", &["wide", "big", "aggressive"], sci, || echo(&laser(1600.0, 220.0, 0.45, 0.08, 4202), 0.14, 0.5, 4)).peak(-2.0));

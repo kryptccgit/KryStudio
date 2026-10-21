@@ -1,21 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Runtime client context (lightweight anti-rebrand, kryptguidelines §9).
-//
-// The strings a rebrander wants to strip (product name, Discord application
-// id, official URLs) are not stored as clean literals: they're XOR+base64
-// encoded and rebuilt at runtime. The SAME resolved context feeds the window
-// title, the startup log line, the presence module and the external-link
-// guard, so ripping it out degrades the app instead of cleanly deleting one
-// file.
-//
-// [PROTECTION] Soft integrity (§9.4): the decoded identity must match a
-// sealed fingerprint, and the host app name (package.json productName) must
-// match the embedded product name. On a mismatch nothing crashes and nothing
-// says "tamper": the context comes back degraded (generic name, no presence,
-// no official links) and every music feature keeps working.
-// Friction, not war. KRYPT_STUDIO_DEBUG=1 disables all of it (always intact).
-// ──────────────────────────────────────────────────────────────────────
-
 const K = 0x5a;
 
 function dec(b64: string): string {
@@ -38,9 +20,6 @@ const P = {
   h: 'Mi4uKilgdXUxKCMqLnQ5OXUuNTU2KXUpLi8+MzU=',
 };
 
-// [PROTECTION] Layout revision: the FNV-1a seal of the decoded payloads above
-// (joined with "|"). Doubles as the provenance watermark (§9.6). Re-seal when
-// a payload legitimately changes: fingerprint(Object.values(P).map(dec).join('|')).
 const LAYOUT_REV = [0xe85c, 0xaddb] as const;
 
 export interface ClientContext {
@@ -50,9 +29,7 @@ export interface ClientContext {
   toolsUrl: string;
   discordUrl: string;
   homeUrl: string;
-  /** False when the identity was tampered with: callers run degraded. */
   intact: boolean;
-  /** Harmless build watermark derived from the product name (§9.6). */
   mark: number;
 }
 
@@ -68,10 +45,6 @@ function fingerprint(s: string): number {
   return h;
 }
 
-/**
- * The host's app name (package.json productName), or null outside Electron
- * (unit tests import this module under plain Node, where there is no app).
- */
 function hostLabel(): string | null {
   try {
     if (!process.versions.electron) return null;
@@ -84,7 +57,6 @@ function hostLabel(): string | null {
   }
 }
 
-/** Resolve the decoded runtime context (memoized). */
 export function resolveClientContext(): ClientContext {
   if (cached) return cached;
   const v = { n: dec(P.n), c: dec(P.c), s: dec(P.s), t: dec(P.t), d: dec(P.d), h: dec(P.h) };
@@ -100,10 +72,6 @@ export function resolveClientContext(): ClientContext {
   return cached;
 }
 
-/**
- * True if `url` points at an official Krypt destination (site or community
- * invite). Used to drop official links in a degraded (rebranded) build.
- */
 export function isOfficialDestination(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase();

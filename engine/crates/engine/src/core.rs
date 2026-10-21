@@ -1,11 +1,3 @@
-//! The real-time core: transport, sequencer (event generation), automation,
-//! instruments, and the mixer graph. Shared verbatim by the live device
-//! callback, the null driver and the offline renderer.
-//!
-//! [RT] rules: nothing in `process_*` allocates, locks or blocks. Model
-//! changes arrive as prebuilt `Batch`es through an rtrb SPSC queue; replaced
-//! objects go back through the retire queue and are dropped off-thread.
-
 use crate::automation;
 use crate::program::*;
 use crate::time::{
@@ -17,22 +9,14 @@ use krypt_studio_dsp::{
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::*};
 use std::sync::Arc;
 
-// live input: MIDI input + recording hooks live in record_hooks.rs (a child
-// module so it can drive the sequencer). Call sites are marked `live input:`.
 #[path = "record_hooks.rs"]
 mod record_hooks;
 
-// launcher: the clip launcher's audio-thread hooks (launcher_hooks.rs, a child
-// module like record_hooks). Call sites are marked `launcher:`.
 #[path = "launcher_hooks.rs"]
 mod launcher_hooks;
 
-// midi clock: MIDI clock out + external sync hooks (clock_hooks.rs, a child
-// module like record_hooks). Call sites are marked `midi clock:`.
 #[path = "clock_hooks.rs"]
 mod clock_hooks;
-
-// ── Messages ─────────────────────────────────────────────────────────────
 
 pub enum Cmd {
     Batch(Box<Batch>),
@@ -45,7 +29,6 @@ pub enum Cmd {
     NoteOff { slot: u32, key: u8 },
     AuditionOff,
     Preview(Option<Box<Preview>>),
-    /// launcher: clip launcher commands (launcher.rs).
     Launcher(crate::launcher::LaunchCmd),
 }
 
@@ -57,14 +40,11 @@ pub enum Garbage {
     Preview(Box<Preview>),
 }
 
-/// Browser preview voice: plays a decoded file straight to the output.
 pub struct Preview {
     pub data: Arc<SampleData>,
     pub pos: f64,
     pub gain: f32,
 }
-
-// ── State published to the control / telemetry threads ───────────────────
 
 pub struct Shared {
     pub playing: AtomicBool,
@@ -79,25 +59,17 @@ pub struct Shared {
     pub faulted: AtomicBool,
     pub garbage_leaked: AtomicU32,
     pub events_dropped: AtomicU32,
-    /// Peak since last telemetry frame, f32 bits (positive floats order like u32).
     pub ins_peak: Vec<[AtomicU32; 2]>,
     pub ch_act: Vec<AtomicU32>,
-    /// Latency (samples) reported by each live effect after the last batch.
     pub fx_latency: Vec<AtomicU32>,
-    /// meters: per-slot gain reduction + watched-slot taps (meters.rs, docs/ENGINE_PROTOCOL.md §15).
     pub meters: crate::meters::MeterShared,
-    /// Latency (samples) reported by each live instrument after the last batch (channel PDC).
     pub ch_latency: Vec<AtomicU32>,
-    /// Device stats.
     pub buffer_frames: AtomicU32,
     pub out_latency_us: AtomicU32,
     pub sample_rate: AtomicU32,
     pub callbacks: AtomicU64,
-    /// live input: MIDI / recording state shared with the input threads (record.rs).
     pub live: Arc<crate::record::LiveShared>,
-    /// launcher: clip launcher state for telemetry + the launch-record ring.
     pub launch: crate::launcher::LaunchShared,
-    /// midi clock: clock-out / sync state and rings (clock.rs).
     pub clock: Arc<crate::clock::ClockShared>,
 }
 
@@ -129,7 +101,7 @@ impl Shared {
             callbacks: AtomicU64::new(0),
             live: Arc::new(crate::record::LiveShared::new()),
             launch: crate::launcher::LaunchShared::new(),
-            clock: crate::clock::ClockShared::new(), // midi clock
+            clock: crate::clock::ClockShared::new(),
         }
     }
 }
@@ -139,8 +111,6 @@ impl Default for Shared {
         Self::new()
     }
 }
-
-// ── Runtime state ────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 struct ClipEnv {
@@ -172,11 +142,8 @@ struct ChanRt {
     gr: f32,
     clip: Option<ClipEnv>,
     kick: bool,
-    /// Jump straight to the target gain (no ramp) on the next sub-block.
     fresh: bool,
-    /// Restart this channel's audio clips at the playhead (Batch::rechase).
     rechase: bool,
-    /// Instrument PDC: frames still to flush out of the channel's delay line after its instrument went idle.
     pdc_tail: u32,
 }
 
@@ -206,7 +173,6 @@ struct InsRt {
     gl: f32,
     gr: f32,
     fresh: bool,
-    /// Frames the insert has been silent in and out (its FX chain sleeps past InsertProg::quiet_frames).
     quiet: u32,
 }
 
@@ -232,7 +198,6 @@ struct PendingOff {
     slot: u32,
     key: u8,
     tick: f64,
-    /// launcher: the playlist track slot that played it (| LAUNCH_OWNER for launch clips; NONE = pattern mode).
     owner: u32,
 }
 
@@ -266,7 +231,6 @@ struct Click {
     remaining: u32,
     total: u32,
     amp: f32,
-    /// Offset in the current sub-block where a new click starts (None = continue).
     start: Option<usize>,
     pending_accent: bool,
 }
@@ -287,26 +251,21 @@ pub struct Core {
     effects: Vec<Option<Box<dyn Effect>>>,
     chan_rt: Vec<ChanRt>,
     ins_rt: Vec<InsRt>,
-    // Transport
     playing: bool,
     pos: f64,
-    /// Tick from which the next event window starts.
     gen_cursor: f64,
     cur_pattern: u32,
     pending_pattern: u32,
     sec: f64,
     need_chase: bool,
-    /// Some ChanRt::rechase flag is set.
     pending_rechase: bool,
     played_ticks: f64,
-    // Render control
     limit: Option<f64>,
     finished: bool,
     finished_at: Option<u64>,
     frame_counter: u64,
     render_mode: bool,
     mode_override: Option<bool>,
-    // Scratch
     pending_offs: Vec<PendingOff>,
     events: Vec<Ev>,
     seq: u32,
@@ -320,13 +279,9 @@ pub struct Core {
     sc_l: [f32; SUB],
     sc_r: [f32; SUB],
     master_gain: f32,
-    /// Set if a plugin panicked inside process(): output silence until reset.
     pub faulted: bool,
-    /// live input: MIDI input / recording state (record.rs; attached by the live engine only).
     pub live: crate::record::LiveRt,
-    /// launcher: clip launcher state machine (launcher.rs / launcher_hooks.rs).
     launch: crate::launcher::LaunchRt,
-    /// midi clock: clock out + sync follower (clock.rs; attached by the live engine only).
     pub clock: crate::clock::ClockRt,
 }
 
@@ -338,7 +293,7 @@ impl Core {
         garbage_tx: Option<rtrb::Producer<Garbage>>,
         spec_tx: Option<rtrb::Producer<f32>>,
     ) -> Self {
-        let launch = crate::launcher::LaunchRt::new(shared.launch.take_rec_tx()); // launcher
+        let launch = crate::launcher::LaunchRt::new(shared.launch.take_rec_tx());
         Self {
             sr,
             cmd_rx,
@@ -381,14 +336,10 @@ impl Core {
             faulted: false,
             live: crate::record::LiveRt::new(Arc::new(crate::record::LiveShared::new())),
             launch,
-            clock: crate::clock::ClockRt::detached(), // midi clock
+            clock: crate::clock::ClockRt::detached(),
         }
     }
 
-    // ── Non-RT maintenance ───────────────────────────────────────────────
-
-    /// Re-prepare every plugin for a new device rate (NOT real-time safe;
-    /// call with the core borrowed from a non-RT thread).
     pub fn set_sample_rate(&mut self, sr: f32) {
         if (sr - self.sr).abs() < 0.5 {
             return;
@@ -420,7 +371,6 @@ impl Core {
         }
     }
 
-    /// Render: configure the transport for an offline bounce.
     pub fn start_render(
         &mut self,
         song_mode: bool,
@@ -448,7 +398,6 @@ impl Core {
         self.finished
     }
 
-    /// Render: absolute frame index at which the scope ended.
     pub fn finished_at(&self) -> Option<u64> {
         self.finished_at
     }
@@ -461,24 +410,19 @@ impl Core {
         self.pos
     }
 
-    /// Apply a batch directly (offline render: no queue).
     pub fn apply_batch_now(&mut self, b: Box<Batch>) {
         self.apply_batch(b);
     }
 
-    /// Clear the faulted state (after loadProject rebuilt everything).
     pub fn clear_fault(&mut self) {
         self.faulted = false;
         self.shared.faulted.store(false, Release);
     }
 
-    // ── RT entry points ──────────────────────────────────────────────────
-
-    /// [RT] Fill an interleaved device buffer.
     pub fn process_interleaved(&mut self, out: &mut [f32], channels: usize) {
         let channels = channels.max(1);
-        self.live_block(out.len() / channels); // live input: stamp the block, pull MIDI
-        self.clock_block(out.len() / channels); // midi clock: stamp the block, follow the sync input
+        self.live_block(out.len() / channels);
+        self.clock_block(out.len() / channels);
         self.drain_commands();
         let frames = out.len() / channels;
         let mut done = 0;
@@ -506,10 +450,9 @@ impl Core {
         self.publish();
     }
 
-    /// [RT] Fill planar stereo buffers (offline render, null driver).
     pub fn process_stereo(&mut self, l: &mut [f32], r: &mut [f32]) {
-        self.live_block(l.len().min(r.len())); // live input: stamp the block, pull MIDI
-        self.clock_block(l.len().min(r.len())); // midi clock
+        self.live_block(l.len().min(r.len()));
+        self.clock_block(l.len().min(r.len()));
         self.drain_commands();
         let frames = l.len().min(r.len());
         let mut done = 0;
@@ -523,15 +466,10 @@ impl Core {
         self.publish();
     }
 
-    /// Offline stem render (render.rs; NOT real-time: the sink may allocate or
-    /// write files). Exactly `process_stereo` (same sub-blocks, same output),
-    /// and after every sub-block hands `sink(i, l, r)` the post-fader output of
-    /// the insert in `taps[i]` (after its effects, volume and pan, before it
-    /// is summed into its targets).
     pub fn process_stereo_tapped(&mut self, l: &mut [f32], r: &mut [f32], taps: &[u32], sink: &mut dyn FnMut(usize, &[f32], &[f32])) {
         const ZERO: [f32; SUB] = [0.0; SUB];
         self.live_block(l.len().min(r.len()));
-        self.clock_block(l.len().min(r.len())); // midi clock
+        self.clock_block(l.len().min(r.len()));
         self.drain_commands();
         let frames = l.len().min(r.len());
         let mut done = 0;
@@ -551,10 +489,6 @@ impl Core {
         self.publish();
     }
 
-    /// Offline stem render: for every insert slot, the frames by which its
-    /// post-fader output leads the master output (plugin delay compensation:
-    /// route delays + the master chain's own latency). Delaying a stem by this
-    /// lines it up with the master mix. Same arithmetic as compile.rs PDC.
     pub fn stem_alignment(&self) -> Vec<(u32, usize)> {
         let mut arrive = vec![0usize; MAX_INSERTS];
         let mut out = vec![0usize; MAX_INSERTS];
@@ -570,7 +504,6 @@ impl Core {
                 .filter_map(|f| self.effects.get(f.slot as usize).and_then(|e| e.as_ref()))
                 .map(|e| e.latency())
                 .sum();
-            // Direct channel inputs arrive late by their instruments' latency (instrument PDC).
             arrive[u] = arrive[u].max(ins.in_lat);
             out[u] = arrive[u] + lat;
             for route in ins.routes.iter() {
@@ -599,7 +532,7 @@ impl Core {
         s.song_mode.store(song, Relaxed);
         s.pattern_slot
             .store(if song { NONE } else { self.cur_pattern }, Relaxed);
-        self.launch_publish(); // launcher: telemetry
+        self.launch_publish();
     }
 
     #[inline]
@@ -612,12 +545,11 @@ impl Core {
         match self.garbage_tx.as_mut() {
             Some(tx) => {
                 if let Err(rtrb::PushError::Full(g)) = tx.push(g) {
-                    // Never free on the audio thread: leak instead (practically unreachable).
                     std::mem::forget(g);
                     self.shared.garbage_leaked.fetch_add(1, Relaxed);
                 }
             }
-            None => drop(g), // offline core: not real-time
+            None => drop(g),
         }
     }
 
@@ -673,7 +605,7 @@ impl Core {
                     self.retire(Garbage::Preview(old));
                 }
             }
-            Cmd::Launcher(c) => self.launch_cmd(c), // launcher
+            Cmd::Launcher(c) => self.launch_cmd(c),
         }
     }
 
@@ -701,14 +633,14 @@ impl Core {
 
     fn play(&mut self) {
         if self.playing || self.live_intercept_play() {
-            return; // live input: record armed with a count-in → count in first
+            return;
         }
         self.playing = true;
         self.sec = 0.0;
         self.played_ticks = 0.0;
         self.need_chase = true;
         self.gen_cursor = self.pos;
-        self.launch_play_started(); // launcher: transport start count, pattern-mode grid
+        self.launch_play_started();
         if !self.song_mode() {
             if self.pending_pattern != NONE {
                 self.cur_pattern = self.pending_pattern;
@@ -718,13 +650,13 @@ impl Core {
                 self.cur_pattern = self.program.transport.active_pattern;
             }
         }
-        self.clock_started(); // midi clock: Start / SPP + Continue
+        self.clock_started();
     }
 
     fn stop(&mut self) {
-        self.clock_stopped(); // midi clock: Stop
-        self.live_transport_stopped(); // live input: end the take / cancel the count-in
-        self.launch_transport_stopped(); // launcher: clips stop, launch recording ends
+        self.clock_stopped();
+        self.live_transport_stopped();
+        self.launch_transport_stopped();
         self.flush_offs(0);
         for inst in self.instruments.iter_mut().flatten() {
             inst.all_off();
@@ -766,12 +698,12 @@ impl Core {
     }
 
     fn pause(&mut self) {
-        self.live_transport_stopped(); // live input: end the take / cancel the count-in
-        self.launch_paused(); // launcher: launch recording ends
+        self.live_transport_stopped();
+        self.launch_paused();
         if !self.playing {
             return;
         }
-        self.clock_stopped(); // midi clock: Stop
+        self.clock_stopped();
         self.flush_offs(0);
         self.playing = false;
         self.click.remaining = 0;
@@ -788,7 +720,7 @@ impl Core {
         for c in self.program.auto_clips.iter_mut() {
             c.active = false;
         }
-        self.clock_located(); // midi clock: Song Position Pointer
+        self.clock_located();
     }
 
     fn flush_offs(&mut self, offset: usize) {
@@ -798,8 +730,6 @@ impl Core {
             }
         }
     }
-
-    // ── Batch application ────────────────────────────────────────────────
 
     fn apply_batch(&mut self, mut b: Box<Batch>) {
         let mut installed_fx = false;
@@ -867,7 +797,6 @@ impl Core {
             self.retire(Garbage::Program(old));
         }
         if installed_inst || !b.inst_params.is_empty() {
-            // Instrument latency (instrument racks): compile.rs refresh_latencies → channel PDC.
             for ch in self.program.channels.iter() {
                 if let Some(Some(i)) = self.instruments.get(ch.slot as usize) {
                     self.shared.ch_latency[ch.slot as usize].store(i.latency() as u32, Relaxed);
@@ -887,14 +816,11 @@ impl Core {
             self.stop();
             self.clear_fault();
         }
-        self.launch_applied(b.reset); // launcher: drop state of vanished clips / tracks
+        self.launch_applied(b.reset);
         self.shared.applied_version.store(b.version, Release);
         self.retire(Garbage::Batch(b));
     }
 
-    /// Automation of params inside racks across a program swap (Wave 12.2b): release
-    /// the overrides of targets that left the program (the macro / document value
-    /// takes over again), and re-send the carried ones (the rack may be new).
     fn rack_auto_swap(&mut self, old: &Program) {
         for (j, ot) in old.targets.iter().enumerate() {
             if !is_rack_target(ot.kind) || ot.held.is_none() {
@@ -913,7 +839,6 @@ impl Core {
         }
     }
 
-    /// [RT] Set (or with NaN release) the automation override of a param inside a rack.
     fn write_rack(&mut self, kind: TargetKind, v: f32) {
         match kind {
             TargetKind::RackInst { ch_slot, target } => {
@@ -930,7 +855,6 @@ impl Core {
         }
     }
 
-    /// Carry held automation values and PDC delay contents into the new program.
     fn carry_over(&mut self, new: &mut Program) {
         let old = &mut self.program;
         for i in 0..new.targets.len() {
@@ -947,7 +871,6 @@ impl Core {
                 }
             }
         }
-        // Instrument PDC lines: keep contents when the channel keeps the same delay.
         for nc in new.channels.iter_mut() {
             let Some(nd) = nc.pdc.as_mut() else { continue };
             if let Some(od) = old.channels.iter_mut().find(|o| o.slot == nc.slot).and_then(|o| o.pdc.as_mut()) {
@@ -956,7 +879,6 @@ impl Core {
                 }
             }
         }
-        // PDC delay lines: keep contents when the same edge keeps the same delay.
         for ni in new.inserts.iter_mut() {
             let has_delay = ni.chan_delay.is_some() || ni.routes.iter().any(|r| r.delay.is_some());
             if !has_delay {
@@ -987,7 +909,6 @@ impl Core {
                 }
             }
         }
-        // Keep "active" flags of automation clips that still exist at the same place.
         for nc in new.auto_clips.iter_mut() {
             if let Some(oc) = old
                 .auto_clips
@@ -999,7 +920,6 @@ impl Core {
         }
     }
 
-    /// New channels / inserts start at their target gain (no fade-in ramp).
     fn mark_fresh(&mut self, old: &Program) {
         for ch in self.program.channels.iter() {
             if old.channel(ch.slot).is_none() {
@@ -1021,7 +941,6 @@ impl Core {
             return;
         }
         if old_song != new_song {
-            // Mode switch: restart from the top of the new mode.
             self.flush_offs(0);
             self.pos = 0.0;
             self.gen_cursor = self.pos;
@@ -1035,7 +954,6 @@ impl Core {
             if self.playing {
                 if active != self.cur_pattern {
                     if self.program.pattern(self.cur_pattern).is_none() {
-                        // Current pattern vanished: switch now.
                         self.flush_offs(0);
                         self.cur_pattern = active;
                         self.pos = 0.0;
@@ -1051,15 +969,12 @@ impl Core {
                 self.pending_pattern = NONE;
             }
         }
-        // Channels that disappeared: drop clip envelopes.
         for ch in old.channels.iter() {
             if self.program.channel(ch.slot).is_none() {
                 self.chan_rt[ch.slot as usize].clip = None;
             }
         }
     }
-
-    // ── One sub-block (≤ SUB frames) ─────────────────────────────────────
 
     fn run_sub(&mut self, n: usize) {
         if self.faulted {
@@ -1082,14 +997,14 @@ impl Core {
         let beat_pos = self.pos / PPQ;
         if self.playing {
             self.eval_automation();
-            self.clock_pre_advance(); // midi clock: external tempo + phase loop
+            self.clock_pre_advance();
             let bpm = self.program.transport.bpm.clamp(10.0, 999.0);
             let tpf = ticks_per_frame(bpm, self.sr as f64);
             self.advance(n, tpf);
             self.sec += n as f64 / self.sr as f64;
         }
-        self.clock_sub(n); // midi clock: pulses of this sub-block
-        self.live_sub(n); // live input: count-in, take start/end, MIDI notes, monitor
+        self.clock_sub(n);
+        self.live_sub(n);
         self.dispatch_events();
 
         let ctx = ProcessContext {
@@ -1108,8 +1023,6 @@ impl Core {
         self.frame_counter += n as u64;
     }
 
-    // ── Sequencer ────────────────────────────────────────────────────────
-
     fn loop_bounds(&self) -> (f64, f64) {
         let t = &self.program.transport;
         let bar = bar_ticks(t.num, t.den);
@@ -1120,7 +1033,7 @@ impl Core {
             if t.loop_on && t.loop_end > t.loop_start + 1.0 {
                 (t.loop_start.max(0.0), t.loop_end)
             } else if self.live_extends_song() || self.launch_extends_song() {
-                (0.0, f64::INFINITY) // live input / launch recording: runs past the last clip
+                (0.0, f64::INFINITY)
             } else {
                 (0.0, self.program.song_end.max(bar))
             }
@@ -1146,10 +1059,6 @@ impl Core {
     }
 
     fn advance(&mut self, n: usize, tpf: f64) {
-        // Events map to the NEAREST frame: frame k of this sub-block covers
-        // ticks [base + (k-0.5)·tpf, base + (k+0.5)·tpf). Windows therefore
-        // end half a frame early (except at loop/limit boundaries), which
-        // makes onsets on exact frame boundaries immune to FP drift.
         let half = 0.5 * tpf;
         let mut f = 0usize;
         let mut guard = 0;
@@ -1162,7 +1071,7 @@ impl Core {
             }
             if self.need_chase {
                 self.need_chase = false;
-                self.clear_rechase(); // a full chase covers every channel
+                self.clear_rechase();
                 let at = self.gen_cursor;
                 self.chase(at, f);
             } else if self.pending_rechase {
@@ -1172,7 +1081,7 @@ impl Core {
             let frames_left = n - f;
             let start = self.pos;
             let mut seg_end = start + frames_left as f64 * tpf;
-            let mut boundary = 0u8; // 0 none, 1 wrap, 2 limit
+            let mut boundary = 0u8;
             if seg_end >= hi {
                 seg_end = hi;
                 boundary = 1;
@@ -1195,7 +1104,7 @@ impl Core {
                 seg_end
             };
             let from = self.gen_cursor.min(win_end);
-            self.launch_gen(from, win_end, start, f, n, tpf); // launcher: gen_events split at launch transitions
+            self.launch_gen(from, win_end, start, f, n, tpf);
             self.gen_cursor = win_end;
             let covered = seg_frames as f64 * tpf;
             self.played_ticks += if boundary == 0 {
@@ -1210,7 +1119,6 @@ impl Core {
                     break;
                 }
                 2 => {
-                    // Render end: stop sequencing, let tails ring.
                     self.pos = seg_end;
                     self.flush_offs(f.min(n - 1));
                     self.playing = false;
@@ -1242,7 +1150,6 @@ impl Core {
         true
     }
 
-    /// Emit a note-on at song/pattern tick `t` and register its note-off at `off_tick`.
     #[inline]
     fn emit_note(
         &mut self,
@@ -1279,7 +1186,6 @@ impl Core {
         }
     }
 
-    /// Generate events for ticks in [from, to). `base` is the tick at frame `f`.
     fn gen_events(&mut self, from: f64, to: f64, base: f64, f: usize, n: usize, tpf: f64) {
         if to <= from {
             return;
@@ -1289,7 +1195,6 @@ impl Core {
             x.clamp(f as f64, (n - 1) as f64) as u32
         };
 
-        // Note-offs due in this window.
         let mut i = 0;
         while i < self.pending_offs.len() {
             let o = self.pending_offs[i];
@@ -1310,7 +1215,6 @@ impl Core {
 
         let swing = self.program.transport.swing;
         if self.song_mode() {
-            // Pattern clips.
             let pc_count = self.program.pattern_clips.len();
             let lo_start = from - self.program.max_pattern_clip_len;
             let mut ci = self
@@ -1324,7 +1228,7 @@ impl Core {
                     break;
                 }
                 if clip.end <= from || self.launch_silenced(clip.track) {
-                    continue; // launcher: an overridden track's arrangement is silent
+                    continue;
                 }
                 let wa = from.max(clip.start);
                 let wb = to.min(clip.end);
@@ -1362,7 +1266,6 @@ impl Core {
                         if note.tick >= lb {
                             break;
                         }
-                        // Notes past the pattern end don't loop.
                         if note.tick >= len {
                             break;
                         }
@@ -1399,7 +1302,6 @@ impl Core {
                     k += 1;
                 }
             }
-            // Audio clips starting in the window.
             let ac_count = self.program.audio_clips.len();
             let mut ai = self.program.audio_clips.partition_point(|c| c.start < from);
             while ai < ac_count {
@@ -1411,7 +1313,6 @@ impl Core {
                 self.trigger_audio_clip(&clip, clip.start, off(clip.start));
             }
         } else {
-            // Pattern mode.
             let slot = self.cur_pattern;
             let (len, count) = match self.program.pattern(slot) {
                 Some(p) => (p.len, p.notes.len()),
@@ -1462,7 +1363,6 @@ impl Core {
             }
         }
 
-        // Metronome.
         if self.program.transport.metronome {
             let beat = beat_ticks(self.program.transport.den);
             let bar = bar_ticks(self.program.transport.num, self.program.transport.den);
@@ -1478,7 +1378,7 @@ impl Core {
 
     fn trigger_audio_clip(&mut self, clip: &AudioClipProg, at_tick: f64, offset: u32) {
         if self.launch_silenced(clip.track) {
-            return; // launcher: an overridden track's arrangement is silent
+            return;
         }
         let Some(ch) = self.program.channel(clip.ch_slot) else {
             return;
@@ -1502,9 +1402,8 @@ impl Core {
         self.emit_note(offset, clip.ch_slot, clip.key, pitch, 1.0, extras, clip.end, clip.track);
     }
 
-    /// Start audio clips that span the play position (mid-clip start).
     fn chase(&mut self, at: f64, f: usize) {
-        self.launch_chase(at, f); // launcher: audio launch clips resume mid-pass
+        self.launch_chase(at, f);
         if !self.song_mode() {
             return;
         }
@@ -1526,8 +1425,6 @@ impl Core {
         }
     }
 
-    /// Restart the audio clips spanning `at` on channels flagged by a batch
-    /// (their instrument was just re-created with new audio), then clear the flags.
     fn rechase(&mut self, at: f64, f: usize) {
         if self.song_mode() {
             let lo_start = at - self.program.max_audio_clip_len;
@@ -1666,8 +1563,6 @@ impl Core {
         self.events.clear();
     }
 
-    // ── Channels ─────────────────────────────────────────────────────────
-
     fn process_channels(&mut self, n: usize, ctx: &ProcessContext) {
         let tick_a = self.pos;
         let playing = self.playing;
@@ -1677,7 +1572,6 @@ impl Core {
                 (c.slot as usize, c.insert_slot, c.volume, c.pan)
             };
             let rt = &mut self.chan_rt[slot];
-            // Target gains: volume × equal-power pan (0 dB at centre) × audio-clip envelope.
             let theta = (pan.clamp(-1.0, 1.0) + 1.0) * std::f32::consts::FRAC_PI_4;
             let mut tl = vol * theta.cos().max(0.0) * std::f32::consts::SQRT_2;
             let mut tr = vol * theta.sin().max(0.0) * std::f32::consts::SQRT_2;
@@ -1692,11 +1586,8 @@ impl Core {
                 continue;
             };
             let active = rt.kick || inst.is_active();
-            // Instrument PDC (a more latent instrument shares the insert): a delayed channel
-            // keeps running until its delay line has played out.
             let pdc = self.program.channels[ci].pdc.as_mut();
             if !active && !(pdc.is_some() && rt.pdc_tail > 0) {
-                // Silent: no processing, and no gain ramp when it wakes up.
                 rt.gl = tl;
                 rt.gr = tr;
                 rt.fresh = false;
@@ -1713,7 +1604,6 @@ impl Core {
                 rt.pdc_tail = if active { d.len() as u32 } else { rt.pdc_tail.saturating_sub(n as u32) };
             }
 
-            // Activity LED: pre-fader peak.
             let mut pk = 0f32;
             for i in 0..n {
                 pk = pk.max(rt.l[i].abs()).max(rt.r[i].abs());
@@ -1745,11 +1635,8 @@ impl Core {
         }
     }
 
-    // ── Mixer ────────────────────────────────────────────────────────────
-
     fn process_insert(&mut self, idx: usize, n: usize, ctx: &ProcessContext) {
         let slot = self.program.inserts[idx].slot as usize;
-        // Input = (delayed) direct channel sum + routed inserts.
         {
             let ins = &mut self.program.inserts[idx];
             let rt = &mut self.ins_rt[slot];
@@ -1761,9 +1648,6 @@ impl Core {
                 rt.out_r[i] = rt.ch_r[i] + rt.in_r[i];
             }
         }
-        // FX chain. A chain that can sleep skips its effects while the insert is
-        // silent and its tails have died out (−140 dBFS for quiet_frames), and wakes
-        // on the first non-silent input sample: idle parts cost nothing.
         let quiet_need = self.program.inserts[idx].quiet_frames;
         let in_silent = quiet_need > 0 && {
             let rt = &self.ins_rt[slot];
@@ -1773,7 +1657,6 @@ impl Core {
             let rt = &mut self.ins_rt[slot];
             rt.out_l[..n].fill(0.0);
             rt.out_r[..n].fill(0.0);
-            // meters: watched slots of a sleeping chain show silence
             for fx in self.program.inserts[idx].fx.iter() {
                 self.shared.meters.tap(fx.slot, None, n);
             }
@@ -1789,7 +1672,7 @@ impl Core {
                     )
                 };
                 if !enabled || mix <= 0.0 {
-                    let rt = &self.ins_rt[slot]; // meters: a bypassed slot passes its input on
+                    let rt = &self.ins_rt[slot];
                     self.shared.meters.tap(fx_slot as u32, Some((&rt.out_l[..n], &rt.out_r[..n])), n);
                     continue;
                 }
@@ -1807,7 +1690,6 @@ impl Core {
                 if mix < 1.0 {
                     self.dry_l[..n].copy_from_slice(&rt.out_l[..n]);
                     self.dry_r[..n].copy_from_slice(&rt.out_r[..n]);
-                    // a latent effect's wet signal arrives late: delay the dry copy to match (no comb filtering)
                     effect.align_dry([&mut self.dry_l[..n], &mut self.dry_r[..n]]);
                 }
                 let side = if has_sc {
@@ -1823,7 +1705,6 @@ impl Core {
                         rt.out_r[i] = self.dry_r[i] * d + rt.out_r[i] * mix;
                     }
                 }
-                // meters: gain reduction + the watched-slot tap (lock-free, no allocation)
                 self.shared.meters.publish_gr(fx_slot, effect.meter());
                 self.shared.meters.tap(fx_slot as u32, Some((&rt.out_l[..n], &rt.out_r[..n])), n);
             }
@@ -1834,7 +1715,6 @@ impl Core {
                 0
             };
         }
-        // Post-FX: stereo separation, phase, swap, pan (balance), volume, mute.
         let (sep, phase, swap, pan, vol, mute, is_master) = {
             let p = &self.program.inserts[idx];
             (p.sep, p.phase, p.swap, p.pan, p.volume, p.mute, p.is_master)
@@ -1902,7 +1782,6 @@ impl Core {
             }
             return;
         }
-        // Sends / routes.
         for k in 0..self.program.inserts[idx].routes.len() {
             let route = &mut self.program.inserts[idx].routes[k];
             let target = route.target_slot as usize;
@@ -1937,7 +1816,6 @@ impl Core {
     }
 
     fn finish_master(&mut self, n: usize) {
-        // Spectrum tap (post master insert, pre masterVolume).
         if let Some(tx) = self.spec_tx.as_mut() {
             if tx.slots() >= n {
                 for i in 0..n {
@@ -1945,9 +1823,8 @@ impl Core {
                 }
             }
         }
-        // Metronome straight to the output.
         if !self.playing && !self.live_counting_in() {
-            self.click.start = None; // live input: the count-in clicks while stopped
+            self.click.start = None;
         }
         if let Some(start) = self.click.start.take() {
             let accent = self.click.pending_accent;
@@ -1961,7 +1838,6 @@ impl Core {
         } else if self.click.remaining > 0 {
             self.render_click(0, n);
         }
-        // Browser preview.
         let mut done = false;
         if let Some(p) = self.preview.as_mut() {
             let data = &p.data;
@@ -1997,7 +1873,6 @@ impl Core {
                 self.retire(Garbage::Preview(p));
             }
         }
-        // Master volume (ramped) + NaN guard.
         let target = self.program.transport.master_volume.max(0.0);
         let g0 = self.master_gain;
         let inv = 1.0 / n as f32;
@@ -2036,7 +1911,6 @@ impl AutoClipProg {
     }
 }
 
-/// Write a built-in (non-plugin) automated value into the program.
 fn write_builtin(p: &mut Program, ti: usize, v: f32) {
     let Some(t) = p.targets.get(ti) else { return };
     match t.kind {
@@ -2092,7 +1966,6 @@ fn is_rack_target(k: TargetKind) -> bool {
     matches!(k, TargetKind::RackInst { .. } | TargetKind::RackFx { .. })
 }
 
-/// Below −140 dBFS: digital silence for the FX-sleep check.
 #[inline]
 fn is_silent(x: &[f32]) -> bool {
     x.iter().all(|v| v.abs() < 1e-7)

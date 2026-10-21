@@ -1,23 +1,11 @@
-// On-device ML models known to Krypt Studio (Model Manager).
-//
-// Licences follow research/04 §9: bundle only permissive code+weights;
-// everything large is an opt-in download with its licence shown and every
-// file SHA-256-verified before use. Bundled models live in
-// resources/models/<id>/ (copied by scripts/engine-build.mjs); downloaded
-// ones in userData/models/<id>/.
-
 import type { StemName } from './protocol';
 
 export type ModelTask = 'stems' | 'transcribe' | 'beats' | 'tts';
 
 export interface ModelFile {
-  /** File name inside the model directory. */
   name: string;
-  /** Download URL (empty for bundled models). */
   url: string;
-  /** Other URLs serving the identical file, tried in order when `url` fails (network, HTTP error or hash mismatch). */
   mirrors?: string[];
-  /** Lowercase hex SHA-256 of the file. */
   sha256: string;
   bytes: number;
 }
@@ -31,31 +19,21 @@ export interface ModelDef {
     /** SPDX-ish name, e.g. 'MIT', 'Apache-2.0'. */
     name: string;
     url: string;
-    /** Caveat shown before download (e.g. training-data terms). */
     notice?: string;
   };
-  /** Ships in the installer; cannot be removed. */
   bundled: boolean;
   files: ModelFile[];
-  /** The model a task uses when none is named. */
   default?: boolean;
-  /** stems: what this model separates into. */
   stems?: StemName[];
-  /** Shown in the UI, e.g. '~20 s per minute of audio on CPU, ~2 s on GPU'. */
   speed?: string;
 }
 
-// An entry with an empty sha256 is not installable; one with a sha256 but no
-// url can only be installed from a folder (Model Manager → Install from folder).
 export const MODEL_CATALOG: readonly ModelDef[] = [
   {
     id: 'basic-pitch',
     name: 'Basic Pitch',
     task: 'transcribe',
     description: 'Polyphonic audio → notes (Spotify). Tiny and faster than real time on any CPU.',
-    // ICASSP 2022 model, ONNX as published in spotify/basic-pitch
-    // (basic_pitch/saved_models/icassp_2022/nmp.onnx). Code and weights
-    // Apache-2.0; LICENSE + NOTICE ship beside it.
     license: { name: 'Apache-2.0', url: 'https://github.com/spotify/basic-pitch/blob/main/LICENSE' },
     bundled: true,
     files: [{ name: 'nmp.onnx', url: '', sha256: '2c3c1d144bfa61ad236e92e169c13535c880469a12a047d4e73451f2c059a0ec', bytes: 230444 }],
@@ -63,9 +41,6 @@ export const MODEL_CATALOG: readonly ModelDef[] = [
     speed: '~1 s per minute of audio on CPU',
   },
   {
-    // Beat This! (CPJKU, ISMIR 2024) "small1" checkpoint as ONNX from
-    // danigb/beat-this-rs (models/), plus that project's log-mel front end.
-    // Code and published weights MIT; LICENSE ships beside them.
     id: 'beat-this-small',
     name: 'Beat This! (small)',
     task: 'beats',
@@ -84,9 +59,6 @@ export const MODEL_CATALOG: readonly ModelDef[] = [
     speed: '~2 s per minute of audio on CPU',
   },
   {
-    // Meta's HT-Demucs v4 as the forward-only ONNX export published by the
-    // WebNN project, pinned to one revision. Provenance, hashes and the
-    // DirectML workarounds: scripts/models/README.md.
     id: 'htdemucs',
     name: 'HT-Demucs (4 stems)',
     task: 'stems',
@@ -106,7 +78,6 @@ export const MODEL_CATALOG: readonly ModelDef[] = [
         bytes: 2385507,
       },
       {
-        // Must keep this exact name: the graph refers to it.
         name: 'htdemucs_fwd.onnx.data',
         url: 'https://huggingface.co/webnn/stem-separator/resolve/b56f9e66ceffca2401f83d2469dadaddd06e4994/onnx/htdemucs_fwd.onnx.data',
         sha256: '23a7c68669c041363caaef94641e961dc8c4e16b9891cb87f58f0e199a5e8820',
@@ -118,11 +89,6 @@ export const MODEL_CATALOG: readonly ModelDef[] = [
     speed: '~25 s per minute of audio on an 8-core CPU, ~6 s on a DirectX 12 GPU',
   },
   {
-    // Krypt Voice local engine (research/21). Kokoro-82M v1.0 (hexgrad, Apache-2.0) as the ONNX
-    // export published by onnx-community, pinned to one revision: the fp32 graph (3x faster than
-    // the int8 one on CPU) plus the 28 English voice style tables. Files sit flat in the model
-    // folder (<voice>.bin). The analyzer's G2P uses the CMU Pronouncing Dictionary built into
-    // krypt-studio-analyzer.exe (BSD-style; no eSpeak / GPL). Hashes: scripts/models/README.md.
     id: 'kokoro',
     name: 'Kokoro (Krypt Voice)',
     task: 'tts',
@@ -170,7 +136,6 @@ export const MODEL_CATALOG: readonly ModelDef[] = [
   },
 ];
 
-/** The voices the `kokoro` package installs (`<voice>.bin`), best-rated first. a* = US English, b* = UK English. */
 export const KOKORO_VOICES: ReadonlyArray<{ id: string; name: string; description: string }> = [
   { id: 'af_heart', name: 'Heart', description: 'US English · female · warm (best)' },
   { id: 'af_bella', name: 'Bella', description: 'US English · female · bright' },

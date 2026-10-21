@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The docked Guides panel (PANELS.guides, right dock): the same article view
-// as the Home guides screen, narrow. A grouped picker instead of the
-// sidebar, search with snippets, Previous / Next. F1 and Help ▸ Guides open
-// it while the Studio is showing (openGuides in src/home/store.ts). It
-// remembers the open article and each article's scroll for the session,
-// across closing and reopening, floating and docking.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Clapperboard, Maximize2 } from 'lucide-react';
 import { cls } from '../utils/format';
@@ -46,7 +37,6 @@ export function GuidesPanel() {
 
   useArticleScroll('panel', article, paneRef, searching, panelScroll);
 
-  // Remember where each article was scrolled to (read back on return and on remount).
   useEffect(() => {
     const pane = paneRef.current;
     if (!pane || searching) return;

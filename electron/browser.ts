@@ -1,6 +1,3 @@
-// Browser panel roots: the bundled factory kit plus user-added folders
-// (settings.browserRoots). Listing is confined to these roots.
-
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { BrowserWindow } from 'electron';
@@ -10,7 +7,6 @@ import * as dialogs from './system/dialogs';
 
 export interface BrowserDeps {
   factoryDir: string;
-  /** Bundled demo projects; listed read-only when the folder exists. */
   demosDir?: string;
   getSettings(): Settings;
   updateSettings(patch: Partial<Settings>): Settings;

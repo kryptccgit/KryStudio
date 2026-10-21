@@ -1,37 +1,3 @@
-// Groove template extractor: Groove MIDI Dataset (GMD) → shared/grooves/templates.gen.ts
-//
-//   node scripts/grooves/extract.mjs <path-to-unzipped-groove-dir> [--out <file>] [--check]
-//
-// The GMD is by Google LLC (Magenta), CC BY 4.0: https://magenta.tensorflow.org/datasets/groove
-// Download groove-v1.0.0-midionly.zip from that page and unzip it anywhere; pass the folder that
-// holds info.csv. The dataset is read as untrusted data (paths are confined to that folder, only
-// .mid files are opened, nothing from it is executed) and is never copied into the repo: only the
-// aggregated per-style statistics below are written.
-//
-// Method (research/11-sound-sources.md §5 has the reasoning):
-//  1. Use 4/4 BEAT performances only (no fills), mapped to 11 style templates (thin styles merged).
-//  2. Instrument classes from the GM drum map GMD uses: kick, snare (incl. rim + cross-stick),
-//     hihat (closed/open/pedal + ride), other (toms, crashes, anything else).
-//  3. Per performance, remove its global offset: the median deviation of every hit that sits
-//     on a quarter-note line (swing-independent), so a drummer who rides ahead of the click as a
-//     whole doesn't skew the template.
-//  4. Per template, estimate 8th and 16th swing (median beat phase of off-beat hits), build a
-//     swung 16th grid from it and assign each hit to its nearest swung line. So a swung jazz "and"
-//     counts as step 3 of the beat (+0.56 of a 16th), not as a late step 4.
-//  5. Per (performance, bar, class, step) keep the hit closest to its line (flams / rolls don't
-//     double count). Offsets are relative to the STRAIGHT grid in fractions of a 16th.
-//  6. Per (template, class, step): trimmed mean (10 %) and robust spread (1.4826 × MAD) of the
-//     offsets, trimmed-mean velocity relative to that performance's class median, and hit
-//     probability = the mean over performances of (bars with a hit / bars). Each performance
-//     contributes at most CAP hits per cell. Cells with fewer than MIN_HITS hits or fewer than
-//     MIN_PERFS performances fall back: all classes at that step → the class at that beat
-//     position → all classes at that beat position → neutral (0 offset, velocity 1).
-//  7. Velocities are scaled per class so their hit-probability-weighted mean is 1 (they are
-//     accents, not levels).
-//
-// Output is deterministic (sorted, rounded, no timestamps). --check exits 1 when the file on
-// disk differs from what this run would write.
-
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { readMidi } from './smf.mjs';
@@ -51,15 +17,13 @@ if (!positional[0]) {
 const ROOT = realpathSync(path.resolve(positional[0]));
 const OUT = path.resolve(opt('--out') ?? path.join(REPO, 'shared', 'grooves', 'templates.gen.ts'));
 
-// ── Parameters ─────────────────────────────────────────────────────────
-const MIN_HITS = 30; // hits per cell (after the per-performance cap)
-const MIN_PERFS = 3; // performances per cell
-const CAP = 64; // max hits one performance contributes to one cell
+const MIN_HITS = 30;
+const MIN_PERFS = 3;
+const CAP = 64;
 const MIN_TEMPLATE_PERFS = 4;
 const MIN_PERF_HITS = 16;
 const MIN_PERF_BARS = 2;
 
-/** GM drum map as used by GMD (Roland TD-11 pitches, incl. the edge/rim extras 22 and 26). */
 function classOf(key) {
   if (key === 35 || key === 36) return 'kick';
   if (key === 37 || key === 38 || key === 39 || key === 40) return 'snare';
@@ -68,7 +32,6 @@ function classOf(key) {
 }
 const CLASSES = ['kick', 'snare', 'hihat', 'other'];
 
-/** info.csv style (digits stripped, e.g. "funk/groove") → template id; first match wins. */
 const STYLE_RULES = [
   [/^(blues|rock|neworleans)\/shuffle$|^funk\/purdieshuffle$/, 'shuffle'],
   [/^jazz\/(funk|fusion|linear)$|^neworleans\/(funk|secondline)$/, 'funk'],
@@ -76,7 +39,7 @@ const STYLE_RULES = [
   [/^gospel$/, 'soul'],
   [/^highlife$/, 'afrobeat'],
   [/^(punk|country)$/, 'rock'],
-  [/^(hiphop|funk|soul|jazz|latin|reggae|afrobeat|rock|pop|dance)(\/|$)/, null], // own family
+  [/^(hiphop|funk|soul|jazz|latin|reggae|afrobeat|rock|pop|dance)(\/|$)/, null],
 ];
 const TEMPLATE_INFO = {
   hiphop: { label: 'Hip hop', order: 0 },
@@ -96,10 +59,9 @@ function templateFor(style) {
     const m = re.exec(style);
     if (m) return id ?? style.split('/')[0];
   }
-  return null; // e.g. middleeastern (1 performance): no fitting family
+  return null;
 }
 
-// ── Small robust-stats helpers ─────────────────────────────────────────
 const sorted = (xs) => [...xs].sort((a, b) => a - b);
 function median(xs) {
   if (!xs.length) return NaN;
@@ -117,7 +79,6 @@ const robustSd = (xs) => {
   const m = median(xs);
   return 1.4826 * median(xs.map((x) => Math.abs(x - m)));
 };
-/** Evenly spaced subsample of at most n items (deterministic). */
 function cap(xs, n) {
   if (xs.length <= n) return xs;
   const out = [];
@@ -129,7 +90,6 @@ const num = (x, d) => {
   return Object.is(v, -0) ? '0' : String(v);
 };
 
-// ── Read info.csv ──────────────────────────────────────────────────────
 function parseCsv(text) {
   const rows = [];
   for (const line of text.split(/\r?\n/)) {
@@ -161,15 +121,13 @@ if (!existsSync(csvPath)) {
 }
 const rows = parseCsv(readFileSync(csvPath, 'utf8'));
 
-/** Resolve a dataset-relative path, refusing anything that escapes ROOT or isn't a .mid. */
 function datasetFile(rel) {
   const p = path.resolve(ROOT, rel);
   if (!p.startsWith(ROOT + path.sep) || !/\.midi?$/i.test(p)) throw new Error(`refusing path ${JSON.stringify(rel)}`);
   return p;
 }
 
-// ── Pass 1: performances → offset-corrected hits ───────────────────────
-const perfs = []; // { id, template, drummer, bpm, hits: [{cls, q, vel}] }
+const perfs = [];
 const skipped = { notBeat44: 0, unmapped: 0, tiny: 0, unreadable: 0 };
 for (const r of rows) {
   if (r.beat_type !== 'beat' || r.time_signature !== '4-4') {
@@ -208,7 +166,6 @@ for (const r of rows) {
   });
 }
 
-// ── Pass 2: per template ───────────────────────────────────────────────
 const byTemplate = new Map();
 for (const p of perfs) (byTemplate.get(p.template) ?? byTemplate.set(p.template, []).get(p.template)).push(p);
 
@@ -228,16 +185,13 @@ const templates = [];
 for (const [id, list] of [...byTemplate].sort((a, b) => TEMPLATE_INFO[a[0]].order - TEMPLATE_INFO[b[0]].order)) {
   if (list.length < MIN_TEMPLATE_PERFS) throw new Error(`template ${id} has only ${list.length} performances; merge it into another style`);
   const { r8, r16 } = estimateSwing(list);
-  // Swung 16th lines within one beat, in 16ths.
   const lines = [0, 4 * r8 * r16, 4 * r8, 4 * (r8 + (1 - r8) * r16)];
 
-  // cell[cls][step] → { off: [[perf hits]], vel: [[...]], perfs: Set }
   const cells = Object.fromEntries([...CLASSES, 'all'].map((c) => [c, Array.from({ length: 16 }, () => ({ off: [], vel: [], perfs: new Set(), n: 0 }))]));
   const probSum = Object.fromEntries(CLASSES.map((c) => [c, new Array(16).fill(0)]));
   let bars = 0;
   let hitCount = 0;
   for (const p of list) {
-    // Velocity reference: the class median in this performance (overall median if the class is rare).
     const all = p.hits.map((h) => h.vel);
     const allMed = median(all);
     const ref = Object.fromEntries(
@@ -246,8 +200,7 @@ for (const [id, list] of [...byTemplate].sort((a, b) => TEMPLATE_INFO[a[0]].orde
         return [c, v.length >= 8 ? median(v) : allMed];
       }),
     );
-    // Assign hits to swung lines; keep the closest hit per (bar, step, class).
-    const best = new Map(); // `${cls}|${k}` → { dist, off, vel }
+    const best = new Map();
     for (const h of p.hits) {
       const b0 = Math.floor(h.q / 4);
       let bestLine = null;
@@ -291,7 +244,6 @@ for (const [id, list] of [...byTemplate].sort((a, b) => TEMPLATE_INFO[a[0]].orde
     for (const c of CLASSES) for (let s = 0; s < 16; s++) probSum[c][s] += barsHit[c][s].size / nBars;
   }
 
-  // Pooled per beat position (s % 4) for the fallback chain.
   const pooled = (c, pos) => {
     const off = [];
     const vel = [];
@@ -341,7 +293,6 @@ for (const [id, list] of [...byTemplate].sort((a, b) => TEMPLATE_INFO[a[0]].orde
   });
 }
 
-// ── Emit ───────────────────────────────────────────────────────────────
 const arr = (xs, d) => `[${xs.map((x) => num(x, d)).join(', ')}]`;
 const lines = [];
 lines.push('// GENERATED by scripts/grooves/extract.mjs from the Groove MIDI Dataset. Do not edit by hand:');

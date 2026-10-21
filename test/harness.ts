@@ -1,4 +1,3 @@
-// Minimal test harness: test('name', fn) + run(). node:assert for checks.
 type Fn = () => void | Promise<void>;
 const tests: Array<{ name: string; fn: Fn }> = [];
 
@@ -20,8 +19,6 @@ export async function run(suite: string): Promise<void> {
   }
   console.log(`${fail ? '✗' : '✓'} ${suite}: ${pass} passed${fail ? `, ${fail} failed` : ''}`);
   if (fail) process.exitCode = 1;
-  // A failed test can skip its cleanup and leave a child process or server holding
-  // the event loop open. Don't wait on it forever (the timer only fires if something does).
   setTimeout(() => {
     console.error(`  ${suite}: something was still running 3 s after the last test; exiting`);
     process.exit(process.exitCode ?? 0);

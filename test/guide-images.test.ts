@@ -1,7 +1,3 @@
-// Guide screenshots (shared/guides/images.ts): the {{image:<file>|<caption>}} markup, the files in
-// resources/guides/images agree with the articles (every image named exists, every file is used, the folder stays
-// small), the "Start here (step by step)" section comes first and is where the Guides open, numbered steps carry
-// on across a picture, and the read-only app:// handler (flat names only, images only).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -24,10 +20,7 @@ function repoRoot(): string {
   return process.cwd();
 }
 const IMAGE_DIR = path.join(repoRoot(), 'resources', 'guides', 'images');
-/** research/22: keep the bundled screenshots under ~8 MB. */
 const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
-
-// ── Markup ────────────────────────────────────────────────────────────
 
 test('{{image:<file>|<caption>}} parses to an image block; malformed ones stay visible text', () => {
   const b = parseGuide(
@@ -72,8 +65,6 @@ test('numbered steps carry on across a picture: "4." after an image starts the l
   assert.equal(b[4].type === 'ol' && b[4].start, undefined);
 });
 
-// ── Files ─────────────────────────────────────────────────────────────
-
 test('every {{image:…}} in an article is in resources/guides/images, every file there is used, the folder stays small', () => {
   const files = fs.existsSync(IMAGE_DIR) ? fs.readdirSync(IMAGE_DIR) : [];
   const used = new Set<string>();
@@ -109,8 +100,6 @@ test('image files really are WebP / PNG / JPEG (magic bytes match the extension)
     if (f.endsWith('.jpg')) assert.ok(head[0] === 0xff && head[1] === 0xd8, `${f} isn't JPEG`);
   }
 });
-
-// ── The "Start here (step by step)" section ───────────────────────────
 
 test('"Start here (step by step)" is the first group, holds the eight beginner guides in order, and the Guides open on it', () => {
   assert.equal(GUIDE_GROUPS[0], BEGINNER_GROUP);
@@ -149,8 +138,6 @@ test('the windows guide lists every window key from the keymap it names', () => 
   for (const k of ['F5', 'F6', 'F7', 'F9', 'Alt+F8', 'F3', 'F1', 'Ctrl+Shift+H', 'Ctrl+Z']) assert.ok(body.includes(`[[${k}]]`), `step-windows: [[${k}]]`);
   assert.ok(body.includes('Reset layout'));
 });
-
-// ── URLs and the app:// handler ───────────────────────────────────────
 
 test('guideImageUrl: on the app origin, under guide-images/; isGuideImageFile only takes flat image names', () => {
   assert.equal(GUIDE_IMAGE_ROUTE, 'guide-images');

@@ -1,6 +1,3 @@
-//! Chord estimation on synthetic, harmonic-rich material (detuned saw pads,
-//! square bass, drums) and the `drums` option of `analyze`.
-
 mod common;
 
 use common::*;
@@ -26,12 +23,8 @@ fn show(spans: &[ChordSpan]) -> String {
     spans.iter().map(|s| format!("{:.2}-{:.2} {} ({:.2})", s.start_sec, s.end_sec, label(s.root, s.quality.as_str()), s.confidence)).collect::<Vec<_>>().join(" | ")
 }
 
-/// Ground truth: (start s, end s, root pitch class, accepted qualities;
-/// the first is the exact one).
 type Truth<'a> = Vec<(f32, f32, u8, &'a [&'a str])>;
 
-/// Time-weighted (root accuracy, quality-family accuracy, exact quality
-/// accuracy) over [from, to), 10 ms steps. Time without a chord counts as wrong.
 fn accuracy(spans: &[ChordSpan], truth: &Truth, from: f32, to: f32) -> (f32, f32, f32) {
     let (mut n, mut root, mut fam, mut exact) = (0usize, 0usize, 0usize, 0usize);
     let mut t = from;
@@ -70,16 +63,14 @@ fn looped<'a>(bar: &[(u8, &'a [&'a str])], secs: f32, loops: usize) -> Truth<'a>
 }
 
 const BAR140: f32 = 60.0 / 140.0 * 4.0;
-const FM9: &[f32] = &[53.0, 56.0, 60.0, 63.0, 67.0]; // F3 Ab3 C4 Eb4 G4
-const DBMAJ7: &[f32] = &[49.0, 53.0, 56.0, 60.0, 65.0]; // Db3 F3 Ab3 C4 F4
-const EBMAJ9: &[f32] = &[51.0, 55.0, 58.0, 62.0, 65.0]; // Eb3 G3 Bb3 D4 F4
-const CM7: &[f32] = &[48.0, 51.0, 55.0, 58.0, 63.0]; // C3 Eb3 G3 Bb3 Eb4 (the demo's voicing)
+const FM9: &[f32] = &[53.0, 56.0, 60.0, 63.0, 67.0];
+const DBMAJ7: &[f32] = &[49.0, 53.0, 56.0, 60.0, 65.0];
+const EBMAJ9: &[f32] = &[51.0, 55.0, 58.0, 62.0, 65.0];
+const CM7: &[f32] = &[48.0, 51.0, 55.0, 58.0, 63.0];
 
 const M7: &[&str] = &["m7", "min"];
 const MAJ7: &[&str] = &["maj7", "maj"];
 
-/// The Neon Fog loop (i9 – VImaj7 – VIImaj9 – v7 in F minor) as a detuned saw
-/// pad with a sub-octave square on each root, 140 BPM, one chord per bar.
 #[test]
 fn neon_fog_loop_saw_pad_with_drums() {
     let loops = 4;
@@ -100,13 +91,10 @@ fn neon_fog_loop_saw_pad_with_drums() {
         assert!(root >= 0.85, "root accuracy {root:.2}");
         assert!(fam >= 0.8, "quality accuracy {fam:.2}");
         assert!(a.estimated.iter().any(|e| e == "chords"));
-        // Smoothed: about one span per bar, not one per beat.
         assert!(a.chords.len() <= 4 * loops + 4, "{} spans", a.chords.len());
     }
 }
 
-/// I – vi – IV – V in C with a square bass under a detuned saw pad and drums,
-/// 120 BPM, one chord per bar: triads read as maj / min.
 #[test]
 fn pop_triads_with_square_bass_and_drums() {
     let bar = 2.0;
@@ -126,7 +114,6 @@ fn pop_triads_with_square_bass_and_drums() {
     assert!(root >= 0.85 && fam >= 0.85, "root {root:.2} quality {fam:.2}");
 }
 
-/// ii7 – V7 – Imaj7 – VI7 in C, sustained (no pulse: 0.5 s grid).
 #[test]
 fn seventh_chords_without_a_beat() {
     let bar: [(&[f32], f32); 4] = [(&[50.0, 53.0, 57.0, 60.0], 2.0), (&[43.0, 53.0, 59.0, 62.0], 2.0), (&[48.0, 55.0, 59.0, 64.0], 2.0), (&[45.0, 55.0, 61.0, 64.0], 2.0)];
@@ -140,7 +127,6 @@ fn seventh_chords_without_a_beat() {
     assert!(root >= 0.85 && fam >= 0.8, "root {root:.2} quality {fam:.2}");
 }
 
-/// Two chords per bar (changes on beat 3) at 100 BPM: spans follow the half bars.
 #[test]
 fn half_bar_harmonic_rhythm() {
     let half = 60.0 / 100.0 * 2.0;
@@ -155,7 +141,6 @@ fn half_bar_harmonic_rhythm() {
     let (root, fam, _) = accuracy(&a.chords, &truth, 0.0, half * 16.0);
     eprintln!("C–G–Am–F half bars: root {root:.2} quality {fam:.2} — {}", show(&a.chords));
     assert!(root >= 0.8 && fam >= 0.8, "root {root:.2} quality {fam:.2}");
-    // Boundaries land within a beat of the true changes.
     for s in a.chords.iter().skip(1) {
         let k = (s.start_sec / half).round();
         assert!((s.start_sec - k * half).abs() <= 0.61, "span starts at {} (half bars every {half} s)", s.start_sec);
@@ -172,13 +157,11 @@ fn drums_noise_and_bass_alone_have_no_chords() {
     let mut rng = Rng::new(9);
     let a = run((0..(15.0 * SR) as usize).map(|_| 0.2 * rng.next()).collect(), false);
     assert!(a.chords.is_empty(), "noise: {}", show(&a.chords));
-    // A sub-bass riff alone is a bass line, not harmony.
     let q = 60.0 / 140.0;
     let riff = [29.0, 32.0, 36.0, 29.0, 25.0, 29.0, 32.0, 25.0];
     let notes: Vec<(f32, f32)> = (0..6).flat_map(|_| riff.iter().map(|&m| (m, q))).collect();
     let a = run(square_bass(&notes, 0.0, 0.6), false);
     assert!(a.chords.is_empty(), "bass alone: {}", show(&a.chords));
-    // Silence.
     let a = run(silence(5.0), false);
     assert!(a.chords.is_empty());
 }
@@ -197,7 +180,6 @@ fn drums_option_matches_transcribe_from_the_same_decode() {
     let with = run(x.clone(), true);
     let hits = with.drum_hits.as_ref().expect("drumHits");
     assert!(with.estimated.iter().any(|e| e == "drumHits"));
-    // Same algorithm and defaults as transcribe 'drums' on the same mono mix.
     let args = TranscribeArgs { path: String::new(), mode: TranscribeMode::Drums, model_dir: None, onset_threshold: None, frame_threshold: None, min_note_ms: None, min_key: None, max_key: None };
     let mono = krypt_studio_analyzer::audio::resample(&x, SR, krypt_studio_analyzer::audio::ANALYSIS_SR);
     let tr = krypt_studio_analyzer::transcribe::transcribe_signal(&mono, &args, &JobCtx::detached()).unwrap();
@@ -209,7 +191,6 @@ fn drums_option_matches_transcribe_from_the_same_decode() {
     assert!((14..=18).contains(&kicks), "{kicks} kicks (16 expected)");
     let json = serde_json::to_value(&with).unwrap();
     assert!(json["drumHits"][0]["timeSec"].is_number() && json["drumHits"][0]["role"].is_string());
-    // The rest of the analysis is unchanged by the option.
     assert_eq!(serde_json::to_value(&without.chords).unwrap(), serde_json::to_value(&with.chords).unwrap());
     assert_eq!(without.tempo.as_ref().map(|t| t.bpm), with.tempo.as_ref().map(|t| t.bpm));
 }
@@ -222,8 +203,6 @@ fn analyze_args_parse_drums() {
     assert!(a.drums && !a.sections);
 }
 
-/// The library light pass on an AAC file: one `analyze` call (one decode,
-/// Media Foundation) returns key, chords and drum hits.
 #[cfg(windows)]
 #[test]
 fn analyze_m4a_with_chords_and_drums() {
@@ -257,8 +236,6 @@ fn analyze_m4a_with_chords_and_drums() {
     let hits = a.drum_hits.as_ref().expect("drumHits");
     let count = |r: &str| hits.iter().filter(|h| format!("{:?}", h.role) == r).count();
     eprintln!("roles: kick {} snare {} hat {} openhat {} perc {}", count("Kick"), count("Snare"), count("Hat"), count("Openhat"), count("Perc"));
-    // A full mix (drum roles are best on a drum stem): bass attacks at chord
-    // changes may add a few kicks.
     assert!((14..=22).contains(&count("Kick")) && hits.len() >= 32, "{} kicks, {} hits", count("Kick"), hits.len());
     let _ = std::fs::remove_dir_all(&dir);
 }

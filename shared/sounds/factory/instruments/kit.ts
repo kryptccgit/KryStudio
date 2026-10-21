@@ -1,13 +1,3 @@
-// Builders for the factory instrument presets: full, explicit param sets per
-// stock instrument (a preset REPLACES the whole param set, so every sound
-// states every knob it relies on) plus compact effect-slot helpers. Values are
-// plain units exactly as in shared/plugins/catalog.gen.json;
-// test/presets-factory.test.ts checks every one against the catalog.
-//
-// Gain staging: every preset's level was set by rendering it through the
-// engine (scripts/audition-presets.mjs) so presets of one role land within
-// about ±2 LU of each other at the default channel volume.
-
 import type { GenreId } from '../../genres';
 import type { InstrumentPreset, InstrumentRole, PresetFx } from '../../types';
 
@@ -20,15 +10,9 @@ export const K808 = 'krypt.kick808';
 export const DRUM = 'krypt.drumsynth';
 export const SAMPLER = 'krypt.sampler';
 
-// ── Krypt Wave ────────────────────────────────────────────────────────
-
-/** Wave tables: 0 basic morph (0 sine, 1/3 triangle, 2/3 saw, 1 square), 1 PWM (50% → 6%), 2 formant (a e i o u), 3 harmonic sweep (sine → 64 harmonics), 4 digital (sync ratio 1 → 8, crushed above 0.5). */
 export const T = { basic: 0, pwm: 1, formant: 2, harmonic: 3, digital: 4 } as const;
-/** Basic-morph positions. */
 export const POS = { sine: 0, tri: 1 / 3, saw: 2 / 3, square: 1 } as const;
-/** Sync divisions (LFO / delay / filter / phaser index). */
 export const DIV = { '1/64': 0, '1/32': 1, '1/16T': 2, '1/16': 3, '1/16D': 4, '1/8T': 5, '1/8': 6, '1/8D': 7, '1/4T': 8, '1/4': 9, '1/4D': 10, '1/2': 11, '1bar': 12, '2bars': 13, '4bars': 14 } as const;
-/** LFO shapes. */
 export const LFO = { sine: 0, tri: 1, sawUp: 2, sawDown: 3, square: 4 } as const;
 
 const WAVE_BASE: Params = {
@@ -68,14 +52,10 @@ const WAVE_BASE: Params = {
   gain: -6,
 };
 
-/** A full Krypt Wave param set: neutral base (no filter movement, no LFO) + the given values. */
 export function wave(p: Params & { gain: number }): Params {
   return { ...WAVE_BASE, ...p };
 }
 
-// ── Krypt TriOsc ──────────────────────────────────────────────────────
-
-/** TriOsc shapes. */
 export const SH = { sine: 0, tri: 1, saw: 2, square: 3, pulse: 4, noise: 5 } as const;
 
 const TRI_BASE: Params = {
@@ -116,17 +96,10 @@ const TRI_BASE: Params = {
   filterKeyTrack: 0,
 };
 
-/** A full Krypt TriOsc param set (osc 2 and 3 silent unless given). */
 export function tri(p: Params & { gain: number }): Params {
   return { ...TRI_BASE, ...p };
 }
 
-// ── Krypt FM ──────────────────────────────────────────────────────────
-
-/**
- * FM algorithms (index): 0 stack 4>3>2>1 · 1 (4+3)>2>1 · 2 (3>2)+4>1 · 3 (4>3)+2>1 ·
- * 4 pairs 4>3 + 2>1 (carriers 1, 3) · 5 4>(3+2+1) · 6 4>3 + 2 + 1 · 7 additive.
- */
 export const ALG = { stack: 0, twoToOne: 1, branch: 2, branch2: 3, pairs: 4, oneToThree: 5, pairPlusTwo: 6, additive: 7 } as const;
 
 export interface Op {
@@ -164,7 +137,6 @@ export interface FmSpec {
   gain: number;
   algorithm: number;
   feedback?: number;
-  /** Operators 1-4 (op 1 is always a carrier). */
   ops: [Op?, Op?, Op?, Op?];
   filterType?: number;
   cutoff?: number;
@@ -176,7 +148,6 @@ export interface FmSpec {
   vibrato?: number;
 }
 
-/** A full Krypt FM param set. Operators not given are silent (level 0). */
 export function fm(p: FmSpec): Params {
   const { ops, gain, algorithm, feedback, ...rest } = p;
   const extra: Params = {};
@@ -201,15 +172,12 @@ export function fm(p: FmSpec): Params {
   };
 }
 
-// ── Krypt 808 / DrumSynth / Sampler ───────────────────────────────────
-
 const K808_BASE: Params = { gain: -3, tune: 0, decay: 900, punch: 24, punchDecay: 40, click: 0.2, drive: 0.25, tone: 6000, gate: 0 };
 
 export function k808(p: Params & { gain: number }): Params {
   return { ...K808_BASE, ...p };
 }
 
-/** DrumSynth voices. */
 export const DV = { kick: 0, snare: 1, clap: 2, hat: 3, openhat: 4, tom: 5, rim: 6, cowbell: 7, crash: 8, perc: 9 } as const;
 
 const DRUM_BASE: Params = { gain: -3, voice: 0, tune: 0, decay: 250, tone: 0.5, snap: 0.5, drive: 0.1 };
@@ -241,27 +209,19 @@ export function sampler(p: Params & { gain: number }): Params {
   return { ...SAMPLER_BASE, ...p };
 }
 
-// ── Effects ───────────────────────────────────────────────────────────
-
 export interface EqSpec {
-  /** Low cut (Hz) and slope (0 = 12, 1 = 24, 2 = 48 dB/oct). */
   hp?: number;
   hpSlope?: 0 | 1 | 2;
-  /** Low shelf [Hz, dB]. */
   low?: [number, number];
-  /** Bells [Hz, dB, Q]. */
   b3?: [number, number, number];
   b4?: [number, number, number];
   b5?: [number, number, number];
-  /** High shelf [Hz, dB]. */
   high?: [number, number];
-  /** High cut (Hz) and slope. */
   lp?: number;
   lpSlope?: 0 | 1 | 2;
   out?: number;
 }
 
-/** krypt.eq with only the bands used switched on. */
 export function eq(s: EqSpec): PresetFx {
   const p: Params = { b2On: 0, b3On: 0, b4On: 0, b5On: 0, b6On: 0 };
   if (s.hp != null) Object.assign(p, { b1On: 1, b1Freq: s.hp, b1Slope: s.hpSlope ?? 1 });
@@ -275,7 +235,6 @@ export function eq(s: EqSpec): PresetFx {
   return { type: 'krypt.eq', params: p };
 }
 
-/** Just a low cut. */
 export const hp = (freq: number, slope: 0 | 1 | 2 = 1): PresetFx => eq({ hp: freq, hpSlope: slope });
 
 export function chorus(p: { voices?: number; rate?: number; depth?: number; delay?: number; spread?: number; feedback?: number; lowCut?: number; highCut?: number; mix?: number }): PresetFx {
@@ -299,7 +258,6 @@ export const ROOM = 0;
 export const HALL = 1;
 export const PLATE = 2;
 
-/** krypt.reverb at a wet/dry blend (the slot mix). */
 export function reverb(mode: number, decay: number, mix: number, o: { size?: number; predelay?: number; damping?: number; lowCut?: number; width?: number; diffusion?: number } = {}): PresetFx {
   return {
     type: 'krypt.reverb',
@@ -317,7 +275,6 @@ export function reverb(mode: number, decay: number, mix: number, o: { size?: num
   };
 }
 
-/** Tempo-synced krypt.delay at a wet/dry blend. */
 export function delay(division: number, feedback: number, mix: number, o: { pingPong?: 0 | 1; lowCut?: number; highCut?: number; modDepth?: number } = {}): PresetFx {
   return {
     type: 'krypt.delay',
@@ -387,7 +344,6 @@ export function flanger(p: { delay?: number; depth?: number; rate?: number; feed
   };
 }
 
-/** krypt.filter: type 0 LP12, 1 LP24, 2 HP12, 3 HP24, 4 BP, 5 notch; optional LFO on cutoff. */
 export function filter(p: { type?: number; cutoff: number; reso?: number; drive?: number; lfoSync?: 0 | 1; lfoDivision?: number; lfoRate?: number; lfoDepth?: number; lfoShape?: number }): PresetFx {
   return {
     type: 'krypt.filter',
@@ -409,17 +365,14 @@ export function transient(attack: number, sustain: number, output = 0): PresetFx
   return { type: 'krypt.transient', params: { attack, sustain, attackWindow: 15, sustainWindow: 200, output } };
 }
 
-/** krypt.utility: width 0 = mono … 2 = extra wide. */
 export function utility(p: { gain?: number; width?: number; mono?: 0 | 1; pan?: number }): PresetFx {
   return { type: 'krypt.utility', params: { gain: p.gain ?? 0, pan: p.pan ?? 0, width: p.width ?? 1, mono: p.mono ?? 0, invertL: 0, invertR: 0, dcFilter: 0 } };
 }
 
-/** krypt.duck in tempo-shape mode (the classic sidechain pump without a kick routed): rate 0 1/8, 1 1/4, 2 1/2, 3 1 bar. */
 export function pump(depth: number, rate = 1, curve = 0.5): PresetFx {
   return { type: 'krypt.duck', params: { mode: 0, depth, rate, curve, attack: 1, release: 180, threshold: -24 } };
 }
 
-/** krypt.gate pattern (0 half-time … 7 gate 1/8, 8 gate 1/16 trance, 9 gate 3-3-2), always on. */
 export function gatePattern(pattern: number, depth = 1, smoothing = 4): PresetFx {
   return { type: 'krypt.gate', params: { pattern, trigger: 0, active: 0, depth, smoothing, mix: 1 } };
 }
@@ -443,8 +396,6 @@ export function squash(p: { depth?: number; time?: number; upward?: number; down
   };
 }
 
-// ── Preset ────────────────────────────────────────────────────────────
-
 export interface PresetSpec {
   id: string;
   name: string;
@@ -460,7 +411,6 @@ export interface PresetSpec {
   range: [number, number];
 }
 
-/** A factory instrument preset; the role comes from the id ('factory:<role>/<slug>'). */
 export function preset(s: PresetSpec): InstrumentPreset {
   const m = /^factory:([a-z0-9]+)\//.exec(s.id);
   if (!m) throw new Error(`Bad factory preset id ${s.id}`);

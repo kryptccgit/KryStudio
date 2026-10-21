@@ -1,18 +1,3 @@
-// Auto Mashup service (electron/mashup) + the auto_mashup MCP tool, over an
-// in-process fake analyzer (analysis per file name, cached / separated stems,
-// vocal-stem loudness per section) and the real DocHost + commands:
-//
-//  - check reads both songs and plans without editing or separating;
-//  - build is ONE history entry (a new project, or new tracks in the open
-//    one) and one undo restores the project exactly;
-//  - vocalOverBeat / stemBlend / backAndForth place sensible tracks, clips
-//    per section (warped, pitched), markers, the vocal chain and sends;
-//  - a style that needs stems without a stem model is refused with the
-//    Model Manager hint (check lists it as a problem); backAndForth works;
-//  - cancelling during separation leaves the project untouched;
-//  - the key comes from the stems' notes (light reads of the vocal / bass /
-//    other stems) and every song is level-matched;
-//  - auto_mashup: dry_run, a build into the open project, File access.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -49,12 +34,9 @@ for (const song of ['Vocal Song', 'Beat Song', 'Far Song']) {
   }
 }
 
-// ── Fixtures ────────────────────────────────────────────────────────────
-
 const BPM = 120;
-const BAR = 2; // seconds per bar at 120 bpm
-const T0 = 0.5; // first downbeat
-/** [label, bars, lufs, vocal stem rms dB] */
+const BAR = 2;
+const T0 = 0.5;
 type Sec = [string, number, number, number];
 const SONGS: Record<string, { key: string; secs: Sec[]; rms: Record<string, number> }> = {
   'Vocal Song': {
@@ -109,7 +91,6 @@ function analysis(file: string): AudioAnalysis {
   };
 }
 
-/** A pitch profile: the scale of `tonic` with the tonic and fifth strongest. */
 function profileOf(tonic: number, minor: boolean): number[] {
   const steps = minor ? [0, 2, 3, 5, 7, 8, 10] : [0, 2, 4, 5, 7, 9, 11];
   const p = new Array<number>(12).fill(0.01);
@@ -119,7 +100,6 @@ function profileOf(tonic: number, minor: boolean): number[] {
   const t = p.reduce((x, y) => x + y, 0);
   return p.map((v) => v / t);
 }
-/** What each song's stems play (by default: its key label). */
 const STEM_PROFILES: Record<string, Record<string, number[]>> = {
   'Vocal Song': { vocals: profileOf(7, true), bass: profileOf(7, true), other: profileOf(7, true) },
   'Beat Song': { vocals: profileOf(9, true), bass: profileOf(9, true), other: profileOf(9, true) },
@@ -127,10 +107,8 @@ const STEM_PROFILES: Record<string, Record<string, number[]>> = {
 };
 
 interface RigOpts {
-  /** Override what a song's vocal stem sings (a pitch profile). */
   vocalProfile?: Record<string, number[]>;
   noModel?: boolean;
-  /** Stems already separated (cached) for these songs. */
   cached?: string[];
   fileAccess?: FileAccessMode;
   dirty?: boolean;
@@ -164,7 +142,6 @@ function rig(opts: RigOpts = {}) {
     async analyze(t: AudioTarget, o: { light?: boolean } = {}): Promise<ActionResult<AudioAnalysis>> {
       const f = fileOfTarget(t);
       if (!f || !fs.existsSync(f)) return { ok: false, message: `File not found: ${f}` };
-      // A stem: TMP/stems/<song>/<stem>.wav.
       const stemOfSong = f.includes(`${path.sep}stems${path.sep}`) ? path.basename(path.dirname(f)) : null;
       if (stemOfSong) {
         const stem = path.basename(f, '.wav');
@@ -253,8 +230,6 @@ const clipsOf = (doc: DocHost, channelId: string) => Object.values(doc.project.p
 const markers = (doc: DocHost) => Object.values(doc.project.playlist.markers).sort((a, b) => a.tick - b.tick).map((m) => [m.tick / (4 * PPQ) + 1, m.name]);
 const BARTICKS = 4 * PPQ;
 
-// ── check ───────────────────────────────────────────────────────────────
-
 test('check: both songs read and planned, cached stems used, nothing edited or separated', async () => {
   const r = rig({ cached: ['Vocal Song', 'Beat Song'] });
   const v0 = r.doc.version;
@@ -291,8 +266,6 @@ test('check: without a stem model, vocalOverBeat lists the Model Manager problem
   assert.equal(typeof cleanMashupRequest({ a: { path: '' }, b: { clipId: 'c1' }, style: 'backAndForth', factorA: 2 }), 'object');
 });
 
-// ── build ───────────────────────────────────────────────────────────────
-
 test('build vocalOverBeat: a NEW project as ONE undo step: stems separated, tracks with a clip per section, warped and pitched, markers, vocal chain, sends, ducking, master', async () => {
   const r = rig();
   const out = await r.svc.build(req(), { kind: 'new', actor: USER }, { progress: r.onProgress });
@@ -310,25 +283,21 @@ test('build vocalOverBeat: a NEW project as ONE undo step: stems separated, trac
   assert.ok(!chNames.some((n) => ['Kick', 'Clap', 'Hat', 'Snare', '808', 'Keys'].includes(n)), 'the default kit made way');
   assert.ok(chNames.some((n) => /^FX/.test(n)), 'transitions at the boundaries (add_transition)');
   assert.deepEqual(markers(r.doc), [[1, 'Intro'], [9, 'Verse'], [25, 'Chorus 1'], [41, 'Break'], [49, 'Chorus 2'], [65, 'Outro']]);
-  // The vocal: Gm → Am (+2 st, formants kept), tones warp, its hook (song bar 24) twice in each chorus.
   const voc = channelByName(r.doc, /Vocals$/)!;
   assert.equal(voc.generator.params.pitch, 2);
   assert.equal(voc.generator.params.formant, 1);
   assert.equal(voc.generator.warp?.mode, 'tones');
   assert.ok((voc.generator.warp?.markers.length ?? 0) > 10, 'warped bar by bar');
   const vc = clipsOf(r.doc, voc.id);
-  // autoWarp puts the first downbeat (0.5 s, after a 1-beat pickup) on bar 2 of the sample grid: song bar k = beat 4 + 4k.
   const at = (bar: number) => vc.filter((c) => c.start === (bar - 1) * BARTICKS).map((c) => [c.length / BARTICKS, c.offset / PPQ]);
   assert.deepEqual(at(25), [[8, 4 + 4 * 24]]);
   assert.deepEqual(at(33), [[8, 4 + 4 * 24]]);
   assert.deepEqual(at(9), [[16, 4 + 4 * 8]], 'the first verse plays in order');
   assert.ok(!vc.some((c) => c.start < 8 * BARTICKS || (c.start >= 40 * BARTICKS && c.start < 48 * BARTICKS) || c.start >= 64 * BARTICKS), 'no vocal in the intro, break and outro');
-  // The bed: drums beats-warped and never pitched; a clip per section in its own order.
   const drums = channelByName(r.doc, /Drums$/)!;
   assert.equal(drums.generator.warp?.mode, 'beats');
   assert.ok(!drums.generator.params.pitch);
   assert.deepEqual(clipsOf(r.doc, drums.id).map((c) => [c.start / BARTICKS + 1, c.offset / PPQ]), [[1, 4], [9, 36], [25, 100], [41, 164], [49, 196], [65, 260]]);
-  // Mix: the Stem Vocal chain (no Krypt Tune unless asked); reverb + delay sends; the Other stem ducks under the vocal; a master chain.
   const vins = p.mixer.inserts[voc.insertId];
   const types = vins.slotOrder.map((s) => vins.slots[s].type);
   assert.deepEqual(types, ['krypt.eq', 'krypt.comp'], 'Stem Vocal: EQ + one gentle comp');
@@ -340,7 +309,6 @@ test('build vocalOverBeat: a NEW project as ONE undo step: stems separated, trac
   const duck = Object.values(p.mixer.inserts[other.insertId].slots).find((s) => s.type === 'krypt.duck');
   assert.ok(duck && duck.sidechainFrom === voc.insertId, 'Other ducks under the vocal');
   assert.ok(p.mixer.inserts[p.mixer.masterId].slotOrder.length >= 2, 'master chain');
-  // ONE history entry; its undo leaves the fresh project's own state.
   assert.equal(r.doc.getHistory().length, 1);
   assert.ok(o.notes.every((n) => typeof n === 'string'));
   assert.ok(['reading', 'separating', 'analyzing', 'planning', 'building', 'mixing'].every((s) => r.progress.some((x) => x.stage === s)), r.progress.map((x) => x.stage).join(','));
@@ -358,7 +326,6 @@ test('build into the open project: new tracks, the source clips muted, one undo 
   const a = r.doc.exec<{ clipId: string }>('playlist.addAudio', { path: VOCAL, name: 'Vocal Song', trackId: tA, start: 0 }, { actor: USER }).data!;
   const tB = r.doc.exec<{ id: string }>('playlist.addTrack', { name: 'B' }, { actor: USER }).data!.id;
   const b = r.doc.exec<{ clipId: string }>('playlist.addAudio', { path: BEAT, name: 'Beat Song', trackId: tB, start: 0 }, { actor: USER }).data!;
-  // Song / pattern mode is UI state outside undo history (transport.setMode history: false), like File ▸ Open audio as project.
   const snap = () => JSON.stringify({ ...r.doc.project, transport: { ...r.doc.project.transport, mode: 'x' } });
   const before = snap();
   const h0 = r.doc.getHistory().length;
@@ -445,7 +412,6 @@ test('cancel during separation: nothing is changed; a second build while one run
 });
 
 test("key from the stems' notes: a vocal that already sings in the beat's key isn't moved, whatever its song's label; levels matched", async () => {
-  // Vocal Song's mix reads Gm, but its vocal stem sings in A minor: on Beat Song (Am) it needs no shift.
   const r = rig({ cached: ['Vocal Song', 'Beat Song'], vocalProfile: { 'Vocal Song': profileOf(9, true) } });
   const c = (await r.svc.check(req())).data as MashupCheck;
   assert.deepEqual([c.plan.shiftA.semitones, c.plan.shiftB.semitones], [0, 0]);
@@ -456,13 +422,10 @@ test("key from the stems' notes: a vocal that already sings in the beat's key is
   assert.equal(out.ok, true, out.message);
   const voc = channelByName(r.doc, /Vocals$/)!;
   assert.ok(!voc.generator.params.pitch, 'not pitched');
-  // Both songs measure -9 LUFS: every part at -14 (-5 dB on the channel's 0.78), the vocal 1 dB over.
   const drums = channelByName(r.doc, /Drums$/)!;
   assert.ok(Math.abs(drums.volume - 0.78 * Math.pow(10, -5 / 20)) < 1e-3, String(drums.volume));
   assert.ok(Math.abs(voc.volume - 0.78 * Math.pow(10, -4 / 20)) < 1e-3, String(voc.volume));
 });
-
-// ── auto_mashup (MCP) ───────────────────────────────────────────────────
 
 test('auto_mashup: dry_run checks without editing; a build into the open project is one agent step; File access applies to paths', async () => {
   const r = rig({ cached: ['Vocal Song', 'Beat Song'] });
@@ -473,7 +436,6 @@ test('auto_mashup: dry_run checks without editing; a build into the open project
   assert.match(dry.text ?? '', /Fit: \d+\/100/);
   assert.ok((dry.text ?? '').includes(MASHUP_RIGHTS_NOTE));
   assert.equal(r.doc.getHistory().length, 0);
-  // new_project refused while the project has unsaved changes.
   r.setDirty(true);
   const refused = await r.call('auto_mashup', { a: VOCAL, b: BEAT });
   assert.equal(refused.ok, false);
@@ -489,7 +451,6 @@ test('auto_mashup: dry_run checks without editing; a build into the open project
   const undo = await r.call('undo_last');
   assert.equal(undo.ok, true, undo.message);
   assert.ok(!channelByName(r.doc, /Vocals$/));
-  // A clip name works as a source; File access "browser" refuses a file outside the Browser folders.
   const r2 = rig({ fileAccess: 'browser', cached: ['Vocal Song', 'Far Song'] });
   const tr = r2.doc.exec<{ id: string }>('playlist.addTrack', { name: 'A' }, { actor: USER }).data!.id;
   r2.doc.exec('playlist.addAudio', { path: VOCAL, name: 'Vocal Song', trackId: tr, start: 0 }, { actor: USER });

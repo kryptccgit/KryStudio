@@ -1,6 +1,3 @@
-// The Vocal Booth's pure logic (src/booth/logic.ts): empty song, the beat to loop and its placement (never on the
-// Vocals track, one clip per pattern length), bar labels, the blocker and "Hear yourself" sentences; plus the entry
-// points being wired (Home action, record button, Recording Studio, command list).
 import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -13,14 +10,12 @@ import { HOME_ACTION_IDS } from '../src/home/logic';
 import { barLabel, beatPattern, boothBlocker, fmtTakeSeconds, LOOP_BARS, loopBeatSteps, monitorStatus, nextBarTick, songIsEmpty, targetTrackName } from '../src/booth/logic';
 
 const BAR = 3840;
-/** The repo root (the bundled test runs from test/.out). */
 function repoRoot(): string {
   let dir = import.meta.dirname ?? process.cwd();
   for (let i = 0; i < 6; i++) {
     try {
       if (statSync(path.join(dir, 'package.json')).isFile()) return dir;
     } catch {
-      /* keep climbing */
     }
     dir = path.dirname(dir);
   }
@@ -57,7 +52,7 @@ test('an empty song, and the beat to loop: the active pattern when it has notes'
 
 test('Loop my beat: clips back to back over the first bars, never on the Vocals track, one undo step', () => {
   const doc = newDoc();
-  const pid = addBeat(doc); // 2 bars long
+  const pid = addBeat(doc);
   const vocals = exec<{ trackId: string }>(doc, 'recording.setupVocals', { name: 'Vocals', chain: null });
   const steps = loopBeatSteps(doc.project)!;
   assert.equal(steps.length, LOOP_BARS / 2);

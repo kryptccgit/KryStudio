@@ -1,28 +1,8 @@
-// ──────────────────────────────────────────────────────────────────────
-// Fish Audio cloud client for Krypt Voice (the user's OWN key; opt-in).
-// API (docs.fish.audio, checked 2026-10):
-//   POST /v1/tts            header `model: s2.1-pro-free` (the free developer
-//                           tier), JSON {text, reference_id, format:'wav',
-//                           sample_rate, prosody:{speed}, normalize, latency}
-//   GET  /model?licensed=true   Fish's own licensed voices (rights secured
-//                           from the voice owner): the "official" list; the
-//                           community library is never offered
-//   POST /model             multipart: type=tts, train_mode=fast,
-//                           visibility=private, title, voices=<wav> → {_id}
-//   DELETE /model/{id}
-//   POST /v1/asr            multipart audio → {text} (consent-line check)
-//   GET  /wallet/self/api-credit   key check (spends nothing)
-// Every call is logged as "sent to Fish Audio" (never the key or the text);
-// every failure becomes a human sentence (FishError).
-// ──────────────────────────────────────────────────────────────────────
-
 import { CONSENT_LINE } from '@shared/voice/types';
 
 export const FISH_API = 'https://api.fish.audio';
-/** The free developer tier model (Fish: free access ends in late 2026). */
 export const FISH_TTS_MODEL = 's2.1-pro-free';
 export const FISH_KEYS_URL = 'https://fish.audio/app/api-keys/';
-/** The TTS output sample rate we ask for. */
 export const FISH_SAMPLE_RATE = 44100;
 
 export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: unknown; signal?: AbortSignal }) => Promise<{
@@ -54,7 +34,6 @@ export interface FishVoice {
 export interface FishClientOptions {
   fetch: FetchLike;
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
-  /** Override the API base (tests). */
   base?: string;
 }
 
@@ -65,7 +44,6 @@ const clean = (s: unknown, max = 160): string =>
     .trim()
     .slice(0, max);
 
-/** A Fish HTTP failure → the sentence the user sees. */
 export function fishErrorMessage(status: number, body: string, what: string): string {
   let msg = '';
   try {
@@ -101,7 +79,6 @@ export function fishErrorMessage(status: number, body: string, what: string): st
   }
 }
 
-/** Did the transcript of a "my voice" recording start with the consent line (fuzzy, ≥ 70 % of its words in order)? */
 export function consentHeard(transcript: string, line = CONSENT_LINE): boolean {
   const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/'/g, '').split(/\s+/).filter(Boolean);
   const want = words(line);
@@ -109,7 +86,6 @@ export function consentHeard(transcript: string, line = CONSENT_LINE): boolean {
   const close = (a: string, b: string): boolean => {
     if (a === b) return true;
     if (Math.min(a.length, b.length) < 4 || Math.abs(a.length - b.length) > 1) return false;
-    // One edit apart (ASR spelling slips).
     let i = 0;
     let j = 0;
     let edits = 0;
@@ -178,14 +154,12 @@ export class FishClient {
     }
   }
 
-  /** Check a key with a request that spends nothing. data: whether the free credit is still there (when Fish says). */
   async verify(key: string, signal?: AbortSignal): Promise<{ freeCredit: boolean | null }> {
     const res = await this.call(key, 'checking your key', '/wallet/self/api-credit?check_free_credit=true', { method: 'GET', signal }, 'key check (no text)');
     const j = await this.json<{ has_free_credit?: boolean | null }>(res, 'checking your key').catch(() => ({ has_free_credit: null }));
     return { freeCredit: typeof j.has_free_credit === 'boolean' ? j.has_free_credit : null };
   }
 
-  /** Text → WAV bytes with one voice (reference id). */
   async tts(key: string, req: { text: string; referenceId: string; speed: number; signal?: AbortSignal }): Promise<Uint8Array> {
     const body = {
       text: req.text,
@@ -206,7 +180,6 @@ export class FishClient {
     return new Uint8Array(await res.arrayBuffer());
   }
 
-  /** Fish's own licensed voices (never the community library). */
   async officialVoices(key: string, signal?: AbortSignal): Promise<FishVoice[]> {
     const res = await this.call(key, 'listing voices', '/model?licensed=true&sort_by=score&page_size=30', { method: 'GET', signal }, 'voice list (licensed voices)');
     const j = await this.json<{ items?: Array<Record<string, unknown>> }>(res, 'listing voices');
@@ -222,7 +195,6 @@ export class FishClient {
       }));
   }
 
-  /** Speech → text (English hint), for the consent-line check. */
   async transcribe(key: string, wav: Uint8Array, signal?: AbortSignal): Promise<string> {
     const form = new FormData();
     form.append('audio', new Blob([new Uint8Array(wav)], { type: 'audio/wav' }), 'my-voice.wav');
@@ -233,7 +205,6 @@ export class FishClient {
     return typeof j.text === 'string' ? j.text : '';
   }
 
-  /** A private voice model from the user's own recording → its reference id. */
   async createVoice(key: string, req: { title: string; wav: Uint8Array; text?: string; signal?: AbortSignal }): Promise<{ id: string; state: string }> {
     const form = new FormData();
     form.append('type', 'tts');
@@ -250,7 +221,6 @@ export class FishClient {
     return { id: j._id, state: typeof j.state === 'string' ? j.state : 'created' };
   }
 
-  /** Delete a voice model; 'gone' when Fish no longer has it. */
   async deleteVoice(key: string, id: string, signal?: AbortSignal): Promise<'deleted' | 'gone'> {
     try {
       await this.call(key, 'deleting your voice', `/model/${encodeURIComponent(id)}`, { method: 'DELETE', signal }, `delete your voice model ${id}`);

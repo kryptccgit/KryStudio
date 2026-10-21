@@ -1,15 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Home background: a dark, slowly flowing texture (domain-warped noise in
-// a tiny WebGL fragment shader) in the Krypt palette. Mostly void, with
-// faint indigo haze and thin purple → pink veins: the gradient stays an
-// accent (kryptguidelines §2.2, 80/20).
-//
-// Cost caps: drawn at ~40 % of CSS resolution and upscaled, at most 30 fps,
-// only while Home is up, the window is visible AND focused. Reduced motion
-// draws one still frame. Lite mode / no WebGL → a static CSS gradient.
-// Ticks ride the shared frame loop (src/render/frameLoop.ts).
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, useState } from 'react';
 import { onFrame } from '../render/frameLoop';
 
@@ -38,7 +26,6 @@ void main(){
   gl_FragColor=vec4(col,1.);
 }`;
 
-/** Fraction of CSS pixels rendered (the texture is soft; upscaling hides it). */
 const RENDER_SCALE = 0.4;
 const FRAME_SEC = 1 / 30;
 
@@ -88,7 +75,6 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
-/** Static fallback (Lite mode, no WebGL): layered gradients, no animation. */
 function StillGradient() {
   return (
     <div
@@ -110,7 +96,6 @@ export function HomeBackground({ lite }: { lite: boolean }) {
     if (lite || failed) return;
     const host = hostRef.current;
     if (!host) return;
-    // A fresh canvas per run: a context released with loseContext() can't be reused.
     const canvas = document.createElement('canvas');
     canvas.className = 'absolute inset-0 h-full w-full';
     host.appendChild(canvas);
@@ -121,7 +106,7 @@ export function HomeBackground({ lite }: { lite: boolean }) {
       return;
     }
     const { gl } = g;
-    const start = performance.now() - 40_000 * Math.random(); // a different frame each open
+    const start = performance.now() - 40_000 * Math.random();
     let width = 0;
     let height = 0;
     const resize = (): void => {
@@ -150,7 +135,6 @@ export function HomeBackground({ lite }: { lite: boolean }) {
     };
     let focused = document.hasFocus();
     const run = (): void => {
-      // Pause while hidden, minimised or unfocused; reduced motion = one still frame.
       const active = !reduced && focused && document.visibilityState === 'visible';
       if (!active) {
         stop();
@@ -196,7 +180,7 @@ export function HomeBackground({ lite }: { lite: boolean }) {
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('blur', onBlur);
       document.removeEventListener('visibilitychange', run);
-      gl.getExtension('WEBGL_lose_context')?.loseContext(); // free the context now, not at GC
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
       canvas.remove();
     };
   }, [lite, failed, reduced]);
@@ -204,7 +188,6 @@ export function HomeBackground({ lite }: { lite: boolean }) {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
       {lite || failed ? <StillGradient /> : <div ref={hostRef} className="absolute inset-0" />}
-      {/* soft vignette so cards always sit on near-black */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_40%,rgba(10,10,15,0.55)_100%)]" />
     </div>
   );

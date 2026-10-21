@@ -1,7 +1,3 @@
-// Rack verbs for the renderer (Wave 12.2, research/16 §2.3): wrap a channel / mixer slot in a rack, slice audio
-// to drum pads, and the menu items other panels add (Channel Rack, mixer slots, Browser, Playlist clips). Every
-// edit is a doc command through dispatch(); failures toast (the dispatch error handler), successes flash a hint.
-
 import { Boxes, Drum, Layers, Scissors } from 'lucide-react';
 import type { AudioTarget, SliceToPadsOptions } from '@shared/types';
 import { pluginById } from '@shared/plugins/catalog';
@@ -14,7 +10,6 @@ import { wm } from '../workspace/WindowManager';
 
 export type RackTarget = { channelId: string } | { insertId: string; slotId: string };
 
-/** Command args addressing a rack. */
 export function rackArgs(t: RackTarget): Record<string, string> {
   return 'channelId' in t ? { channelId: t.channelId } : { insertId: t.insertId, slotId: t.slotId };
 }
@@ -60,7 +55,6 @@ export async function addEffectRack(insertId: string): Promise<boolean> {
 
 let slicing = false;
 
-/** Slice audio onto a drum rack in main (the analyzer finds the hits); toasts the result and opens the rack. */
 export async function sliceToPads(source: AudioTarget, opts: SliceToPadsOptions = {}): Promise<boolean> {
   if (slicing) {
     toast.info('Already slicing: wait for it to finish');
@@ -89,7 +83,6 @@ export async function sliceToPads(source: AudioTarget, opts: SliceToPadsOptions 
   }
 }
 
-/** "Slice to pads" with the common ways to cut. */
 export function sliceMenuItem(source: AudioTarget, extra: SliceToPadsOptions = {}): MenuItem {
   const go = (o: SliceToPadsOptions) => () => void sliceToPads(source, { ...extra, ...o });
   return {
@@ -110,7 +103,6 @@ export function sliceMenuItem(source: AudioTarget, extra: SliceToPadsOptions = {
   };
 }
 
-/** Channel Rack menu entries: wrap in a rack (instrument / drum), new empty racks, slice a sample channel. */
 export function channelRackItems(channelId: string): MenuItem[] {
   const p = getProject();
   const ch = p.channels[channelId];
@@ -139,7 +131,6 @@ export function channelRackItems(channelId: string): MenuItem[] {
   return items;
 }
 
-/** Mixer slot menu entries: wrap the effect in an effect rack. */
 export function slotRackItems(insertId: string, slotId: string): MenuItem[] {
   const slot = getProject().mixer.inserts[insertId]?.slots[slotId];
   if (!slot || isRackPlugin(slot.type)) return [];

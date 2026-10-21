@@ -1,9 +1,3 @@
-//! CLAP hosting on top of clack-host (MIT OR Apache-2.0).
-//!
-//! Main-thread side: `ClapInstance` (instantiate, activate, state, GUI,
-//! main-thread callbacks). Audio side: `ClapProc`, run by the instance's
-//! real-time thread, translating the shared block into CLAP events/buffers.
-
 use crate::audio::{AudioThread, Processor};
 use crate::serve::{Hosted, LoadArgs};
 use crate::{win, wire};
@@ -25,8 +19,6 @@ use std::sync::atomic::{AtomicBool, Ordering::*};
 use std::sync::{Arc, Mutex};
 use windows_sys::Win32::Foundation::HWND;
 
-// ── Host handlers ────────────────────────────────────────────────────────
-
 pub struct KryptClap;
 
 impl HostHandlers for KryptClap {
@@ -46,7 +38,6 @@ impl HostHandlers for KryptClap {
     }
 }
 
-/// Flags plugin threads raise for the UI thread.
 pub struct ClapShared {
     callback: AtomicBool,
     restart: AtomicBool,
@@ -75,7 +66,6 @@ impl<'a> SharedHandler<'a> for ClapShared {
         win::wake();
     }
     fn request_process(&self) {
-        // The engine decides when to process; we're always active.
     }
     fn request_callback(&self) {
         self.callback.store(true, Release);
@@ -160,17 +150,13 @@ pub fn new_instance(entry: &PluginEntry, plugin_id: &str) -> Result<PluginInstan
     PluginInstance::<KryptClap>::new(|_| ClapShared::new(), |shared| ClapMain { shared }, entry, &cid, &host_info()).map_err(|e| format!("couldn't create the plugin: {e}"))
 }
 
-// ── Ports ────────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Default)]
 pub struct Ports {
-    /// Channel count per audio input port.
     pub inputs: Vec<u32>,
     pub main_in: Option<usize>,
     pub outputs: Vec<u32>,
     pub main_out: Option<usize>,
     pub note_inputs: u32,
-    /// The plugin's first note port only speaks MIDI.
     pub midi_notes: bool,
 }
 
@@ -222,14 +208,11 @@ pub fn discover_ports(h: &mut PluginMainThreadHandle, effect_default: bool) -> P
     p
 }
 
-// ── Params (descriptor export, used by the scanner) ──────────────────────
-
 fn cstr_lossy(b: &[u8]) -> String {
     let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
     String::from_utf8_lossy(&b[..end]).trim().to_string()
 }
 
-/// ParamSpec-shaped JSON for every visible, writable parameter.
 pub fn describe_params(h: &mut PluginMainThreadHandle) -> Vec<Value> {
     let Some(params) = h.get_extension::<PluginParams>() else { return Vec::new() };
     let mut out = Vec::new();
@@ -299,17 +282,13 @@ pub fn gui_support(h: &mut PluginMainThreadHandle) -> Option<GuiConfiguration<'s
     None
 }
 
-// ── Audio side ───────────────────────────────────────────────────────────
-
 struct ClapProc {
     proc: PluginAudioProcessor<KryptClap>,
     ports: Ports,
     max: usize,
     in_ports: AudioPorts,
     out_ports: AudioPorts,
-    /// Zeroed buffers for every input channel we don't feed.
     scratch_in: Vec<f32>,
-    /// Throw-away outputs for non-main ports / extra channels.
     scratch_out: Vec<f32>,
     mono: Vec<f32>,
     ev_in: EventBuffer,
@@ -319,7 +298,6 @@ struct ClapProc {
     steady: u64,
 }
 
-// SAFETY: PluginAudioProcessor is Send; the raw buffers are owned plain data.
 unsafe impl Send for ClapProc {}
 
 impl ClapProc {
@@ -347,7 +325,6 @@ impl Processor for ClapProc {
     }
 
     fn idle(&mut self) {
-        // Plugin GUI edits while the engine isn't calling process().
         let want = self.proc.access_shared_handler(|s| s.flush.swap(false, AcqRel));
         if let (true, Some(params)) = (want, self.params) {
             if let Ok(p) = self.proc.as_started_mut() {
@@ -359,7 +336,6 @@ impl Processor for ClapProc {
     }
 
     fn process(&mut self, blk: *mut Block, events: &[Ev]) -> Result<(), ()> {
-        // SAFETY: the audio thread owns the block for this call (audio.rs).
         let b = unsafe { &mut *blk };
         let n = (b.frames as usize).min(self.max);
         if n == 0 {
@@ -369,7 +345,6 @@ impl Processor for ClapProc {
         if b.flags & flag::RESET != 0 {
             p.reset();
         }
-        // Events (already sorted by offset).
         self.ev_in.clear();
         let last = (n - 1) as u32;
         for e in events {
@@ -411,7 +386,6 @@ impl Processor for ClapProc {
             }
         }
 
-        // Audio buffers: the main ports map straight onto the shared block.
         let inp = b.audio_in.as_mut_ptr() as *mut f32;
         let outp = b.audio_out.as_mut_ptr() as *mut f32;
         let stride = krypt_studio_pluginclient::shm::MAX_FRAMES;
@@ -419,11 +393,9 @@ impl Processor for ClapProc {
         let sin = self.scratch_in.as_mut_ptr();
         let sout = self.scratch_out.as_mut_ptr();
         let mono = self.mono.as_mut_ptr();
-        // Mono main input: L+R mixdown.
         if let Some(mi) = self.ports.main_in {
             if self.ports.inputs[mi] == 1 {
                 for i in 0..n {
-                    // SAFETY: n ≤ max ≤ MAX_FRAMES; buffers sized accordingly.
                     unsafe { *mono.add(i) = 0.5 * (*inp.add(i) + *inp.add(stride + i)) };
                 }
             }
@@ -437,7 +409,6 @@ impl Processor for ClapProc {
             AudioPortBuffer {
                 latency: 0,
                 channels: AudioPortBufferType::f32_input_only((0..chs as usize).map(move |c| {
-                    // SAFETY: every pointer targets a buffer of ≥ n frames that outlives the call.
                     let ptr = unsafe {
                         if main && chs == 1 {
                             mono
@@ -461,14 +432,11 @@ impl Processor for ClapProc {
             AudioPortBuffer {
                 latency: 0,
                 channels: AudioPortBufferType::f32_output_only((0..chs as usize).map(move |c| {
-                    // SAFETY: as above.
                     let ptr = unsafe { if main && c < 2 { outp.add(c * stride) } else { sout.add((base + c) * max) } };
                     unsafe { std::slice::from_raw_parts_mut(ptr, n) }
                 })),
             }
         }));
-        // Zero the outputs first: some plugins only add.
-        // SAFETY: owned block.
         unsafe {
             std::ptr::write_bytes(outp, 0, n);
             std::ptr::write_bytes(outp.add(stride), 0, n);
@@ -500,14 +468,11 @@ impl Processor for ClapProc {
         let mut output_events = OutputEvents::from_buffer(&mut self.ev_out);
         let r = p.process(&ins, &mut outs, &input_events, &mut output_events, Some(self.steady), Some(&transport));
         self.steady = self.steady.wrapping_add(n as u64);
-        // Mono main output → both sides.
         if let Some(mo) = self.ports.main_out {
             if self.ports.outputs[mo] == 1 {
-                // SAFETY: owned block.
                 unsafe { std::ptr::copy_nonoverlapping(outp, outp.add(stride), n) };
             }
         } else {
-            // No audio output at all (MIDI effect): silence.
             unsafe {
                 std::ptr::write_bytes(outp, 0, n);
                 std::ptr::write_bytes(outp.add(stride), 0, n);
@@ -520,8 +485,6 @@ impl Processor for ClapProc {
         }
     }
 }
-
-// ── Main-thread instance ─────────────────────────────────────────────────
 
 struct Editor {
     container: Option<HWND>,
@@ -549,8 +512,6 @@ pub struct ClapInstance {
 
 impl ClapInstance {
     pub fn load(a: &LoadArgs) -> Result<ClapInstance, String> {
-        // SAFETY: loading foreign code is what this process exists for; a
-        // crash here takes down only the plugin host.
         let entry = unsafe { PluginEntry::load(&a.path) }.map_err(|e| format!("couldn't load {}: {e}", a.path))?;
         let name = {
             let f = entry.get_plugin_factory().ok_or("the file has no CLAP plugin factory")?;
@@ -593,7 +554,6 @@ impl ClapInstance {
     fn activate(&mut self) -> Result<(), String> {
         let cfg = PluginAudioConfiguration { sample_rate: self.sr, min_frames_count: 1, max_frames_count: self.max_frames };
         let stopped = self.instance.activate(|_, _| (), cfg).map_err(|e| format!("{} failed to activate: {e}", self.name))?;
-        // `latency.changed` during activate is expected: we re-read it right here.
         self.instance.access_shared_handler(|s| s.latency_changed.store(false, Release));
         let lat = match self.latency {
             Some(l) => l.get(&mut self.instance.plugin_handle()),
@@ -691,7 +651,6 @@ impl Hosted for ClapInstance {
         gui.create(&mut h, cfg).map_err(|e| format!("the plugin couldn't create its editor: {e}"))?;
         if cfg.is_floating {
             if !owner.is_null() {
-                // SAFETY: the owner HWND stays valid while the app runs.
                 let _ = unsafe { gui.set_transient(&mut h, ClapWindow::from_win32_hwnd(owner as *mut core::ffi::c_void)) };
             }
             if let Ok(t) = CString::new(title) {
@@ -720,7 +679,6 @@ impl Hosted for ClapInstance {
             initial
         };
         win::set_client_size(container, size.width.max(64), size.height.max(48));
-        // SAFETY: the container outlives the embedded GUI (destroyed after gui.destroy).
         if let Err(e) = unsafe { gui.set_parent(&mut h, ClapWindow::from_win32_hwnd(container as *mut core::ffi::c_void)) } {
             gui.destroy(&mut h);
             win::destroy(container);
@@ -786,7 +744,6 @@ impl Hosted for ClapInstance {
             }
         }
         if closed && self.editor.is_some() {
-            // The plugin closed its own window.
             if let Some(ed) = self.editor.take() {
                 if let Some(gui) = self.gui {
                     gui.destroy(&mut self.instance.plugin_handle());
@@ -810,7 +767,6 @@ impl Hosted for ClapInstance {
             }
         }
         if restart {
-            // Restart (e.g. latency change): re-activate between blocks.
             self.deactivate();
             if let Err(e) = self.activate() {
                 wire::event(json!({ "event": "pluginError", "inst": self.id, "message": e }));

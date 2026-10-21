@@ -1,7 +1,3 @@
-// The Scripts guide (Wave 12.2b, research/17; scripts). Kept in its own file; articles.ts lists it after the
-// piano roll guides. Pure data. Every label here matches src/panels/pianoRoll/scriptsDialog.tsx and the factory
-// scripts in shared/scripts/factory.ts.
-
 import type { GuideArticle } from './articles';
 
 export const SCRIPTS_ARTICLE: GuideArticle = {

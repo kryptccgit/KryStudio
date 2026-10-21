@@ -1,11 +1,3 @@
-// "Sounds like" search over track feature vectors (tempo, key, swing,
-// loudness, bands, width, onset density, drum density …). Pure.
-//
-// Each dimension has a fixed scale (a "typical spread" between different
-// songs) and a weight. similarity() compares the scaled differences over the
-// dimensions both vectors know (NaN = missing), so a light-pass track still
-// compares with a deep one. Brute force is fine at 10k tracks (research/08 §4.1).
-
 import type { AudioAnalysis } from '../analyzer/protocol';
 import { parseKey } from '../music/theory';
 import type { DrumGrid } from './types';
@@ -14,18 +6,14 @@ import { isNum, round } from './stats';
 
 interface Dim {
   name: string;
-  /** Difference that counts as "one typical spread". */
   scale: number;
   weight: number;
 }
 
-/** The vector layout (VECTOR_VERSION 1). */
 export const FEATURE_DIMS: readonly Dim[] = [
-  // Tempo folded into one octave (70–140) on a circle, so 70 and 140 read the same; plus the raw tempo (log2).
   { name: 'tempo.fold.sin', scale: 0.5, weight: 1 },
   { name: 'tempo.fold.cos', scale: 0.5, weight: 1 },
   { name: 'tempo.log2', scale: 0.3, weight: 0.5 },
-  // Key on the circle of fifths (relative major, so Am = C) + mode.
   { name: 'key.fifths.sin', scale: 0.8, weight: 0.5 },
   { name: 'key.fifths.cos', scale: 0.8, weight: 0.5 },
   { name: 'key.minor', scale: 1, weight: 0.5 },
@@ -35,7 +23,6 @@ export const FEATURE_DIMS: readonly Dim[] = [
   { name: 'lra', scale: 3, weight: 0.5 },
   { name: 'width', scale: 0.15, weight: 0.75 },
   { name: 'correlation', scale: 0.25, weight: 0.5 },
-  // Band balance: each band relative to the mean of the six (dB).
   { name: 'band.sub', scale: 4, weight: 0.5 },
   { name: 'band.low', scale: 4, weight: 0.5 },
   { name: 'band.lowMid', scale: 4, weight: 0.5 },
@@ -44,20 +31,16 @@ export const FEATURE_DIMS: readonly Dim[] = [
   { name: 'band.high', scale: 4, weight: 0.5 },
   { name: 'centroid.log2', scale: 0.5, weight: 0.75 },
   { name: 'onset.rate', scale: 1.5, weight: 1 },
-  /** Standard deviation of the short-term loudness curve (dB): how much the energy moves. */
   { name: 'energy.std', scale: 2, weight: 0.5 },
-  // Drum density: hits per bar per role (from the drum grid).
   { name: 'drums.kick', scale: 1.5, weight: 0.75 },
   { name: 'drums.snare', scale: 1, weight: 0.75 },
   { name: 'drums.hat', scale: 4, weight: 0.75 },
   { name: 'drums.openhat', scale: 1, weight: 0.5 },
   { name: 'drums.perc', scale: 1.5, weight: 0.5 },
   { name: 'drums.rolls', scale: 0.3, weight: 0.5 },
-  /** Snare on beat 3 vs on 2 + 4 (1 = half-time backbeat). */
   { name: 'drums.halftime', scale: 0.5, weight: 0.5 },
 ];
 
-/** The meaning of each vector dimension, in order (stored with the vectors; bump VECTOR_VERSION when it changes). */
 export const FEATURE_NAMES: readonly string[] = FEATURE_DIMS.map((d) => d.name);
 export const VECTOR_VERSION = 1;
 
@@ -139,7 +122,6 @@ export function featureVector(analysis: AudioAnalysis, drums: DrumGrid | null): 
   return out;
 }
 
-/** Similarity 0..1 between two vectors (normalised distance; handles missing dims as NaN). */
 export function similarity(a: number[], b: number[]): number {
   const n = Math.min(a.length, b.length, FEATURE_DIMS.length);
   let num2 = 0;
@@ -155,7 +137,6 @@ export function similarity(a: number[], b: number[]): number {
   }
   if (wsum <= 0) return 0;
   const sim = 1 / (1 + num2 / wsum);
-  // Vectors that share only a few dimensions can't be very similar with confidence.
   const coverage = Math.min(1, wsum / (0.5 * TOTAL_WEIGHT));
   return round(sim * coverage, 4);
 }

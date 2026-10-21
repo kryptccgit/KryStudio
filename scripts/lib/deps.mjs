@@ -1,28 +1,13 @@
-// Dependency inventory shared by scripts/gen-notices.mjs and
-// scripts/license-check.mjs. Two sources of truth:
-//
-//   npm   package-lock.json + node_modules: production dependencies, plus the
-//         devDependencies the app source actually imports (they get bundled
-//         into the renderer / main by Vite), plus the Electron runtime.
-//   cargo `cargo metadata --filter-platform x86_64-pc-windows-msvc`: every
-//         crate reachable from the engine workspace members, classified as
-//         runtime (linked into a shipped exe), build-time (build scripts and
-//         proc-macros) or dev-only (tests/benches; never shipped).
-//
-// Pure Node, no dependencies, so it runs right after `npm ci` in CI.
-
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 export const root = path.resolve(import.meta.dirname, '..', '..');
 export const WIN_TARGET = 'x86_64-pc-windows-msvc';
-/** Every target a release ships for (.github/workflows/release.yml): notices and the licence gate cover their union. */
 export const SHIP_TARGETS = [WIN_TARGET, 'aarch64-apple-darwin', 'x86_64-unknown-linux-gnu'];
 
 // ── SPDX ──────────────────────────────────────────────────────────────
 
-/** Licences we accept without review (research/05 §10). */
 export const ALLOWED = new Set([
   'MIT',
   'MIT-0',
@@ -36,7 +21,7 @@ export const ALLOWED = new Set([
   'Unlicense',
   'CC0-1.0',
   'BSL-1.0',
-  'MPL-2.0', // file-level copyleft; used unmodified, flagged in the notices
+  'MPL-2.0',
   'Unicode-3.0',
   'Unicode-DFS-2016',
   'BlueOak-1.0.0',
@@ -44,15 +29,13 @@ export const ALLOWED = new Set([
   'OFL-1.1',
 ]);
 
-/** Copyleft or source-available licences that are never accepted without an explicit approval. */
 export const DENIED = /^(AGPL|GPL|LGPL|SSPL|EUPL|OSL|RPL|CPAL|Sleepycat|BUSL|Elastic|CC-BY-NC|CC-BY-SA|Commons-Clause)/i;
 
-/** Preference when a package offers a choice (lower = preferred). */
 const PREFERENCE = ['MIT', 'Apache-2.0', 'BSD-3-Clause', 'BSD-2-Clause', 'ISC', 'Zlib', '0BSD', 'MIT-0', 'Unlicense', 'CC0-1.0', 'BSL-1.0', 'BSD-1-Clause', 'Unicode-3.0', 'Unicode-DFS-2016', 'BlueOak-1.0.0', 'Python-2.0', 'MPL-2.0'];
 
 function tokenize(expr) {
   return String(expr)
-    .replace(/\//g, ' OR ') // legacy "MIT/Apache-2.0"
+    .replace(/\//g, ' OR ')
     .replace(/[()]/g, (m) => ` ${m} `)
     .split(/\s+/)
     .filter(Boolean);
@@ -110,10 +93,6 @@ export function spdxDnf(expr) {
 const baseId = (id) => id.replace(/\s+WITH\s+.*$/i, '').replace(/\+$/, '');
 const isAllowedId = (id) => ALLOWED.has(baseId(id)) || /^Apache-2\.0 WITH LLVM-exception$/i.test(id);
 
-/**
- * Evaluate a licence expression against the allowlist.
- * → { ok, chosen: string[] | null, denied: string[], unknown: string[] }
- */
 export function evaluateLicense(expr) {
   if (!expr || /^(UNLICENSED|NONE|NOASSERTION|UNKNOWN)$/i.test(String(expr).trim())) return { ok: false, chosen: null, denied: [], unknown: [String(expr || 'none')] };
   let dnf;
@@ -129,11 +108,8 @@ export function evaluateLicense(expr) {
   return { ok: false, chosen: null, denied: ids.filter((id) => DENIED.test(id)), unknown: ids.filter((id) => !DENIED.test(id) && !isAllowedId(id)) };
 }
 
-// ── Licence files on disk ─────────────────────────────────────────────
-
 const LICENSE_FILE = /^(licen[cs]e|copying|unlicense|notice|copyright|ofl)([-._].*)?$/i;
 
-/** Licence-ish files in a package directory (top level only), sorted. */
 export function licenseFiles(dir) {
   let names = [];
   try {
@@ -154,7 +130,6 @@ export function licenseFiles(dir) {
     .map((n) => ({ name: n, text: readFileSync(path.join(dir, n), 'utf8').replace(/\r\n/g, '\n').replace(/^﻿/, '').trim() }));
 }
 
-/** Classify a licence text by its content. */
 export function classifyText(text) {
   if (/Apache License\s*\n?\s*Version 2\.0/i.test(text) && /TERMS AND CONDITIONS FOR USE/i.test(text)) return 'Apache-2.0';
   if (/Mozilla Public License,?\s*(Version|v\.)\s*2\.0/i.test(text) && /1\.\s*Definitions/i.test(text)) return 'MPL-2.0';
@@ -169,9 +144,6 @@ export function classifyText(text) {
   return 'other';
 }
 
-// ── npm ───────────────────────────────────────────────────────────────
-
-/** Packages that ship as a tool output, not as code: list them, don't walk their deps. */
 const LEAF_ROOTS = new Set(['electron', 'tailwindcss']);
 
 function readJson(p) {
@@ -196,7 +168,6 @@ function npmLicense(pj, lockEntry) {
   return '';
 }
 
-/** Bare module specifiers imported anywhere under the given folders. */
 function importedPackages(dirs) {
   const out = new Set();
   const re = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"]([^'"./][^'"]*)['"]/g;
@@ -226,10 +197,6 @@ function importedPackages(dirs) {
   return out;
 }
 
-/**
- * npm packages that end up in the installed app.
- * → [{ name, version, license, repository, dir, reason }]
- */
 export function npmShipped() {
   const pkg = readJson(path.join(root, 'package.json'));
   const lock = readJson(path.join(root, 'package-lock.json'));
@@ -268,17 +235,15 @@ export function npmShipped() {
   const out = [];
   for (const [key, reason] of seen) {
     const dir = path.join(root, key);
-    if (!existsSync(path.join(dir, 'package.json'))) continue; // optional dep not installed on this platform
+    if (!existsSync(path.join(dir, 'package.json'))) continue;
     const pj = readJson(path.join(dir, 'package.json'));
     out.push({ name: pj.name, version: pj.version, license: npmLicense(pj, entries[key]), repository: repoUrl(pj), dir, reason });
   }
-  // One row per name@version (the same package can be installed at several paths).
   const uniq = new Map();
   for (const p of out) if (!uniq.has(`${p.name}@${p.version}`)) uniq.set(`${p.name}@${p.version}`, p);
   return [...uniq.values()].sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 }
 
-/** Every package in the lockfile (dev included) with its declared licence: for the dev-tool warning pass. */
 export function npmAll() {
   const lock = readJson(path.join(root, 'package-lock.json'));
   const out = [];
@@ -290,15 +255,12 @@ export function npmAll() {
       try {
         license = npmLicense(readJson(path.join(root, key, 'package.json')), null);
       } catch {
-        /* not installed */
       }
     }
     out.push({ name, version: e.version, license, dev: !!e.dev, optional: !!e.optional });
   }
   return out;
 }
-
-// ── cargo ─────────────────────────────────────────────────────────────
 
 export function cargoMetadata() {
   const manifest = path.join(root, 'engine', 'Cargo.toml');
@@ -314,18 +276,14 @@ export function cargoMetadata() {
   throw new Error(`cargo metadata failed:\n${last}`);
 }
 
-/**
- * Every third-party crate the engine workspace pulls in for Windows, macOS or Linux.
- * → { members: [{name, version}], crates: [{ name, version, license, repository, dir, use: 'runtime'|'build'|'dev', usedBy: string[] }] }
- */
 export function cargoCrates(meta = cargoMetadata()) {
   const pkgs = new Map(meta.packages.map((p) => [p.id, p]));
   const nodes = new Map(meta.resolve.nodes.map((n) => [n.id, n]));
   const members = new Set(meta.workspace_members);
   const isProcMacro = (id) => pkgs.get(id)?.targets?.some((t) => t.kind.includes('proc-macro'));
   const rank = { runtime: 0, build: 1, dev: 2 };
-  const use = new Map(); // id → 'runtime' | 'build' | 'dev'
-  const usedBy = new Map(); // id → Set(member names) that need it to build (dev deps excluded)
+  const use = new Map();
+  const usedBy = new Map();
 
   for (const mid of members) {
     const name = pkgs.get(mid).name;

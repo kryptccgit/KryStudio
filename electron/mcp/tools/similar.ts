@@ -1,7 +1,3 @@
-// "More like this" for agents: find_samples {like} and find_presets {like} (research/13 §12.1). The `like` string
-// is a factory / pack sample path, an instrument preset id (or exact name), or an audio file under the agent's
-// File access policy; electron/sounds/similar.ts does the measuring and ranking.
-
 import type { SimilarQuery, SimilarResult, SimilarSource } from '@shared/types';
 import type { MainDeps } from '../types';
 import { findSimilar, similarDepsFor, type SimilarDeps } from '../../sounds/similar';
@@ -9,7 +5,6 @@ import { fail, ToolFailure, type RunCtx, type ToolCaller } from './types';
 import { agentSamplePath, AUDIO_EXT, safeName, unquotePath } from './util';
 import { soundLibrary } from './instruments';
 
-/** What a `like` argument names: a sample path, or an instrument preset (id or exact name). */
 export function likeSource(deps: MainDeps, like: string): SimilarSource {
   const s = unquotePath(like);
   if (!s) fail('like is empty: pass a sample path (factory:… / pack:… / an audio file) or an instrument preset id.');
@@ -22,7 +17,6 @@ export function likeSource(deps: MainDeps, like: string): SimilarSource {
   fail(`like "${safeName(s, 80)}" isn't a sample path or a preset: pass a path from find_samples (factory:… / pack:…), an absolute audio file path, or a preset id from find_presets.`);
 }
 
-/** Rank the library around `like` for an agent (progress + cancel from the call). Throws ToolFailure on refusal. */
 export async function similarForAgent(deps: MainDeps, caller: ToolCaller, ctx: RunCtx | undefined, like: string, q: SimilarQuery, classify?: SimilarDeps['classify']): Promise<SimilarResult & { message: string }> {
   const source = likeSource(deps, like);
   const userFile: SimilarDeps['userFile'] = (p) => {
@@ -41,14 +35,12 @@ export async function similarForAgent(deps: MainDeps, caller: ToolCaller, ctx: R
   return { ...r.data, message: r.message ?? '' };
 }
 
-/** "pack sounds still being measured" + other notes, for warnings. */
 export function similarWarnings(r: SimilarResult): string[] {
   const out = [...r.notes];
   if (r.pending) out.push(`${r.pending} installed pack sound(s) of this kind are still being measured: call again with the same like to include them.`);
   return out;
 }
 
-/** "(kick)" / "(a kick, judged by its sound)" for the message. */
 export function likeKindText(r: SimilarResult): string {
   if (!r.source.kind) return '';
   return r.source.inferred ? ` (sounds like a ${r.source.kind})` : ` (${r.source.kind})`;

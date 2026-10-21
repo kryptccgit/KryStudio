@@ -1,7 +1,3 @@
-// project.scripts: the scripts a song keeps (optional, additive: no
-// migration). zod for load-time validation + the integrity checks zod can't
-// express. Imported by shared/schema/project.ts.
-
 import { z } from 'zod';
 import type { ProjectScript } from './types';
 import { SCRIPT_ID_PREFIX, SCRIPT_LIMITS } from './types';

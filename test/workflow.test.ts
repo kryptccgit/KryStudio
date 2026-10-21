@@ -1,7 +1,3 @@
-// Wave 12.2b "workflow": time signatures (picker maths, grids, bar maths in
-// other meters), marker commands + ruler hit maths, clip fades / crossfades
-// (geometry, engine-parity gain), user templates (store + service round
-// trip), the tempo of a dropped loop, and the MCP arguments for all of it.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -31,8 +27,6 @@ import { callTool, newSession, type ToolCaller } from '../electron/mcp/tools';
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'krypt-workflow-'));
 const host = (p?: Project) => new DocHost(p ?? createDefaultProject('W'), CATALOG, { strict: true });
 const exec = <T = unknown>(d: DocHost, cmd: string, args: unknown) => d.exec<T>(cmd, args, { actor: USER });
-
-// ── Time signatures ───────────────────────────────────────────────────
 
 test('time signature parsing, presets and validation', () => {
   assert.deepEqual(parseTimeSig('7/8'), { num: 7, den: 8 });
@@ -105,8 +99,6 @@ test('KPN stats name out-of-key notes by 16th step in any meter (3/4 bar 2, beat
   assert.ok(s.outOfKeyNotes.some((x) => x.endsWith('@2.5')), s.outOfKeyNotes.join(', '));
 });
 
-// ── Markers ───────────────────────────────────────────────────────────
-
 test('marker commands: rename (trimmed, never empty / same / too long), move, remove; one undo each', () => {
   const d = host();
   const id = exec<{ id: string }>(d, 'playlist.addMarker', { tick: 0, name: 'Marker 1' }).data!.id;
@@ -156,8 +148,6 @@ test('ruler marker hit-testing covers the flag and the label; drag preview moves
   assert.deepEqual(moved.map((m) => m.tick), [0, 3840]);
   assert.deepEqual(markersWithDrag(ms, { id: 'b', orig: 960, tick: 3840, downX: 0, moved: false }).map((m) => m.tick), [0, 960]);
 });
-
-// ── Fades ─────────────────────────────────────────────────────────────
 
 const audio = (id: string, start: number, length: number, extra: Partial<Clip> = {}): Clip => ({ id, trackId: 't', kind: 'audio', start, length, offset: 0, mute: false, color: null, channelId: 'ch', gain: 1, fadeIn: 0, fadeOut: 0, ...extra });
 
@@ -217,7 +207,6 @@ test('playlist.setFades clamps, refuses pattern clips; playlist.crossfade on a s
   const trackId = d.project.playlist.clips[clipId].trackId;
   const pat = exec<{ id: string }>(d, 'playlist.addClip', { kind: 'pattern', trackId, start: 3840 * 8, patternId: d.project.patternOrder[0] }).data!.id;
   assert.match(exec(d, 'playlist.setFades', { updates: [{ id: pat, fadeIn: 10 }] }).message!, /Only audio clips/);
-  // Split, then crossfade the right half with the left.
   const [left, right] = exec<{ ids: string[] }>(d, 'playlist.splitClip', { id: clipId, at: 3840 }).data!.ids;
   assert.equal(previousTouching(d.project, d.project.playlist.clips[right])?.id, left);
   const before = structuredClone(d.project.playlist.clips);
@@ -238,7 +227,6 @@ test('playlist.setFades clamps, refuses pattern clips; playlist.crossfade on a s
 test('fade handles: top-corner hit zones, drag lengths that never cross the other fade, the drawn lines', () => {
   const tv = { scrollTick: 0, pxPerTick: 0.1 };
   const c = audio('a', 1000, 4000, { fadeIn: 400, fadeOut: 0 });
-  // clip spans x 100..500; fade-in handle at x 140, fade-out handle at x 500
   assert.equal(hitFadeHandle(c, tv, 20, 141, 22), 'in');
   assert.equal(hitFadeHandle(c, tv, 20, 498, 22), 'out');
   assert.equal(hitFadeHandle(c, tv, 20, 141, 20 + FADE_ZONE_H + 5), null, 'only near the top edge');
@@ -257,8 +245,6 @@ test('fade handles: top-corner hit zones, drag lengths that never cross the othe
   assert.equal(fadeLabel(960, PPQ), '1 beat');
   assert.equal(fadeLabel(0, PPQ), 'No fade');
 });
-
-// ── Follow tempo on drop ──────────────────────────────────────────────
 
 test('bpmFromName reads tempos written in file names; one-shots and keys are not tempos', () => {
   const cases: Array<[string, number | null]> = [
@@ -297,7 +283,6 @@ test('loopBpmFor: library metadata wins (a one-shot stays a one-shot even with a
 test('turning on Follow tempo after a drop is its own undo step and rescales the clip to exact bars', () => {
   const { d, clipId } = withAudio();
   const ch = d.project.playlist.clips[clipId].channelId!;
-  // 4 s at 120 bpm = 8 beats; project 140: at the file's speed it is 4 × 140/60 = 9.33 beats.
   exec(d, 'transport.set', { bpm: 140 });
   const r = d.execBatch(
     [
@@ -312,8 +297,6 @@ test('turning on Follow tempo after a drop is its own undo step and rescales the
   assert.ok(d.project.playlist.clips[clipId], 'one undo keeps the clip');
   assert.notEqual(d.project.channels[ch].generator.params.tempo_sync, 1);
 });
-
-// ── Templates ─────────────────────────────────────────────────────────
 
 const tpl = (id: string, name: string, updatedAt = '2026-01-01T00:00:00.000Z'): ProjectTemplate => ({ id, name, createdAt: updatedAt, updatedAt, bpm: 140, timeSig: '4/4', channels: 6, patterns: 1 });
 
@@ -358,10 +341,8 @@ test('TemplateStore: save, replace by name, rename (no clashes), delete; atomic,
   assert.deepEqual(store.list().map((t) => t.name), ['Trap starter']);
   assert.ok(!fs.existsSync(path.join(dir, `${a.template.id}.kstudio`)));
   assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp')), [], 'no temp files left behind');
-  // Concurrent saves never lose an index entry.
   await Promise.all(['One', 'Two', 'Three'].map((n) => store.save(n, new Uint8Array([1]), facts)));
   assert.equal(store.list().length, 4);
-  // A template whose file vanished is not listed.
   fs.rmSync(store.fileOf(store.list()[0].id));
   assert.equal(store.list().length, 3);
 });
@@ -412,8 +393,6 @@ test('ProjectService: Save as template → New from template gives a fresh, unsa
   assert.deepEqual(svc.listTemplates(), []);
   assert.equal((await svc.saveAsTemplate('   ')).ok, false);
 });
-
-// ── MCP ───────────────────────────────────────────────────────────────
 
 function mcp(dir: string) {
   const { doc, svc } = service(dir);

@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Plugin editor (one floating window per open instrument / effect). The UI
-// is generated from the catalog ParamSpecs grouped by `group`: knobs, 0/1
-// toggles and option selects. Channels also get their channel settings and
-// (for samplers) the sample with its waveform; FX slots get mix, bypass and
-// sidechain.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useMemo, useState, type ReactNode } from 'react';
 import { FolderInput, Layers, Piano, RotateCcw } from 'lucide-react';
 import { isRackPlugin } from '@shared/schema/rack';
@@ -57,7 +49,6 @@ function groupParams(desc: PluginDescriptor, skip?: readonly string[]): Array<[s
   return [...groups.entries()];
 }
 
-/** `skip`: param ids drawn by a dedicated section (e.g. the Audio Clip's Stretch & pitch). */
 function ParamGroups({ desc, refFor, skip }: { desc: PluginDescriptor; refFor: (paramId: string) => string; skip?: readonly string[] }) {
   const groups = useMemo(() => groupParams(desc, skip), [desc, skip]);
   return (
@@ -75,8 +66,6 @@ function ParamGroups({ desc, refFor, skip }: { desc: PluginDescriptor; refFor: (
   );
 }
 
-// ── Channel ───────────────────────────────────────────────────────────
-
 const ROOT_KEY: ParamSpec = { id: 'rootKey', name: 'Root key', min: 0, max: 127, default: 60, unit: '', scale: 'linear', step: 1 };
 const SWING_MIX: ParamSpec = { id: 'swing', name: 'Swing mix', min: 0, max: 1, default: 1, unit: '%', scale: 'linear' };
 const GLIDE: ParamSpec = { id: 'glideMs', name: 'Glide', min: 0, max: 2000, default: 0, unit: 'ms', scale: 'linear' };
@@ -88,7 +77,7 @@ function ChannelEditor({ channelId }: { channelId: string }) {
   const sample = useProject((p) => (p.channels[channelId]?.generator.sampleId ? p.samples[p.channels[channelId].generator.sampleId!] : null));
   const inserts = useProject((p) => p.mixer.insertOrder);
   const [drop, setDrop] = useState(false);
-  useCatalogVersion(); // re-render when installed VST3/CLAP plugins register
+  useCatalogVersion();
   if (!ch) return <Gone what="channel" />;
   const desc = pluginById(ch.generator.type);
   const set = (patch: Record<string, unknown>, key?: string) =>
@@ -274,13 +263,11 @@ function ChannelEditor({ channelId }: { channelId: string }) {
   );
 }
 
-// ── FX slot ───────────────────────────────────────────────────────────
-
 function SlotEditor({ insertId, slotId }: { insertId: string; slotId: string }) {
   const slot = useProject((p) => p.mixer.inserts[insertId]?.slots[slotId]);
   const ins = useProject((p) => p.mixer.inserts[insertId]);
   const order = useProject((p) => p.mixer.insertOrder);
-  useCatalogVersion(); // re-render when installed VST3/CLAP plugins register
+  useCatalogVersion();
   if (!slot || !ins) return <Gone what="effect" />;
   const desc = pluginById(slot.type);
   const p = getProject();

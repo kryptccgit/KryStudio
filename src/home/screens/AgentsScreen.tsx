@@ -1,7 +1,3 @@
-// Home ▸ AI Agents: who is connected, one-click setup for Claude Code /
-// Claude Desktop / Cursor / VS Code (the same snippets and installers as
-// the Agents panel's Connect tab), how to talk to an agent, and how to undo it.
-
 import { useEffect, useState } from 'react';
 import { Bot, Check, ChevronDown, ClipboardCopy, Download, History, MessageSquareText, Mic, Plug, Power, Sparkles, Undo2 } from 'lucide-react';
 import type { ClientConfigSnippet } from '@shared/types';

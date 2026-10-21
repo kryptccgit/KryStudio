@@ -1,7 +1,3 @@
-// Home ▸ Projects ▸ Your templates (Wave 12.2b): start a new project from a
-// template, rename or delete one, or save the open project as one. The
-// factory start (New project) and the demo stay as tiles above this.
-
 import { useEffect, useState } from 'react';
 import { LayoutTemplate, Pencil, Plus, Trash2 } from 'lucide-react';
 import { describeTemplate } from '@shared/templates';

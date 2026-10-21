@@ -1,7 +1,3 @@
-// The KPN cheat sheet. One source for the write_pattern tool description, the
-// krypt://docs/kpn resource, the built-in agent's system prompt and docs/MCP.md.
-// Keep it stable: tool descriptions and the agent's cached prompt prefix embed it.
-
 export const KPN_SHORT = [
   'KPN (Krypt Pattern Notation): one line per channel, bar lines are checked.',
   'Header: pattern "Name" bars=2 grid=16 [key=F#m] [ts=4/4]   (grid = steps per bar; 16 = 16th notes)',

@@ -1,6 +1,3 @@
-// Master an album: the dialog's form (songs, preset, prompt, targets, keep the dynamics), the reference song,
-// the one run with its progress and result (A/B, verdict), and Export all. Closing the dialog keeps all of it.
-
 import { create } from 'zustand';
 import type { AlbumExportOutcome, AlbumOutcome, AutoMixProgress } from '@shared/automix/types';
 import { NO_REFERENCE, type ReferenceState } from './logic';
@@ -19,15 +16,12 @@ export interface AlbumState {
   abBusy: boolean;
   verdict: 'open' | 'kept' | 'undone';
   refPlaying: boolean;
-  /** The song the result's transport plays (a row's ▶), null = the whole album. */
   selected: number | null;
-  /** Export all: idle, writing (with progress), or the last result. */
   exportFormat: AlbumExportFormat;
   exporting: 'idle' | 'running' | 'cancelling';
   exportProgress: AutoMixProgress | null;
   exported: AlbumExportOutcome | null;
   visible: boolean;
-  /** Step ③ (the reference) and "More options" stay folded until opened. */
   showReference: boolean;
   showMore: boolean;
 }
@@ -69,7 +63,6 @@ export function updateAlbumForm(act: AlbumFormAction): AlbumForm {
   return form;
 }
 
-/** Back to the form (the songs and options stay). */
 export function albumBackToForm(): void {
   useAlbum.setState({ phase: 'idle', progress: null, outcome: null, error: null, ab: 'after', abBusy: false, verdict: 'open', refPlaying: false, selected: null, exported: null, exportProgress: null });
 }

@@ -1,6 +1,3 @@
-// Playlist panel: pattern list (the brush) · track headers (DOM) · layered
-// canvas arrangement driven imperatively by PlaylistController.
-
 import { Fragment, memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowRightToLine,
@@ -104,8 +101,7 @@ export function Playlist() {
       vThumb: req(r.vThumb),
     });
     const offPeaks = onPeaksReady(() => ctl.invalidateContent());
-    if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__kryptPlaylist = ctl; // devtools / scripted UI checks
-    // Clip menu: the app menu system (submenus for Separate stems / Convert to pattern).
+    if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__kryptPlaylist = ctl;
     ctl.onMenu = (x, y, clipId) => {
       const doc = r.root.current?.ownerDocument ?? document;
       openMenu({ x, y, doc }, clipMenu(ctl, clipId, doc));
@@ -122,7 +118,6 @@ export function Playlist() {
       ctl.onEmptyMenu = null;
       ctl.onRulerMenu = null;
     };
-    // refs are stable; attach once per controller
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctl]);
 
@@ -197,7 +192,6 @@ function clipMenu(ctl: PlaylistController, clipId: string, doc: Document): AppMe
   const patSel = sel.filter((x) => x.kind === 'pattern');
   const items: AppMenuItem[] = [{ type: 'header', label: n > 1 ? `${n} clips selected` : clipName(project, c) }];
 
-  // Open: the thing most people want first.
   if (c.kind === 'pattern' && c.patternId) {
     const pid = c.patternId;
     items.push(
@@ -209,7 +203,6 @@ function clipMenu(ctl: PlaylistController, clipId: string, doc: Document): AppMe
     items.push({ label: 'Open audio editor', icon: AudioLines, hint: 'Waveform, warp, pitch and slicing for this clip', onSelect: () => wm.openPlugin({ kind: 'channel', channelId: chId }) });
   }
 
-  // Edit: the same everywhere.
   items.push(
     { type: 'separator' },
     { label: `Cut${many}`, icon: ScissorsLineDashed, shortcut: `${MOD_KEY}+X`, onSelect: () => void ctl.cut() },
@@ -237,7 +230,6 @@ function clipMenu(ctl: PlaylistController, clipId: string, doc: Document): AppMe
     );
   }
   if (patSel.length > 1) items.push({ label: `Consolidate ${patSel.length} clips`, icon: Combine, hint: 'Merge them into one pattern', onSelect: () => void ctl.consolidateSelection() });
-  // Audio clips: hear what's in them (tempo & key, stems, auto-tune, audio → pattern), mashups, fades.
   if (c.kind === 'audio')
     items.push(
       { type: 'separator' },
@@ -252,7 +244,6 @@ function clipMenu(ctl: PlaylistController, clipId: string, doc: Document): AppMe
   return items;
 }
 
-/** Right-click on empty playlist space. */
 function emptyMenu(ctl: PlaylistController, trackId: string | null, tick: number, doc: Document): AppMenuItem[] {
   const p = getProject();
   const ts = p.transport.timeSig;
@@ -283,8 +274,6 @@ function emptyMenu(ctl: PlaylistController, trackId: string | null, tick: number
   if (!trackId) items.push({ label: 'Add a track', icon: Plus, onSelect: () => void dispatch('playlist.addTrack', {}) });
   return items;
 }
-
-// ── Ruler (time) menu + insert-time dialog ───────────────────────────
 
 function rulerMenu(ctl: PlaylistController, tick: number, doc: Document): MenuItem[] {
   const loop = ctl.loopRegion();
@@ -333,8 +322,6 @@ function InsertTimeForm({ ts, defaultTicks, onApply, onCancel }: { ts: TimeSig; 
     </DialogForm>
   );
 }
-
-// ── Track headers ────────────────────────────────────────────────────
 
 function TrackHeaders({ ctl, onMenu }: { ctl: PlaylistController; onMenu: (m: Menu) => void }) {
   const order = useDocStore((s) => s.project?.playlist.trackOrder);
@@ -443,8 +430,6 @@ function HeaderToggle({ on, label, title, tone, onClick }: { on: boolean; label:
   );
 }
 
-// ── Pattern list (the brush) ─────────────────────────────────────────
-
 function PatternList() {
   const key = useDocStore((s) =>
     s.project ? s.project.patternOrder.map((id) => `${id}\u0001${s.project!.patterns[id]?.name ?? ''}\u0001${s.project!.patterns[id]?.color ?? ''}`).join('\u0002') : '',
@@ -489,8 +474,6 @@ function PatternList() {
     </div>
   );
 }
-
-// ── Toolbar ──────────────────────────────────────────────────────────
 
 function PlaylistToolbar({ ctl }: { ctl: PlaylistController }) {
   const v = usePlaylistView();

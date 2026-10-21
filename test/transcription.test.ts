@@ -1,7 +1,3 @@
-// Song transcription (shared/transcription, research/15 §3.3): synthetic analyses → SongTranscription on the
-// project grid. Beat-synchronous grid (tempo drift), pickups, drums per role (flams, 32nd cap, velocities), chords
-// (names, exact / style voicings), bass cleanup + 'style' re-pitching, the copyright line ('style' never holds lead
-// or vocal notes), sections (phrase snapping, names, sameAs) and the per-section patterns. Pure, no analyzer.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import type { AudioAnalysis, ChordQuality, ChordSpan, DrumHit, TranscribedNote } from '@shared/analyzer/protocol';
@@ -29,7 +25,6 @@ import {
 
 const BAR = 3840;
 
-/** Deterministic jitter in ±amp seconds. */
 function jitter(seed: number, amp: number): number {
   const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
   return (x - Math.floor(x) - 0.5) * 2 * amp;
@@ -38,19 +33,14 @@ function jitter(seed: number, amp: number): number {
 interface SongSpec {
   bpm: number;
   bars: number;
-  /** Seconds of the first downbeat. */
   t0?: number;
-  /** Beats of beat grid (and audio) before the first downbeat. */
   preBeats?: number;
-  /** Tempo drift: the beat period swings by ± this fraction (sine over 32 beats). */
   drift?: number;
   sections?: Array<[string, number, number, number]>;
-  /** [root, quality, bars] cycled from bar 0. */
   chords?: Array<[number, ChordQuality, number]>;
   key?: string;
 }
 
-/** A synthetic analysis and `at(beat)`: seconds of a (fractional) beat from the first downbeat. */
 function song(o: SongSpec): { a: AudioAnalysis; at: (beat: number) => number } {
   const t0 = o.t0 ?? 0.5;
   const pre = o.preBeats ?? 0;
@@ -101,8 +91,6 @@ function song(o: SongSpec): { a: AudioAnalysis; at: (beat: number) => number } {
 const part = (t: SongTranscription, name: string) => t.parts.find((p) => p.name === name);
 const step16 = (tick: number) => Math.round(tick / 240);
 
-// ── 4-on-the-floor house at 128 ─────────────────────────────────────────
-
 const AM_F_C_G: Array<[number, ChordQuality, number]> = [
   [9, 'min', 1],
   [5, 'maj', 1],
@@ -111,7 +99,6 @@ const AM_F_C_G: Array<[number, ChordQuality, number]> = [
 ];
 
 function house() {
-  // Intro (kick + hats) 8 bars, Drop 16, Break (no kick) 8, Drop 16; boundaries a little off the bar lines.
   const s = song({ bpm: 128, bars: 48, chords: AM_F_C_G, sections: [['A', 0, 8.3, -14], ['B', 8.3, 23.8, -8], ['C', 23.8, 32, -13], ['B', 32, 48, -8]] });
   const hits: DrumHit[] = [];
   let seed = 1;
@@ -127,7 +114,6 @@ function house() {
       if (drop && b === 3) hit(beat + 0.5, 'openhat', 0.6);
     }
   }
-  // Flams / double detections on the kicks of bar 10 (10 ms apart).
   for (let b = 0; b < 4; b++) hits.push({ timeSec: s.at(36 + b) + 0.01, role: 'kick', vel: 0.6 });
   return { ...s, hits };
 }
@@ -204,7 +190,6 @@ test('house 128: sections snap to phrases, get names, and the second drop reuses
   assert.equal(kick.notes[0].tick, Math.max(0, kick.notes[0].tick));
   for (const p of pats) for (const q of p.parts) for (const n of q.notes) assert.ok(n.tick >= 0 && n.tick + n.dur <= p.lengthTicks, `${q.name} inside ${p.name}`);
   assert.equal(pats[2].parts.find((p) => p.name === 'Kick'), undefined, 'the break has no kick');
-  // Chords carry over a section boundary: every section starts with a chord.
   for (const p of pats) assert.ok(p.parts.find((q) => q.name === 'Chords')!.notes.some((n) => n.tick === 0));
 });
 
@@ -215,23 +200,19 @@ test('sameAs needs similar material: a drop with a different chord loop gets its
   assert.equal(t.sections[3].sameAs, null);
 });
 
-// ── Half-time trap at 140 with hat rolls and a pickup ───────────────────
-
 function trap() {
   const s = song({ bpm: 140, bars: 16, t0: 1.2, preBeats: 2, chords: [[0, 'min', 2], [8, 'maj', 2]], key: 'Cm', sections: [['A', 0, 8, -9], ['A', 8, 16, -9]] });
   const hits: DrumHit[] = [];
   let seed = 7;
   const hit = (beat: number, role: DrumHit['role'], vel: number) => hits.push({ timeSec: s.at(beat) + jitter(seed++, 0.004), role, vel });
-  // Pickup: a snare run into bar 1 (2 beats before the first downbeat).
   for (const b of [-2, -1.5, -1, -0.75, -0.5, -0.25]) hit(b, 'snare', 0.6);
   for (let bar = 0; bar < 16; bar++) {
     const o = bar * 4;
     hit(o, 'kick', 1);
     hit(o + 2.75, 'kick', 0.8);
-    hit(o + 2, 'snare', 0.9); // beat 3: half time
+    hit(o + 2, 'snare', 0.9);
     for (let e = 0; e < 8; e++) if (!(bar % 4 === 3 && e >= 4 && e < 6)) hit(o + e / 2, 'hat', e % 2 ? 0.5 : 0.7);
     if (bar % 4 === 3) {
-      // A 32nd roll over beat 3, plus a double detection 25 ms late (inside the same 32nd at 140 bpm: the cap).
       for (let k = 0; k < 8; k++) hit(o + 2 + k / 8, 'hat', 0.4 + k * 0.05);
       hits.push({ timeSec: s.at(o + 2) + 0.025, role: 'hat', vel: 0.3 });
     }
@@ -269,8 +250,6 @@ test('trap: a whole bar of material before the first downbeat moves bar 1 back i
   assert.equal(part(t, 'Kick')!.notes[0].tick, 0);
 });
 
-// ── A live recording with ±3% tempo drift ───────────────────────────────
-
 test('live drift ±3%: onsets land on the right 16ths (a constant tempo would not)', () => {
   const s = song({ bpm: 120, bars: 32, drift: 0.03 });
   const PAT: Record<string, number[]> = { kick: [0, 6, 10], snare: [4, 12], hat: [1, 3, 5, 7, 9, 11, 13, 15] };
@@ -292,13 +271,10 @@ test('live drift ±3%: onsets land on the right 16ths (a constant tempo would no
       role,
     );
   }
-  // The same hits at one constant tempo drift off the grid.
   const t0 = s.at(0);
   const wrong = hits.filter((h, i) => Math.round(((h.timeSec - t0) * 120) / 60 * 4) !== [...expected.values()].flat()[i]).length;
   assert.ok(wrong > 50, `a constant tempo misplaces many hits (${wrong})`);
 });
-
-// ── Chords ──────────────────────────────────────────────────────────────
 
 test('chords: snapped to beats, merged, named; exact voicing from agreeing poly notes, else root position', () => {
   const s = song({ bpm: 120, bars: 8 });
@@ -322,7 +298,6 @@ test('chords: snapped to beats, merged, named; exact voicing from agreeing poly 
     ],
   );
   assert.equal(chords[0].confidence, 0.7);
-  // Poly notes: a clear A minor (A3 C4 E4) under Am; under F something else entirely.
   const poly = [
     { tick: 0, end: 8 * 960, key: 57 },
     { tick: 0, end: 8 * 960, key: 60 },
@@ -335,7 +310,6 @@ test('chords: snapped to beats, merged, named; exact voicing from agreeing poly 
   const f = exactVoicing(chords[1], poly, 55);
   assert.equal(f.fromNotes, false);
   assert.deepEqual(f.keys, [65, 69, 72], 'F root position from the register up');
-  // Style: close voicings around C4 with the same changes, smooth voice leading.
   const v = styleVoicings(chords);
   v.forEach((keys, i) => {
     assert.ok(keys.every((k) => k >= 55 && k <= 72), `around C4: ${keys}`);
@@ -349,12 +323,10 @@ test('chords: snapped to beats, merged, named; exact voicing from agreeing poly 
   assert.equal(chordAt(chords, 16 * 960), null);
 });
 
-// ── Bass, lead and the copyright line ───────────────────────────────────
-
 function withLines() {
   const h = house();
   const n = (beat: number, beats: number, key: number, vel = 0.8): TranscribedNote => ({ startSec: h.at(beat), durSec: h.at(beat + beats) - h.at(beat), key, vel });
-  const ROOT = [45, 41, 36, 43]; // A2 F2 C2 G2 (Am F C G)
+  const ROOT = [45, 41, 36, 43];
   const bass: TranscribedNote[] = [];
   const other: TranscribedNote[] = [];
   const vocals: TranscribedNote[] = [];
@@ -362,14 +334,11 @@ function withLines() {
   const MELODY = [76, 74, 72, 74, 76, 76, 79, 77];
   for (let bar = 0; bar < 48; bar++) {
     const r = ROOT[bar % 4];
-    // An offbeat bassline: root, root, octave, fifth.
     bass.push(n(bar * 4 + 0.5, 0.5, r), n(bar * 4 + 1.5, 0.5, r), n(bar * 4 + 2.5, 0.5, r + 12), n(bar * 4 + 3.5, 0.25, r + 7));
     for (const k of TRIAD[bar % 4]) other.push(n(bar * 4, 4, k, 0.6));
-    // A lead on top, an octave up, eighths.
     for (let e = 0; e < 8; e++) other.push(n(bar * 4 + e / 2, 0.5, MELODY[(bar + e) % 8], 0.7));
     for (let e = 0; e < 4; e++) vocals.push(n(bar * 4 + e, 0.75, MELODY[(bar * 3 + e) % 8] - 12, 0.7));
   }
-  // Mono transcription faults: a 20 ms blip, a legato fragment and an octave error.
   bass.push({ startSec: h.at(1.1), durSec: 0.02, key: 70, vel: 0.5 });
   bass.push({ startSec: h.at(4.5) + (h.at(5) - h.at(4.5)) + 0.005, durSec: 0.05, key: 41, vel: 0.5 });
   const err = bass.findIndex((x) => Math.abs(x.startSec - h.at(9 * 4 + 1.5)) < 1e-6);
@@ -387,7 +356,6 @@ test("style never holds lead or vocal notes; its bass keeps the rhythm on chord 
   for (const p of style.parts) assert.ok(['drum', 'bass', 'chords'].includes(p.kind), `style part ${p.name} (${p.kind})`);
   assert.ok(!style.parts.some((p) => /lead|vocal/i.test(p.name)));
   for (const p of sectionPatterns(style)) for (const q of p.parts) assert.ok(['drum', 'bass', 'chords'].includes(q.kind));
-  // The melody's notes appear nowhere: every pitched note is a tone of the chord under it.
   const eb = part(exact, 'Bass')!;
   const sb = part(style, 'Bass')!;
   assert.deepEqual(
@@ -401,12 +369,10 @@ test("style never holds lead or vocal notes; its bass keeps the rhythm on chord 
     assert.ok(n.key >= 28 && n.key <= 64, 'bass register');
   }
   for (const n of part(style, 'Chords')!.notes) assert.ok(chordPcs(chordAt(style.chords, n.tick)!).includes(n.key % 12));
-  // The contour survives: the octave hits sit above the roots.
   const bar2 = sb.notes.filter((n) => n.tick >= BAR * 12 && n.tick < BAR * 13);
   assert.equal(bar2[2].key - bar2[0].key, 12, 'octave class');
   assert.equal(bar2[3].key - bar2[0].key, 7, 'fifth class');
   assert.ok(style.notes.some((x) => /no melody, lead or vocal/i.test(x)));
-  // The user's own song: exact bass and the lead are kept.
   const mine = transcribeSong(input, { mode: 'style', mine: true });
   assert.deepEqual(part(mine, 'Bass')!.notes, eb.notes);
   assert.ok(part(mine, 'Lead'));
@@ -424,7 +390,6 @@ test('bass cleanup: blips dropped, legato fragments merged, octave errors fixed,
   assert.equal(fixed.key, 41, 'the octave error is back on F2');
   assert.ok(t.notes.some((x) => /octave/.test(x)));
   for (let i = 1; i < bass.notes.length; i++) assert.ok(bass.notes[i - 1].tick + bass.notes[i - 1].dur <= bass.notes[i].tick, 'mono');
-  // Unit: monoCleanup and fixBass directly.
   const m = monoCleanup([
     { startSec: 0, durSec: 0.2, key: 40, vel: 0.8 },
     { startSec: 0.21, durSec: 0.06, key: 40, vel: 0.8 },
@@ -456,8 +421,6 @@ test('exact chords are voiced from the other stem; the lead is its top line with
   const top = skyline(w.other);
   assert.equal(top.length, 48 * 8);
 });
-
-// ── Sections and melody shape ───────────────────────────────────────────
 
 test('phrase snapping: lengths within a bar of a 4-bar phrase take it; others stay', () => {
   assert.deepEqual(snapPhrases([0, 7, 15, 31], 40), [0, 8, 16, 32]);
@@ -494,7 +457,6 @@ test('half / double readings: the grid scales, sections keep their place', () =>
 
 test('melody shape: register, density, rhythm, phrases, rests and steps vs leaps', () => {
   const line: GridNote[] = [];
-  // Two-bar phrases of eighths (C D E D C D E D), a bar of rest, repeated 4 times.
   const keys = [72, 74, 76, 74, 72, 74, 76, 74];
   for (let p = 0; p < 4; p++) for (let i = 0; i < 16; i++) line.push({ tick: p * 3 * BAR + i * 480, key: keys[i % 8], dur: 480, vel: 0.7 });
   const s = melodyShape(line, BAR, 'vocals')!;

@@ -1,23 +1,9 @@
-// Factory rack presets (Wave 12.2, research/16 §2.3): an instrument rack, a
-// drum rack and two effect racks with named macros. Kept OUT of
-// INSTRUMENT_PRESETS / CHAIN_PRESETS (whose tests check them against the
-// generated catalog, which gets the rack plugins at integration); they are in
-// FACTORY_PRESETS, and test/racks.test.ts loads every one through the preset
-// commands against a fixture catalog that has the rack plugins.
-//
-// Macro values are the rack's params macro1..8; maps address chains and
-// devices by INDEX (shared/sounds/types.ts PresetRack). Map ranges are in the
-// inner param's NORMALIZED space (log params: frequencies, times).
-
 import type { ChainPreset, InstrumentPreset, PresetFx, PresetRack } from '../types';
 
 const fx = (type: string, params: Record<string, number>, mix?: number): PresetFx => (mix === undefined ? { type, params } : { type, params, mix });
 const all = { velLo: 0, velHi: 1 };
 const pad = (note: number) => ({ keyLo: note, keyHi: note, velLo: 0, velHi: 1 });
-/** A one-shot sampler pad at the sample's own pitch. */
 const padSampler = (sample: string, params: Record<string, number> = {}) => ({ plugin: 'krypt.sampler', sample, params: { keyTrack: 0, oneShot: 1, ...params } });
-
-// ── Layered keys (instrument rack) ────────────────────────────────────
 
 const KEYS_RACK: PresetRack = {
   kind: 'instrument',
@@ -82,8 +68,6 @@ const KEYS_RACK: PresetRack = {
   ],
 };
 
-// ── Drum kit (drum rack) ──────────────────────────────────────────────
-
 const KIT_RACK: PresetRack = {
   kind: 'drum',
   chains: [
@@ -118,8 +102,6 @@ const KIT_RACK: PresetRack = {
     },
   ],
 };
-
-// ── Lo-fi (effect rack) ───────────────────────────────────────────────
 
 const LOFI_RACK: PresetRack = {
   kind: 'effect',
@@ -168,8 +150,6 @@ const LOFI_RACK: PresetRack = {
     { name: 'Broken Tape', values: [0.9, 0.85, 0.55, 0.45, 0, 0, 0, 0] },
   ],
 };
-
-// ── Vocal chain (effect rack) ─────────────────────────────────────────
 
 const VOCAL_RACK: PresetRack = {
   kind: 'effect',
@@ -234,7 +214,6 @@ export const RACK_INSTRUMENT_PRESETS: readonly InstrumentPreset[] = [
     plugin: 'krypt.drumrack',
     params: { macro1: 0.4, macro2: 0.8, macro3: 0.6, macro4: 0.3 },
     rack: KIT_RACK,
-    // Steps in the Channel Rack play the root key: the kick pad.
     channel: { rootKey: 36 },
     fx: [fx('krypt.eq', { b1On: 1, b1Freq: 30 })],
     role: 'perc',

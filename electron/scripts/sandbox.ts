@@ -1,19 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The Krypt Script sandbox: QuickJS compiled to WebAssembly
-// (quickjs-emscripten, MIT; the single-file variant embeds the .wasm so the
-// bundled main process needs no extra file). Scripts are untrusted (an AI or
-// a downloaded file may have written them), so each run gets:
-//   - its own QuickJS runtime + context, created and destroyed per run;
-//   - NO host functions at all: no require / import, no process, no fetch,
-//     no timers, no Date, no Promise; JSON in, a JSON string out;
-//   - a memory limit (32 MB), a stack limit and a CPU deadline (200 ms,
-//     QuickJS interrupt handler), so an infinite loop is killed and a huge
-//     allocation is refused;
-//   - an output cap; the result is then validated strictly in shared/scripts/output.ts.
-// WebAssembly memory is isolated from the host: the script can only touch
-// the QuickJS heap. Runs in main, synchronously, never in a renderer.
-// ──────────────────────────────────────────────────────────────────────
-
 import { newQuickJSWASMModuleFromVariant, type QuickJSContext, type QuickJSHandle, type QuickJSRuntime, type QuickJSWASMModule } from 'quickjs-emscripten-core';
 import variantImport from '@jitl/quickjs-singlefile-cjs-release-sync';
 import { SCRIPT_LIMITS, type ScriptIssue } from '@shared/scripts/types';
@@ -33,12 +17,10 @@ export type SandboxResult =
   | { ok: true; value: unknown; logs: string[]; ms: number }
   | { ok: false; kind: SandboxErrorKind; message: string; line: number; logs: string[]; ms: number };
 
-// The variant is CommonJS: depending on the bundler the default export may sit under .default.
 const variant = ((variantImport as unknown as { default?: unknown }).default ?? variantImport) as typeof variantImport;
 
 let modulePromise: Promise<QuickJSWASMModule> | null = null;
 
-/** Load (once) the QuickJS WebAssembly module. */
 export function loadQuickJS(): Promise<QuickJSWASMModule> {
   if (!modulePromise) {
     modulePromise = newQuickJSWASMModuleFromVariant(variant);
@@ -49,7 +31,6 @@ export function loadQuickJS(): Promise<QuickJSWASMModule> {
   return modulePromise;
 }
 
-/** After an abort inside the WASM module, start from a fresh one next time. */
 function dropModule(): void {
   modulePromise = null;
 }
@@ -64,7 +45,6 @@ interface VmError {
   fileName?: string;
 }
 
-/** The 1-based line in the user's script an error points at (0 = unknown). */
 function lineOf(err: VmError): number {
   if (err.fileName === SCRIPT_FILE && typeof err.lineNumber === 'number') return err.lineNumber;
   const m = typeof err.stack === 'string' ? err.stack.match(new RegExp(`${SCRIPT_FILE.replace('.', '\\.')}:(\\d+)`)) : null;
@@ -91,10 +71,6 @@ function dumpError(vm: QuickJSContext, h: QuickJSHandle): VmError {
   }
 }
 
-/**
- * Run `code` in a fresh sandbox: evaluate it, then call its run(ctx) with `input` (JSON-serialisable). Never throws:
- * every failure is a result with a human message and, when known, the line in the script.
- */
 export async function runSandboxed(code: string, input: unknown, opts: { limits?: Partial<SandboxLimits>; compileOnly?: boolean } = {}): Promise<SandboxResult> {
   const limits = { ...DEFAULT_LIMITS, ...opts.limits };
   const t0 = Date.now();
@@ -122,11 +98,9 @@ export async function runSandboxed(code: string, input: unknown, opts: { limits?
     rt.setMaxStackSize(limits.stackBytes);
     const deadline = start + limits.timeMs;
     rt.setInterruptHandler(() => Date.now() > deadline);
-    // No Date (determinism), no Promise / Proxy (no async, no traps), no typed arrays: a plain language core.
     vm = rt.newContext({ intrinsics: { BaseObjects: true, Eval: true, JSON: true, RegExp: true, MapSet: true, StringNormalize: true } });
     result = evaluate(vm, code, json, opts.compileOnly === true, start);
   } catch (e) {
-    // The host's own stack ran out first (deep recursion inside the interpreter): same answer as QuickJS's limit.
     const msg = (e as Error)?.message ?? String(e);
     result = /call stack/i.test(msg)
       ? { ok: false, kind: 'memory', message: 'Stack overflow: a function calls itself without end', line: 0, logs: [], ms: Date.now() - start }
@@ -137,8 +111,6 @@ export async function runSandboxed(code: string, input: unknown, opts: { limits?
     vm?.dispose();
     rt?.dispose();
   } catch {
-    // A leaked object after an exception can trip QuickJS's teardown assertion, which aborts the WASM instance:
-    // the result stands, the next run gets a fresh module.
     dropModule();
   }
   return result;
@@ -184,7 +156,6 @@ function evaluate(vm: QuickJSContext, code: string, json: string, compileOnly: b
   return { ok: true, value: parsed.notes, logs, ms: Date.now() - start };
 }
 
-/** Compile a script (no run): syntax errors and a missing run() with their lines. */
 export async function compileCheck(code: string): Promise<ScriptIssue[]> {
   const r = await runSandboxed(code, null, { compileOnly: true });
   return r.ok ? [] : [{ line: r.line, message: r.message }];

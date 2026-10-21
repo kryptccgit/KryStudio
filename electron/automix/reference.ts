@@ -1,9 +1,3 @@
-// Reference matching (research/23 §1): read a reference song's sound, the light way. One loudness + spectrum
-// pass by the engine (analyzeFile: the same Analysis our renders get, so both sides are measured alike), unless
-// the analyzer already holds a full analysis of the file (cachedOnly: never starts a new analyzer job). The result
-// is cached per file (path + size + mtime) in userData/analysis/ref-<key>.json and in memory, so picking the
-// reference in the dialog and running with it costs one pass. The audio is only measured, never copied.
-
 import path from 'node:path';
 import type { ActionResult } from '@shared/types';
 import type { Analysis } from '@shared/engine/protocol';
@@ -19,12 +13,10 @@ const MEMO = new Map<string, ReferenceSound>();
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** Clear the in-memory cache (tests). */
 export function forgetReferences(): void {
   MEMO.clear();
 }
 
-/** The reference's sound (cached), or a human message. */
 export async function readReference(deps: MainDeps, rawPath: string, opts: { signal?: AbortSignal } = {}): Promise<ActionResult<ReferenceSound>> {
   const abs = String(rawPath ?? '').trim();
   const name = songNameFromPath(abs);
@@ -41,7 +33,6 @@ export async function readReference(deps: MainDeps, rawPath: string, opts: { sig
     MEMO.set(key, disk.sound);
     return { ok: true, message: `Reference "${name}": ${disk.sound.summary} (cached).`, data: { ...disk.sound, path: abs, name, cached: true } };
   }
-  // A full analysis the analyzer already made of this file (study_reference, compare_to_reference) is free.
   let analysis: Analysis | null = null;
   if (deps.analyzer) {
     const prior = await deps.analyzer.analyze({ path: abs }, { cachedOnly: true }).catch(() => null);

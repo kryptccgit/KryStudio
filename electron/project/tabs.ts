@@ -1,36 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Project tabs (research/19-project-tabs.md): several projects open at
-// once, like browser tabs. There is still ONE DocHost (every main service
-// keeps its reference); the TabManager keeps each INACTIVE tab's state:
-//   project + undo/redo history (DocHost.exportState), and ProjectService's
-//   per-project fields: path, dirty, lastSavedAt, recovered, cover assets
-//   (ProjectService.capture → TabState).
-// A switch = capture the active tab → DocHost.swap(target) (a 'reset' change
-// that keeps the target's history, so the renderer replaces its replica and
-// the engine reloads, exactly like opening a file) → stop the transport.
-// Every switch is ONE synchronous step: files are read before it starts.
-//
-// Guards: a switch away from the active tab is refused (human message, the
-// tab's `busy` shows why) while an agent's edit group is open or the built-in
-// agent is working, a take is recording, or a long job (Audio → Project, a
-// render, Auto Mashup via addGuard) runs. Main-side callers whose own job is
-// making the new project (Audio → Project, agents' templates) use the
-// unguarded openProjectInNewTab / newProjectTab.
-//
-// Session (userData/session/, atomic writes):
-//   tabs.json          order, active tab, titles, paths, dirty flags
-//   tab-<id>.kstudio   every tab that is dirty or was never saved (the
-//                      container + its cover). Written when a tab is switched
-//                      away from (before the recovery snapshot replaces the
-//                      old one), on every tab change, on the autosave cadence
-//                      for the active tab, and on quit.
-// Restore on launch: the active tab first, the others lazily on their first
-// activation; a dirty tab stays dirty; a missing file becomes a tab that says
-// so. Crash recovery (recovery.ts) follows the ACTIVE tab and records its id;
-// after a crash its (fresher) project goes to that tab. Undo history is not
-// kept across restarts.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 import type { BrowserWindow } from 'electron';
@@ -43,13 +10,11 @@ import type { LoadedProject, ProjectService, TabState, TabsHook } from './servic
 import type { RecoveredSession } from './recovery';
 import { ensureDir, isFile, readText, removeFile, writeFileAtomic } from '../system/files';
 
-/** Why the active tab can't be left right now: `busy` for the tab strip, `message` for the toast. */
 export interface TabGuardHit {
   busy: string;
   message: string;
 }
 
-/** A switch guard: looks at the ACTIVE tab (its title for messages). */
 export type TabGuard = (ctx: { title: string }) => TabGuardHit | null;
 
 export type TabsProject = Pick<
@@ -77,24 +42,17 @@ export type TabsProject = Pick<
 export interface TabManagerDeps {
   doc: DocHost;
   project: TabsProject;
-  /** userData/session */
   sessionDir: string;
   appVersion: string;
-  /** Stop playback (a switch stops the transport). */
   stopTransport(): void;
-  /** EVENT.tabsState to every window. */
   broadcast(s: TabsState): void;
   log(level: 'info' | 'warn' | 'error', m: string): void;
   guards?: TabGuard[];
-  /** Before an interactive switch (third-party plugin states into the document). */
   beforeSwitch?(): Promise<void>;
-  /** Recently closed tabs kept for reopenClosed (default 10). */
   maxClosed?: number;
-  /** Re-check `busy` this often (ms; 0 = never; default 1000). */
   busyPollMs?: number;
 }
 
-/** Where an inactive tab that isn't in memory yet comes from. */
 type Source =
   | { kind: 'file' }
   | { kind: 'snapshot'; file: string }
@@ -105,18 +63,12 @@ type Source =
 interface TabRec {
   id: string;
   path: string | null;
-  /** ProjectStatus.name when last active (file name, or the song title for untitled projects). */
   name: string;
   dirty: boolean;
-  /** n of "Untitled n" (a tab without a path). */
   untitled: number;
-  /** In memory while inactive. */
   state: TabState | null;
-  /** Not loaded yet (session restore) or failed to load. */
   pending: Source | null;
-  /** DocHost version right after it was made as a blank new project; null once anything else happened. */
   untouchedAt: number | null;
-  /** Its session file holds its current (inactive) state. */
   snapshotWritten: boolean;
 }
 
@@ -157,15 +109,12 @@ export class TabManager implements TabsHook {
   private pollTimer: NodeJS.Timeout | null = null;
   private saveTimer: NodeJS.Timeout | null = null;
   private stopped = false;
-  /** >0 while a tab's content is going in: status echoes from the project service are not about the old tab. */
   private switching = 0;
-  /** activeId from tabs.json (restore). */
   private sessionActiveId: string | null = null;
   private offs: Array<() => void> = [];
 
   constructor(private readonly d: TabManagerDeps) {
     this.guards = [...(d.guards ?? [])];
-    // Until boot()/restore() runs, the open project is one untouched new tab.
     const first = this.makeRec({ untitled: 1 });
     first.untouchedAt = d.doc.version;
     this.tabs.push(first);
@@ -187,7 +136,6 @@ export class TabManager implements TabsHook {
     }
   }
 
-  /** Auto Mashup and other long jobs: refuse switches while `guard` says so. */
   addGuard(guard: TabGuard): () => void {
     this.guards.push(guard);
     return () => {
@@ -195,8 +143,6 @@ export class TabManager implements TabsHook {
       if (i >= 0) this.guards.splice(i, 1);
     };
   }
-
-  // ── State ───────────────────────────────────────────────────────────
 
   private makeRec(o: Partial<TabRec> = {}): TabRec {
     return { id: newTabId(), path: null, name: 'Untitled', dirty: false, untitled: 0, state: null, pending: null, untouchedAt: null, snapshotWritten: false, ...o };
@@ -206,7 +152,6 @@ export class TabManager implements TabsHook {
     return this.tabs.find((t) => t.id === this.activeId) ?? this.tabs[0];
   }
 
-  /** Copy the active tab's live fields from the project service. */
   private syncActive(): TabRec {
     const rec = this.active();
     const s = this.d.project.status();
@@ -222,7 +167,6 @@ export class TabManager implements TabsHook {
     return rec.pending?.kind === 'missing' ? `${base} (missing)` : base;
   }
 
-  /** The active tab's title (window title, Discord presence). */
   activeTitle(): string {
     return this.titleOf(this.syncActive());
   }
@@ -236,7 +180,6 @@ export class TabManager implements TabsHook {
 
   private guardHit(): TabGuardHit | null {
     const title = this.titleOf(this.syncActive());
-    // An agent's call or begin_edit group is open on the active project.
     const g = this.d.doc.listOpenGroups().find((x) => x.actor.kind === 'agent');
     if (g) {
       const who = actorName(g.actor);
@@ -270,7 +213,6 @@ export class TabManager implements TabsHook {
     };
   }
 
-  /** One line for get_project: the open tabs, the active one marked. */
   summaryLine(): string {
     const s = this.state();
     const items = s.tabs.map((t) => `"${t.title}"${t.dirty ? ' (unsaved)' : ''}${t.id === s.activeId ? ' ← active' : ''}`);
@@ -292,11 +234,9 @@ export class TabManager implements TabsHook {
     try {
       this.d.broadcast(s);
     } catch {
-      /* no window */
     }
   }
 
-  /** After every tab change: tell the windows, keep the session file in step. */
   private changed(): void {
     this.emitState();
     void this.saveSession();
@@ -317,12 +257,6 @@ export class TabManager implements TabsHook {
     return this.tabs.find((t) => t.path && norm(t.path) === n);
   }
 
-  // ── The switch (synchronous) ────────────────────────────────────────
-
-  /**
-   * Keep the active tab's state in memory and write its session file; the next recovery snapshot waits for that
-   * file, so its unsaved work is on disk at every moment. Stops playback.
-   */
   private stashActive(): TabRec {
     const rec = this.syncActive();
     rec.state = this.d.project.capture();
@@ -332,12 +266,10 @@ export class TabManager implements TabsHook {
     try {
       this.d.stopTransport();
     } catch {
-      /* the engine may be gone */
     }
     return rec;
   }
 
-  /** Put a tab's content in the DocHost (it becomes the active tab). `loaded` = what readPending returned. */
   private bringIn(rec: TabRec, loaded: LoadedProject | null): ActionResult {
     const before = this.activeId;
     this.activeId = rec.id;
@@ -372,7 +304,6 @@ export class TabManager implements TabsHook {
     return r;
   }
 
-  /** Undo a stash when bringing the target in failed (rare: the read already succeeded). */
   private rollback(prev: TabRec): void {
     if (!prev.state) return;
     this.activeId = prev.id;
@@ -386,7 +317,6 @@ export class TabManager implements TabsHook {
     prev.state = null;
   }
 
-  /** Read an unloaded tab's content (no state change). null data = a blank new project / recovered session. */
   private async readPending(rec: TabRec): Promise<ActionResult<LoadedProject | null>> {
     const src = rec.pending;
     if (!src || src.kind === 'new' || src.kind === 'recovered') return { ok: true, data: null };
@@ -403,8 +333,6 @@ export class TabManager implements TabsHook {
     if (!isFile(rec.path)) return { ok: false, message: `"${baseName(rec.path)}" isn't at ${rec.path} any more. Put the file back, or close this tab.` };
     return this.d.project.readProjectFile(rec.path);
   }
-
-  // ── Operations (window.krypt.tabs) ──────────────────────────────────
 
   async switchTo(id: string): Promise<ActionResult> {
     const rec = this.tabs.find((t) => t.id === id);
@@ -451,7 +379,6 @@ export class TabManager implements TabsHook {
     }
   }
 
-  /** A new tab (fresh project, or from a template id / name), made active. */
   async newTab(opts: { template?: string } = {}, how: { internal?: boolean } = {}): Promise<ActionResult<{ id: string; template?: ProjectTemplate }>> {
     const template = typeof opts?.template === 'string' && opts.template.trim() ? opts.template : null;
     if (!how.internal) {
@@ -466,7 +393,6 @@ export class TabManager implements TabsHook {
     return r.ok && r.data ? { ...r, data: { id: r.data.id, template: t.data.template } } : { ok: false, message: r.message };
   }
 
-  /** A new tab with a fresh default project (synchronous). */
   newBlankTab(how: { internal?: boolean } = {}): ActionResult<{ id: string }> {
     if (!how.internal) {
       const hit = this.guardHit();
@@ -486,7 +412,6 @@ export class TabManager implements TabsHook {
     return { ok: true, message: 'New project', data: { id: rec.id } };
   }
 
-  /** Put an already-read project in a NEW tab next to the active one. */
   private openLoaded(loaded: LoadedProject, how: { internal?: boolean } = {}): ActionResult<{ id: string }> {
     if (!how.internal) {
       const hit = this.guardHit();
@@ -506,16 +431,10 @@ export class TabManager implements TabsHook {
     return { ok: true, message: r.message, data: { id: rec.id } };
   }
 
-  /**
-   * Main-side: a project built in memory (Auto Mashup) opens in a NEW tab, unsaved, history empty. No switch
-   * guards: the caller's own job is what makes it. Then build on it with doc.exec as usual (it is the active tab).
-   */
   openProjectInNewTab(project: Project, name?: string): ActionResult<{ id: string }> {
     const p: Project = name ? { ...project, meta: { ...project.meta, name: name.slice(0, 120) } } : project;
     return this.openLoaded({ project: p, assets: {}, filePath: null, dirty: true, recent: null, head: `Opened "${p.meta.name || 'Untitled'}" in a new tab`, how: 'Opened', notes: [] }, { internal: true });
   }
-
-  // TabsHook (ProjectService.newProject / newFromTemplate / open route here)
 
   newProjectTab(): ActionResult {
     return this.newBlankTab({ internal: true });
@@ -526,10 +445,6 @@ export class TabManager implements TabsHook {
     return r.ok && r.data?.template ? { ok: true, message: r.message, data: { template: r.data.template } } : { ok: false, message: r.message };
   }
 
-  /**
-   * File ▸ Open / Home / Recent: a NEW tab, unless the active tab is an untouched new project (then it is
-   * replaced); an already-open file just activates its tab.
-   */
   async open(p?: string, win?: BrowserWindow | null): Promise<ActionResult<{ id: string }>> {
     const early = this.guardHit();
     if (early) return { ok: false, message: early.message };
@@ -544,7 +459,6 @@ export class TabManager implements TabsHook {
     await this.beforeSwitch();
     const read = await this.d.project.readProjectFile(target);
     if (!read.ok || !read.data) return { ok: false, message: read.message };
-    // Re-check after the read: the same file may have opened meanwhile.
     const again = this.findByPath(target);
     if (again) return again.id === this.activeId ? { ok: true, message: `"${this.titleOf(again)}" is already open`, data: { id: again.id } } : { ...this.switchNow(again, null), data: { id: again.id } };
     const active = this.syncActive();
@@ -554,7 +468,6 @@ export class TabManager implements TabsHook {
       try {
         this.d.stopTransport();
       } catch {
-        /* the engine may be gone */
       }
       this.switching++;
       let r: ActionResult;
@@ -572,11 +485,6 @@ export class TabManager implements TabsHook {
     return this.openLoaded(read.data);
   }
 
-  /**
-   * Close a tab. Unsaved changes need a decision ({needsDecision:true} without one); 'save' saves it first (the
-   * Save-as dialog for an untitled project; an inactive tab is activated to save it). The last tab leaves a
-   * fresh Untitled tab. A closed tab is kept (with its state) for reopenClosed.
-   */
   async close(id: string, decision?: 'save' | 'discard', win?: BrowserWindow | null): Promise<ActionResult<{ needsDecision?: boolean }>> {
     const rec = this.tabs.find((t) => t.id === id);
     if (!rec) return { ok: false, message: "That tab isn't open any more" };
@@ -607,7 +515,6 @@ export class TabManager implements TabsHook {
   }
 
   private async closeActive(rec: TabRec, title: string): Promise<ActionResult<{ needsDecision?: boolean }>> {
-    // The neighbour to show instead: right, else left; a fresh Untitled tab when it was the last one.
     const idx = this.tabs.indexOf(rec);
     const order = [...this.tabs.slice(idx + 1), ...this.tabs.slice(0, idx).reverse()];
     let next: TabRec | null = null;
@@ -629,14 +536,12 @@ export class TabManager implements TabsHook {
     if (!this.tabs.includes(rec) || rec.id !== this.activeId) return { ok: false, message: 'The tabs changed meanwhile; try again' };
     const hit = this.guardHit();
     if (hit) return { ok: false, message: hit.message };
-    // Keep the closed tab's state in memory (reopenClosed), without a session file: it was closed.
     this.syncActive();
     rec.state = this.d.project.capture();
     rec.untouchedAt = null;
     try {
       this.d.stopTransport();
     } catch {
-      /* the engine may be gone */
     }
     const at = this.tabs.indexOf(rec);
     this.tabs.splice(at, 1);
@@ -647,7 +552,6 @@ export class TabManager implements TabsHook {
     }
     const r = this.bringIn(target, loaded);
     if (!r.ok) {
-      // Fall back to a fresh Untitled tab: there is always an active tab.
       this.d.log('warn', `Closing "${title}": ${r.message}`);
       if (target !== next) this.tabs.splice(this.tabs.indexOf(target), 1);
       const blank = this.makeRec({ untitled: this.nextUntitled() });
@@ -676,7 +580,6 @@ export class TabManager implements TabsHook {
     return { ok: true, message: `Moved "${this.titleOf(rec)}"` };
   }
 
-  /** Reopen the most recently closed tab (with its unsaved state, kept for this session) and activate it. */
   async reopenClosed(): Promise<ActionResult<{ id: string }>> {
     const item = this.closed[0];
     if (!item) return { ok: false, message: 'No closed tab to reopen' };
@@ -717,13 +620,10 @@ export class TabManager implements TabsHook {
     return { ok: true, message: `Reopened "${this.titleOf(rec)}"`, data: { id: rec.id } };
   }
 
-  // ── Session files ───────────────────────────────────────────────────
-
   private snapshotName(rec: TabRec): string {
     return `tab-${rec.id}.kstudio`;
   }
 
-  /** Write an inactive tab's session file when it needs one (dirty or never saved). Never rejects. */
   private writeTabSnapshot(rec: TabRec): Promise<void> {
     const st = rec.state;
     if (!st || (!st.dirty && st.filePath)) {
@@ -754,10 +654,6 @@ export class TabManager implements TabsHook {
     return job;
   }
 
-  /**
-   * Write tabs.json (+ the session files still missing; with `active`, the active tab's too when it is dirty or
-   * untitled) and delete session files nothing needs. Serialized; never rejects.
-   */
   saveSession(opts: { active?: boolean } = {}): Promise<ActionResult> {
     const active = this.syncActive();
     const dir = this.d.sessionDir;
@@ -800,7 +696,6 @@ export class TabManager implements TabsHook {
           if (SNAPSHOT_RE.test(name) && !keep.has(name)) await removeFile(path.join(dir, name)).catch(() => {});
         }
       } catch {
-        /* cleanup is best effort */
       }
       return { ok: true, message: `Kept ${entries.length} open tab${entries.length === 1 ? '' : 's'}` };
     });
@@ -837,10 +732,6 @@ export class TabManager implements TabsHook {
     }
   }
 
-  /**
-   * Launch: rebuild the tabs from userData/session (ProjectService.boot's restore hook, after crash recovery was
-   * read). The active tab loads now, the others on their first activation. Returns whether a project was loaded.
-   */
   async restore(crashed: RecoveredSession | null): Promise<boolean> {
     const entries = (await this.readSessionFile()) ?? [];
     const recs: TabRec[] = entries.map((e) => {
@@ -855,7 +746,6 @@ export class TabManager implements TabsHook {
       return rec;
     });
 
-    // The crashed session belongs to the tab whose id it carries (else it becomes a tab of its own).
     let recovered: TabRec | null = null;
     if (crashed && (crashed.dirty || crashed.projectPath)) {
       const match = crashed.tabId ? recs.find((r) => r.id === crashed.tabId) : undefined;
@@ -865,7 +755,6 @@ export class TabManager implements TabsHook {
         recovered.dirty = true;
         if (!match) recs.push(recovered);
       } else if (match && crashed.projectPath && isFile(crashed.projectPath)) {
-        // Saved before the crash: the file is newer than any session file.
         match.path = crashed.projectPath;
         match.dirty = false;
         match.pending = { kind: 'file' };
@@ -875,7 +764,6 @@ export class TabManager implements TabsHook {
         recs.push(recovered);
       }
     }
-    // Untitled numbers stay unique.
     const used = new Set<number>();
     for (const r of recs) {
       if (r.path) continue;
@@ -886,7 +774,7 @@ export class TabManager implements TabsHook {
       }
       used.add(r.untitled);
     }
-    if (!recs.length) return false; // nothing to restore: keep the untouched new tab made in the constructor
+    if (!recs.length) return false;
 
     const first = recovered ?? recs.find((r) => r.id === this.sessionActiveId) ?? recs[0];
     const order = [first, ...recs.filter((r) => r !== first)];
@@ -917,7 +805,6 @@ export class TabManager implements TabsHook {
     return loadedOne;
   }
 
-  /** Quit: keep every tab for next time, then end crash recovery (kept when the tabs couldn't be saved). */
   async shutdown(): Promise<ActionResult> {
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.saveTimer) clearTimeout(this.saveTimer);

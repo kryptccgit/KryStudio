@@ -1,14 +1,5 @@
-//! Latency-aligned wet/dry for FX slots. A slot's mix below 100 % blends the
-//! dry input with the effect's output; an effect with latency (oversampled
-//! drive / clipper, limiter lookahead, Krypt Tune) outputs its wet signal
-//! `latency()` samples late, so an unaligned blend comb-filters (drive at
-//! 60 % notched around 690 Hz). Every effect is wrapped at creation (control
-//! thread, where the ring buffer is allocated); the core asks the wrapper to
-//! delay the dry copy by the CURRENT latency before blending.
-
 use krypt_studio_dsp::{Effect, ProcessContext};
 
-/// Longest latency compensated (frames). Larger latencies blend unaligned, as before.
 pub const MAX_ALIGN: usize = 8192;
 
 pub struct LatencyAligned {
@@ -83,7 +74,6 @@ impl LatencyAligned {
 mod tests {
     use super::*;
 
-    /// A pure delay "effect" with latency: wet = input delayed by `d`.
     struct Delay {
         d: usize,
         buf: Vec<[f32; 2]>,
@@ -136,7 +126,6 @@ mod tests {
                 out.push(0.5 * dl[i] + 0.5 * wl[i]);
             }
         }
-        // 50/50 of two aligned copies = the input, delayed by d: no comb filtering
         for i in d..src.len() {
             assert!((out[i] - src[i - d]).abs() < 1e-6, "sample {i}");
         }

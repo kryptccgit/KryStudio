@@ -1,30 +1,13 @@
-// ──────────────────────────────────────────────────────────────────────
-// Standard MIDI File (SMF) reader / writer. Pure TS: no Node, no DOM.
-//
-//  - Formats 0 and 1 (format 2 is read like format 1).
-//  - Running status, note-on vel 0 = note-off, sysex skipped, RIFF/RMID
-//    wrapper unwrapped.
-//  - Tempo (FF 51), time signature (FF 58), track/instrument names, the
-//    first program change per track.
-//  - Notes are paired FIFO per (channel, key). Notes still sounding at the
-//    end of a track end there.
-//  - convertPpq() rescales a file to Krypt Studio's PPQ 960.
-//
-// Spec: "Standard MIDI Files 1.0" (MIDI Manufacturers Association).
-// ──────────────────────────────────────────────────────────────────────
-
 export interface SmfNote {
   tick: number;
-  /** Length in ticks, >= 1. */
   dur: number;
-  key: number; // 0..127
-  vel: number; // 1..127
-  channel: number; // 0..15
+  key: number;
+  vel: number;
+  channel: number;
 }
 
 export interface SmfTrack {
   name: string;
-  /** First program change seen on the track (0..127), if any. */
   program: number | null;
   notes: SmfNote[];
 }
@@ -42,7 +25,6 @@ export interface SmfTimeSig {
 
 export interface SmfFile {
   format: 0 | 1 | 2;
-  /** Ticks per quarter note. */
   ppq: number;
   tracks: SmfTrack[];
   tempos: SmfTempo[];
@@ -55,8 +37,6 @@ export class SmfError extends Error {
     this.name = 'SmfError';
   }
 }
-
-// ── Reader ────────────────────────────────────────────────────────────
 
 class Reader {
   pos: number;
@@ -85,7 +65,6 @@ class Reader {
     for (let i = 0; i < n; i++) s += String.fromCharCode(this.u8());
     return s;
   }
-  /** Variable-length quantity (max 4 bytes). */
   vlq(): number {
     let v = 0;
     for (let i = 0; i < 4; i++) {
@@ -108,12 +87,11 @@ function decodeText(b: Uint8Array): string {
     return new TextDecoder('utf-8', { fatal: true }).decode(b).replace(/\0+$/, '').trim();
   } catch {
     let s = '';
-    for (const c of b) s += String.fromCharCode(c); // latin1 fallback
+    for (const c of b) s += String.fromCharCode(c);
     return s.replace(/\0+$/, '').trim();
   }
 }
 
-/** Unwrap a RIFF "RMID" container to its embedded SMF bytes. */
 function unwrapRiff(bytes: Uint8Array): Uint8Array {
   const r = new Reader(bytes);
   if (bytes.length < 12 || r.ascii(4) !== 'RIFF') return bytes;
@@ -121,7 +99,7 @@ function unwrapRiff(bytes: Uint8Array): Uint8Array {
   if (r.ascii(4) !== 'RMID') return bytes;
   while (r.pos + 8 <= bytes.length) {
     const id = r.ascii(4);
-    const len = r.u8() | (r.u8() << 8) | (r.u8() << 16) | ((r.u8() << 24) >>> 0); // little-endian
+    const len = r.u8() | (r.u8() << 8) | (r.u8() << 16) | ((r.u8() << 24) >>> 0);
     if (id === 'data') return bytes.subarray(r.pos, Math.min(bytes.length, r.pos + len));
     r.pos += len + (len & 1);
   }
@@ -147,7 +125,7 @@ function readTrack(
   const noteOff = (ch: number, key: number, at: number): void => {
     const q = open.get((ch << 7) | key);
     const n = q?.shift();
-    if (!n) return; // stray note-off
+    if (!n) return;
     track.notes.push({ tick: n.tick, dur: Math.max(1, at - n.tick), key, vel: n.vel, channel: ch });
   };
 
@@ -156,7 +134,6 @@ function readTrack(
       tick += r.vlq();
       let status = r.u8();
       if (status < 0x80) {
-        // Running status: this byte is the first data byte.
         if (!running) throw new SmfError('Corrupt MIDI track (data byte without status)');
         status = running;
         r.pos--;
@@ -166,7 +143,7 @@ function readTrack(
         const type = r.u8();
         const len = r.vlq();
         const data = r.bytes(len);
-        if (type === 0x2f) break; // end of track
+        if (type === 0x2f) break;
         if (type === 0x03 && !track.name) track.name = decodeText(data);
         else if (type === 0x04 && !instrument) instrument = decodeText(data);
         else if (type === 0x51 && data.length >= 3) {
@@ -183,7 +160,6 @@ function readTrack(
         continue;
       }
       if (status >= 0xf1) {
-        // System common/realtime bytes don't belong in files; skip defensively.
         running = 0;
         continue;
       }
@@ -204,11 +180,9 @@ function readTrack(
       }
     }
   } catch (err) {
-    // A truncated final track keeps whatever parsed cleanly.
     if (!(err instanceof SmfError) || !/Unexpected end/.test(err.message)) throw err;
   }
 
-  // Close notes that never got a note-off.
   for (const [k, q] of open) {
     for (const n of q) track.notes.push({ tick: n.tick, dur: Math.max(1, tick - n.tick), key: k & 0x7f, vel: n.vel, channel: k >> 7 });
   }
@@ -217,7 +191,6 @@ function readTrack(
   return track;
 }
 
-/** Parse a Standard MIDI File. Throws SmfError with a readable message. */
 export function readSmf(input: Uint8Array): SmfFile {
   const bytes = unwrapRiff(input);
   const r = new Reader(bytes);
@@ -232,7 +205,6 @@ export function readSmf(input: Uint8Array): SmfFile {
 
   let ppq: number;
   if (division & 0x8000) {
-    // SMPTE timing: ticks per second. Treat as 120 BPM (0.5 s per quarter).
     const fps = 256 - (division >> 8);
     const tpf = division & 0xff;
     ppq = Math.max(1, Math.round(fps * tpf * 0.5));
@@ -259,7 +231,6 @@ export function readSmf(input: Uint8Array): SmfFile {
   return { format: format as 0 | 1 | 2, ppq, tracks, tempos, timeSigs };
 }
 
-/** Rescale every tick in the file to `ppq` (default 960, Krypt Studio's resolution). */
 export function convertPpq(file: SmfFile, ppq = 960): SmfFile {
   if (file.ppq === ppq) return file;
   const s = ppq / file.ppq;
@@ -276,11 +247,8 @@ export function convertPpq(file: SmfFile, ppq = 960): SmfFile {
   };
 }
 
-// ── Writer ────────────────────────────────────────────────────────────
-
 interface TimedEvent {
   tick: number;
-  /** Ordering within a tick: meta 0, program 1, note-off 2, note-on 3. */
   order: number;
   data: number[];
 }
@@ -334,7 +302,7 @@ function chunk(events: TimedEvent[]): number[] {
     body.push(...vlqBytes(e.tick - last), ...e.data);
     last = e.tick;
   }
-  body.push(0x00, 0xff, 0x2f, 0x00); // end of track
+  body.push(0x00, 0xff, 0x2f, 0x00);
   const len = body.length;
   return [0x4d, 0x54, 0x72, 0x6b, (len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff, ...body];
 }
@@ -346,11 +314,6 @@ function conductorEvents(file: SmfFile): TimedEvent[] {
   return ev;
 }
 
-/**
- * Serialize to SMF bytes. Format 1 writes a conductor track (tempo, time
- * signature) followed by one MTrk per track; format 0 merges everything
- * into one track (each note keeps its channel).
- */
 export function writeSmf(file: SmfFile): Uint8Array {
   const ppq = clamp(Math.round(file.ppq), 1, 0x7fff);
   const tracks: number[][] = [];

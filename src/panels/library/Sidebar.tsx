@@ -1,8 +1,3 @@
-// Collections sidebar: "All tracks", each collection with counts and
-// analysis progress (focus / deep markers), right-click menu, and a drop
-// target for folders and files from Explorer. The dashed tile at the
-// bottom makes a new collection (click, or drop a folder on it).
-
 import { useState, type DragEvent } from 'react';
 import { Crosshair, FolderPlus, HardDrive, Layers, LibraryBig, Loader2, Plus } from 'lucide-react';
 import type { Collection } from '@shared/library/types';

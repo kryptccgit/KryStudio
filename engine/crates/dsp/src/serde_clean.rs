@@ -1,7 +1,3 @@
-//! Serialize f32 values through their shortest decimal form, so JSON shows
-//! `0.1` instead of `0.10000000149011612` even when a caller goes through
-//! `serde_json::Value` (which widens to f64). Non-finite values become null.
-
 use serde::Serializer;
 
 #[inline]
@@ -9,7 +5,6 @@ pub(crate) fn widen(x: f32) -> f64 {
     if !x.is_finite() {
         return f64::NAN;
     }
-    // Display prints the shortest representation that round-trips as f32
     format!("{x}").parse::<f64>().unwrap_or(x as f64)
 }
 

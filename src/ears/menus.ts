@@ -1,10 +1,3 @@
-// "Ears" entries for the playlist audio-clip menu, the Channel Rack menu
-// (audio-clip and sampler channels) and the Browser (audio files). Same
-// wording everywhere: Detect tempo & key / Separate stems / Convert to
-// pattern ▸ Melody & chords · Single line · Drums, plus for audio clips
-// Auto-tune vocal ▸ Natural · Pop · Hard and Match key & tempo to ▸
-// Project · <other audio clips>.
-
 import { AudioWaveform, Drum, Layers, ListMusic, Magnet, MicVocal, Music2, Piano, TimerOff } from 'lucide-react';
 import type { AudioTarget } from '@shared/types';
 import { TUNE_STYLES, type TuneStyle } from '@shared/music/keymatch';
@@ -20,10 +13,8 @@ import { openAnalysisDialog } from './AnalysisDialog';
 const MODE_ICON = { poly: Piano, mono: Music2, drums: Drum } as const;
 
 function convertItems(target: AudioTarget, doc?: Document | null): MenuItem[] {
-  // A full mix through one transcriber is mush (drums, vocal and bass all read as notes): split it into parts first.
   const p = getProject();
   const path = targetPath(p, target);
-  // A separated stem: its mode first, marked (a drum stem through Single line reads the kick as a melody).
   const best = stemMode(p, target);
   const modes = best ? [...TRANSCRIBE_MODES].sort((a, b) => Number(b.mode === best) - Number(a.mode === best)) : TRANSCRIBE_MODES;
   return [
@@ -78,7 +69,6 @@ function separateItem(clipId: string | null): MenuItem {
   };
 }
 
-/** Entries for one piece of audio. `clipId` enables Separate stems (it places stems under that clip). */
 export function earsMenuItems(target: AudioTarget, opts: { clipId?: string | null; doc?: Document | null } = {}): MenuItem[] {
   const items: MenuItem[] = [
     { label: 'Detect tempo & key', icon: AudioWaveform, hint: 'Tempo, key, swing, sections and loudness', onSelect: () => openAnalysisDialog(target, opts.doc) },
@@ -88,7 +78,6 @@ export function earsMenuItems(target: AudioTarget, opts: { clipId?: string | nul
   return items;
 }
 
-/** Auto-tune vocal ▸ Natural / Pop / Hard: Krypt Tune first in the clip's insert, key detected (same as tune_vocal). */
 function tuneItem(target: AudioTarget): MenuItem {
   return {
     type: 'submenu',
@@ -105,7 +94,6 @@ function tuneItem(target: AudioTarget): MenuItem {
   };
 }
 
-/** Match key & tempo to ▸ Project / <other audio clips> (same as match_clip). */
 function matchItem(clipId: string): MenuItem {
   const p = getProject();
   const others = matchTargets(p, clipId);
@@ -122,12 +110,10 @@ function matchItem(clipId: string): MenuItem {
   };
 }
 
-/** Playlist audio clip. */
 export function clipEarsItems(clipId: string, doc?: Document | null): MenuItem[] {
   return [...earsMenuItems({ clipId }, { clipId, doc }), tuneItem({ clipId }), matchItem(clipId)];
 }
 
-/** Channel Rack: audio-clip and sampler channels that hold a sample (others get nothing). */
 export function channelEarsItems(channelId: string, doc?: Document | null): MenuItem[] {
   const p = getProject();
   const ch = p.channels[channelId];
@@ -144,7 +130,6 @@ export function channelEarsItems(channelId: string, doc?: Document | null): Menu
   return items;
 }
 
-/** Browser: an audio file on disk. */
 export function fileEarsItems(path: string, doc?: Document | null): MenuItem[] {
   return [{ label: 'Detect tempo & key', icon: AudioWaveform, hint: 'Tempo, key, swing, sections and loudness of this file', onSelect: () => openAnalysisDialog({ path }, doc) }];
 }

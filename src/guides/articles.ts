@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The Guides: plain-language articles about what Krypt Studio does TODAY.
-// Every label, key and limit here was checked against the code; when the
-// app changes, change the guide in the same commit. Written in the tiny
-// markup of ./markup.ts. Buttons ([[action:id|…]]) run Home actions
-// (src/home/actions.ts); test/home.test.ts checks every id exists.
-// Pure data: no React, no window.
-// ──────────────────────────────────────────────────────────────────────
-
 import { LIBRARY_ARTICLES } from './library';
 import { BEGINNER_ARTICLES, BEGINNER_FIRST } from './beginner';
 import { SESSION_ARTICLE } from './sessionArticle';
@@ -19,7 +10,6 @@ import { VOICE_ARTICLE } from './voiceArticle';
 
 export type GuideGroup = 'Start here (step by step)' | 'Start here' | 'Make music' | 'Music basics' | 'Mixing' | 'Genres' | 'AI and audio' | 'Help';
 
-/** Icon keys, mapped to lucide icons in GuidesView. */
 export type GuideIcon =
   | 'rocket'
   | 'rack'
@@ -36,7 +26,6 @@ export type GuideIcon =
   | 'download'
   | 'keyboard'
   | 'lifebuoy'
-  // Wave 7b library (research/14): mapped in GuidesView's ICONS.
   | 'music'
   | 'drum'
   | 'chords'
@@ -52,7 +41,6 @@ export type GuideIcon =
 export interface GuideArticle {
   id: string;
   title: string;
-  /** One line under the title and in the sidebar search. */
   summary: string;
   group: GuideGroup;
   icon: GuideIcon;
@@ -61,7 +49,6 @@ export interface GuideArticle {
 
 export const GUIDE_GROUPS: GuideGroup[] = ['Start here (step by step)', 'Start here', 'Make music', 'Music basics', 'Mixing', 'Genres', 'AI and audio', 'Help'];
 
-/** The original articles below plus the Wave 7b library (src/guides/library/*, one file per writer). */
 export const ARTICLES: GuideArticle[] = [];
 
 const CORE_ARTICLES: GuideArticle[] = [
@@ -1236,19 +1223,12 @@ Ask on the Krypt Discord, linked in **Help** and on the About page.
 
 ARTICLES.push(...BEGINNER_ARTICLES, ...CORE_ARTICLES, ...LIBRARY_ARTICLES);
 
-/** Where the Guides open first (the Home Guides card, F1): the click-by-click "Start here (step by step)" guides. */
 export const DEFAULT_ARTICLE = BEGINNER_FIRST;
 
 export function articleById(id: string | null | undefined): GuideArticle | undefined {
   return id ? ARTICLES.find((a) => a.id === id) : undefined;
 }
 
-/**
- * One friendly line per stock plugin for the {{catalog:…}} tables. The table
- * itself lists whatever the generated catalog holds, so a new plugin shows up
- * on its own (with the start of its catalog description until it gets a line
- * here; test/home.test.ts flags the gap).
- */
 export const PLUGIN_NOTES: Record<string, string> = {
   'krypt.sampler': 'Plays a sample across the keyboard, with envelope, filter, reverse and loop. The default for drums.',
   'krypt.slicer': 'Chops a loop at its hits or on a grid, one slice per key, so a break replays at any tempo and rearranges note by note. Per-slice pitch, reverse and gain.',

@@ -1,10 +1,3 @@
-// Factory instrument presets (shared/sounds/factory/instruments): every preset
-// must load cleanly through presets.applyToChannel, i.e. pass the zod schema,
-// name a stock instrument, and carry only catalog params already clamped to
-// their spec (in range, on step), with an FX chain of stock effects. Plus the
-// coverage the playbooks rely on: every role and every genre has sounds.
-// The SOUND of each preset is checked by scripts/audition-presets.mjs (engine
-// renders); this file checks the data.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import raw from '../shared/plugins/catalog.gen.json';
@@ -22,7 +15,6 @@ const CATALOG = raw as PluginCatalog;
 const byId = new Map<string, PluginDescriptor>(CATALOG.plugins.map((p) => [p.id, p]));
 const P = INSTRUMENT_PRESETS;
 
-/** Check a param set against a plugin's specs; returns human-readable problems. */
 function paramProblems(where: string, plugin: PluginDescriptor, params: Record<string, number>): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(params)) {
@@ -119,7 +111,7 @@ test('every chain starts its low end with a low cut (sensible for the role)', ()
     const eqs = (p.fx ?? []).filter((f) => f.type === 'krypt.eq' && f.params.b1On === 1);
     assert.ok(eqs.length, `${p.id}: no EQ low cut in the chain`);
     const cut = Math.max(...eqs.map((f) => f.params.b1Freq));
-    const deep = (p.range?.[0] ?? 127) < 36; // drones and impacts written below C2
+    const deep = (p.range?.[0] ?? 127) < 36;
     if (LOW_END.has(p.role) || p.alsoRoles?.includes('808')) assert.ok(cut >= 20 && cut <= 60, `${p.id}: low-end low cut at ${cut} Hz`);
     else if (!deep) assert.ok(cut >= 50, `${p.id}: low cut at ${cut} Hz is too low for a ${p.role}`);
   }
@@ -184,7 +176,6 @@ test('every genre has at least 12 presets that suit it, across several roles', (
 });
 
 test('a genre-fitting sound resolves for the roles every beat needs', () => {
-  // the playbooks ask select.ts for ROLE + genre: the pick must suit the genre (or at least its family)
   const NEEDS: InstrumentRole[] = ['lead', 'pad', 'chord', 'bass', 'kick', 'snare', 'hat'];
   for (const g of GENRE_IDS) {
     for (const role of NEEDS) {
@@ -204,8 +195,6 @@ test('the defaults table names existing presets of the right role', () => {
   }
 });
 
-// Synth presets and sound-pack presets each get at most one default per (role, genre): a pack's default takes over
-// only once that pack is installed (uninstalled pack presets are gated out before ranking).
 test('defaultFor: only genres the preset suits, at most one preset per (role, genre) among synths and among packs', () => {
   const claimed = new Map<string, string>();
   for (const p of P) {

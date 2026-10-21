@@ -1,16 +1,3 @@
-//! krypt.transient — level-independent transient shaper. Two pairs of
-//! envelope followers on the stereo-linked peak level:
-//!
-//! * attack: a fast follower against one whose attack is the Attack
-//!   window. Their dB difference is large only while a note is starting.
-//! * sustain: a follower with a long release (the Sustain window) against
-//!   a short-release one. Their difference grows while a note decays.
-//!
-//! Gain (dB) = attack · 0.6 · Δattack + sustain · 0.6 · Δsustain, clamped to
-//! −30…+18 dB and smoothed over 1 ms. Because both sides of each pair follow
-//! the same signal, the result does not depend on the input level (no
-//! threshold to set). Zero latency.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::dynamics::Follower;
 use crate::blocks::{db_to_gain, tc_coef, Smooth};
@@ -41,9 +28,7 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
-/// Per-unit dB scaling of the detector differences.
 const SCALE: f32 = 0.6;
-/// Levels below this (dB) are treated as silence: no gain change.
 const FLOOR_DB: f32 = -80.0;
 
 pub struct Transient {
@@ -89,7 +74,6 @@ impl Transient {
         self.sustain = p.get(P::Sustain as usize);
         let aw = p.get(P::AttackWindow as usize);
         let sw = p.get(P::SustainWindow as usize);
-        // the attack pair releases together so only onsets differ
         self.fast.set(0.1, 2.0 * aw + 10.0, self.sr);
         self.slow.set(aw, 2.0 * aw + 10.0, self.sr);
         self.hold.set(0.1, sw, self.sr);

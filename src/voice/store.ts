@@ -1,6 +1,3 @@
-// Krypt Voice renderer state: the voice service snapshot (voices, Kokoro, Fish key), the Speak and Sing forms
-// (kept while the dialogs are closed), and the one voice job main runs at a time, with its progress and result.
-
 import { create } from 'zustand';
 import type { SingOutcome, SpeakOutcome, VoiceProgress, VoiceState } from '@shared/voice/types';
 import { DEFAULT_SING, DEFAULT_SPEAK, type JobKind, type JobPhase, type SingForm, type SpeakForm } from './logic';
@@ -21,11 +18,8 @@ export interface VoiceStore {
   speak: SpeakForm;
   sing: SingForm;
   job: VoiceJob | null;
-  /** The last finished sing's mapping (syllable → note), shown in the panel and on the roll. */
   lastMapping: SingOutcome['mapping'] | null;
-  /** The rendered file playing as a preview (Stop button), or null. */
   previewing: string | null;
-  /** The Krypt Voice dialog is on screen. */
   visible: boolean;
 }
 

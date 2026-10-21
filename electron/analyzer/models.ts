@@ -1,26 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// ModelManager: on-device ML models (shared/analyzer/models.ts catalog).
-//
-//   bundled    <resources>/models/<id>/          (ships in the installer)
-//   installed  userData/models/<id>/             (download or "Install from folder")
-//   staging    userData/models/<id>.partial/     (renamed only when EVERY file's
-//                                                 SHA-256 matches the catalog)
-//   cache      userData/models/verified.json     (path → size+mtime+sha256, so a
-//                                                 start-up re-check hashes nothing)
-//
-// Status per catalog entry:
-//   installed    files present and verified (bundled or userData)
-//   available    every file has a URL + hash: the UI can download it
-//   downloading  / verifying (transient)
-//   failed       last install failed (message); retry allowed
-//   unavailable  no hash in the catalog (not installable), or hashes but no
-//                published URL ("Install from folder" still works)
-//
-// Downloads happen ONLY through install() — called from the UI's IPC. MCP
-// tools never call it (agents must not trigger downloads).
-// Node-only (no Electron): tests drive it against a local HTTP server.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import { MODEL_CATALOG, type ModelDef } from '@shared/analyzer/models';
 import type { ActionResult, ModelState } from '@shared/types';
@@ -40,20 +17,13 @@ import {
 } from '../system/download';
 
 export interface ModelManagerOptions {
-  /** Defaults to MODEL_CATALOG (tests inject their own). */
   catalog?: readonly ModelDef[];
-  /** Parent folders of bundled models, best first. */
   bundledDirs: string[];
-  /** userData/models */
   userModelsDir: string;
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
-  /** Called whenever any model's state changes (the service broadcasts, throttled). */
   onChange?(): void;
-  /** Folder picker for importModel (Electron dialog in the app). */
   pickFolder?(title: string): Promise<string | null>;
-  /** Test hook for downloads. */
   fetchImpl?: typeof fetch;
-  /** Message for a bundled model whose files are missing (dev vs packaged). */
   bundledMissingMessage?: string;
 }
 
@@ -75,7 +45,6 @@ const errText = (e: unknown): string => (e instanceof Error ? e.message : String
 const mb = (n: number): string => `${(n / (1024 * 1024)).toFixed(n >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
 const keyOf = (p: string): string => path.resolve(p).toLowerCase();
 
-/** Short display name ('HT-Demucs (4 stems)' → 'HT-Demucs'). */
 export function shortModelName(def: ModelDef): string {
   return def.name.replace(/\s*\([^)]*\)\s*$/, '') || def.name;
 }
@@ -104,14 +73,10 @@ export class ModelManager {
     return this.catalog.find((m) => m.id === id);
   }
 
-  /** The model a task uses when none is named. */
   defaultFor(task: ModelDef['task']): ModelDef | undefined {
     return this.catalog.find((m) => m.task === task && m.default) ?? this.catalog.find((m) => m.task === task);
   }
 
-  // ── Status ─────────────────────────────────────────────────────────
-
-  /** Why a model can't be downloaded, or null when it can. */
   private notInstallable(def: ModelDef): { importable: boolean; message: string } | null {
     if (def.files.length === 0 || def.files.some((f) => !/^[0-9a-f]{64}$/i.test(f.sha256))) {
       return { importable: false, message: `${def.name} isn't available in this version yet: its files aren't published with verified checksums.` };
@@ -151,7 +116,6 @@ export class ModelManager {
     return { def, status: 'available' };
   }
 
-  /** Absolute model directory when installed (verified), else null. */
   dirFor(id: string): string | null {
     return this.installedDir.get(id) ?? null;
   }
@@ -160,11 +124,8 @@ export class ModelManager {
     try {
       this.opts.onChange?.();
     } catch {
-      /* listeners are best-effort */
     }
   }
-
-  // ── Verification ───────────────────────────────────────────────────
 
   private candidates(def: ModelDef): string[] {
     const out: string[] = [];
@@ -173,7 +134,6 @@ export class ModelManager {
     return out;
   }
 
-  /** Every catalog file in `dir` exists, has the catalog size and hashes to the catalog SHA-256 (cached by size+mtime). */
   private async verifyDir(def: ModelDef, dir: string, useCache = true): Promise<{ ok: true } | { ok: false; message: string }> {
     if (!(await dirExists(dir))) return { ok: false, message: `${dir} doesn't exist` };
     for (const f of def.files) {
@@ -213,10 +173,6 @@ export class ModelManager {
     }
   }
 
-  /**
-   * Start-up: drop stale <id>.partial folders (an interrupted download),
-   * then find + verify every catalog model. Cheap when nothing changed.
-   */
   refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
     const run = (async () => {
@@ -259,8 +215,6 @@ export class ModelManager {
     return run;
   }
 
-  // ── Install (download) ─────────────────────────────────────────────
-
   async install(id: string): Promise<ActionResult> {
     const def = this.def(id);
     if (!def) return { ok: false, message: `Unknown model "${id}"` };
@@ -286,8 +240,6 @@ export class ModelManager {
       for (const f of def.files) {
         const dest = path.join(staging, f.name);
         if (path.dirname(path.resolve(dest)) !== path.resolve(staging)) throw new Error(`Catalog entry for ${def.name} has an invalid file name "${f.name}"`);
-        // The primary URL, then any mirrors serving the identical file: a source that fails
-        // (network, HTTP error, wrong size or hash) falls through to the next.
         const sources = [f.url, ...(f.mirrors ?? [])].filter(Boolean);
         const failures: Array<{ host: string; err: unknown }> = [];
         let got: { bytes: number } | null = null;
@@ -318,12 +270,12 @@ export class ModelManager {
               }
             })();
             failures.push({ host, err });
-            await removeDir(dest).catch(() => {}); // works on files too
+            await removeDir(dest).catch(() => {});
             if (sources.length > 1) this.opts.log('warn', `Downloading ${f.name} from ${host} failed (${errText(err)})${failures.length < sources.length ? '; trying the next source' : ''}`);
           }
         }
         if (!got) {
-          if (failures.length === 1) throw failures[0].err; // one source: its own message, unchanged
+          if (failures.length === 1) throw failures[0].err;
           const why = failures.map((x) => `${x.host}: ${errText(x.err).replace(/ Nothing was installed\.$/, '')}`).join('; ');
           throw new Error(`${f.name} couldn't be downloaded from any of its ${sources.length} sources (${why}). Nothing was installed.`);
         }
@@ -331,7 +283,6 @@ export class ModelManager {
       }
       t.status = 'verifying';
       this.changed();
-      // Re-hash what is on disk (guards against a write the OS lost).
       const check = await this.verifyDir(def, staging, false);
       if (!check.ok) throw new Error(`${check.message}. Nothing was installed.`);
       await writeFileAtomic(path.join(staging, 'manifest.json'), JSON.stringify({ id: def.id, name: def.name, task: def.task, license: def.license, files: def.files, installedAt: new Date().toISOString(), source: 'download' }, null, 1));
@@ -355,11 +306,9 @@ export class ModelManager {
     }
   }
 
-  /** Atomic install: staging → final (an older / damaged copy is removed first). */
   private async commit(def: ModelDef, staging: string, finalDir: string): Promise<void> {
     if (await dirExists(finalDir)) await removeDir(finalDir);
     await renameDir(staging, finalDir);
-    // The rename keeps size+mtime, so the cache entries move with the files.
     for (const f of def.files) {
       const st = await statFile(path.join(finalDir, f.name));
       if (st) this.verified.set(keyOf(path.join(finalDir, f.name)), { size: st.size, mtimeMs: st.mtimeMs, sha256: f.sha256.toLowerCase() });
@@ -377,9 +326,6 @@ export class ModelManager {
     return { ok: true, message: `Cancelling the ${def.name} download…` };
   }
 
-  // ── Install from folder ────────────────────────────────────────────
-
-  /** Install from a folder (offline / no published URL): every file's SHA-256 must match the catalog. */
   async importModel(id: string, folder?: string): Promise<ActionResult> {
     const def = this.def(id);
     if (!def) return { ok: false, message: `Unknown model "${id}"` };
@@ -394,7 +340,6 @@ export class ModelManager {
       src = await this.opts.pickFolder(`Folder with the ${def.name} files (${def.files.map((f) => f.name).join(', ')})`);
       if (!src) return { ok: false, message: 'No folder chosen' };
     }
-    // Accept the folder itself or a sub-folder named after the model.
     if (!(await statFile(path.join(src, def.files[0].name))) && (await dirExists(path.join(src, def.id)))) src = path.join(src, def.id);
 
     this.transient.set(id, { status: 'verifying' });
@@ -428,8 +373,6 @@ export class ModelManager {
     }
   }
 
-  // ── Remove ─────────────────────────────────────────────────────────
-
   async remove(id: string): Promise<ActionResult> {
     const def = this.def(id);
     if (!def) return { ok: false, message: `Unknown model "${id}"` };
@@ -455,7 +398,6 @@ export class ModelManager {
     await this.saveCache();
     this.installedDir.delete(id);
     this.transient.delete(id);
-    // A bundled copy (if any) takes over again.
     if (def.bundled) await this.refresh();
     this.changed();
     this.opts.log('info', `Removed ${def.name}`);

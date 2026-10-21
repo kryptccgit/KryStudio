@@ -1,7 +1,3 @@
-// Settings ▸ Voice (research/21): the Fish Audio key (masked; Save verifies it with a tiny request, Remove asks
-// first; the result is shown under the box), the privacy note, the Kokoro model status with the Model Manager link,
-// and My voices (Record my voice…, Remove). Rendered inside SettingsPanel's Voice group.
-
 import { useEffect, useState } from 'react';
 import { BrainCircuit, Check, Cloud, Cpu, ExternalLink, KeyRound, Loader2, Mic, ShieldAlert, Trash2, TriangleAlert, UserRound } from 'lucide-react';
 import { cls } from '../utils/format';

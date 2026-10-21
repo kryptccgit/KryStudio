@@ -1,5 +1,3 @@
-// Music basics: rhythm, keys, chords, melody, bass, drums, sound design (guides-content-1). See research/14-sounds-and-guides.md §3 for the markup and the rules.
-// Every control named here was checked against the code (Wave 7b). Note names follow the Piano Roll: C4 = middle C = MIDI 60.
 import type { GuideArticle } from '../articles';
 
 export const BASICS: GuideArticle[] = [

@@ -1,5 +1,3 @@
-// Editor tools (FL single-letter keys, by physical key code so AZERTY works).
-
 import { Pencil, Paintbrush, Eraser, SquareDashedMousePointer, Scissors, VolumeX, type LucideIcon } from 'lucide-react';
 
 export type EditTool = 'draw' | 'paint' | 'delete' | 'select' | 'slice' | 'mute';
@@ -13,14 +11,12 @@ export const TOOLS: Record<EditTool, { label: string; key: string; code: string;
   mute: { label: 'Mute', key: 'T', code: 'KeyT', icon: VolumeX },
 };
 
-/** Tool for a bare (unmodified) key press, if it's one of `allowed`. */
 export function toolForKey(e: KeyboardEvent, allowed: EditTool[]): EditTool | null {
   if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.repeat) return null;
   for (const t of allowed) if (TOOLS[t].code === e.code) return t;
   return null;
 }
 
-/** True when keyboard input belongs to a text field, not the editor. */
 export function isTypingTarget(t: EventTarget | null): boolean {
   const el = t as HTMLElement | null;
   if (!el || !el.tagName) return false;

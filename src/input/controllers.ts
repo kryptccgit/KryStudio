@@ -1,18 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Controller maps at run time (shared/live/controllers.ts): gamepads through
-// the Gamepad API (Xbox / XInput, DualSense, Switch Pro, generic HID pads)
-// and the computer keyboard / numpad through key events. Each enabled map
-// has a ControllerRunner; its MIDI goes to the engine as the virtual input
-// `map.device` (window.krypt.midi.virtualIn), so notes play the selected
-// channel and record, and CCs can be linked to any knob (MIDI-learn).
-// App commands (play, record arm …) run here.
-//
-// Pads are polled every 8 ms while a gamepad map is on (Chromium samples
-// pads at about that rate). Hiding the app or unplugging a pad releases its
-// held notes; a window blur releases the keyboard maps' keys (their key-ups
-// never arrive).
-// ──────────────────────────────────────────────────────────────────────
-
 import { create } from 'zustand';
 import {
   ControllerRunner,
@@ -37,18 +22,14 @@ export interface ConnectedPad {
   index: number;
   id: string;
   family: PadFamily;
-  /** "Xbox controller", "PlayStation controller" … */
   label: string;
 }
 
 interface ControllerView {
   settings: ControllerSettings;
   pads: ConnectedPad[];
-  /** Last binding that fired per map (live highlight in Settings). */
   activity: Record<string, { bindingId: string; at: number }>;
-  /** Current transpose per map. */
   transpose: Record<string, number>;
-  /** A "press something" capture in progress. */
   learning: { source: 'gamepad' | 'keyboard' } | null;
 }
 
@@ -61,9 +42,6 @@ let learnResolve: ((i: ControllerInput | null) => void) | null = null;
 let learnTimer: number | null = null;
 const greeted = new Set<string>();
 
-// ── Settings ──────────────────────────────────────────────────────────
-
-/** Save a change to the controller maps (validated by main; the change comes back through onChanged). */
 export async function saveControllers(next: ControllerSettings, ok?: string): Promise<boolean> {
   try {
     const s = await window.krypt.settings.update({ controllers: next });
@@ -93,8 +71,6 @@ function apply(next: ControllerSettings): void {
   syncPolling();
 }
 
-// ── Output ────────────────────────────────────────────────────────────
-
 function emit(map: ControllerMap, outs: ControllerOutput[]): void {
   if (!outs.length) return;
   let bytes: number[] = [];
@@ -103,7 +79,6 @@ function emit(map: ControllerMap, outs: ControllerOutput[]): void {
     try {
       window.krypt.midi.virtualIn(map.device, bytes);
     } catch {
-      /* fire-and-forget: the engine may be restarting */
     }
     bytes = [];
   };
@@ -123,12 +98,9 @@ function emit(map: ControllerMap, outs: ControllerOutput[]): void {
   if (fired) useControllers.setState((s) => ({ activity: { ...s.activity, [map.id]: { bindingId: fired!, at: performance.now() } } }));
 }
 
-/** Release every held note of every map (window blur, panic). */
 export function controllersAllOff(): void {
   for (const r of runners.values()) emit(r.current, r.releaseAll());
 }
-
-// ── Gamepads ──────────────────────────────────────────────────────────
 
 function readPads(): Gamepad[] {
   try {
@@ -143,7 +115,6 @@ function describe(g: Gamepad): ConnectedPad {
   return { index: g.index, id: g.id, family, label: `${familyName(family)} controller` };
 }
 
-/** The pad a map listens to: its `gamepad` id match, else the first connected pad. */
 function padFor(map: ControllerMap, pads: Gamepad[]): Gamepad | undefined {
   if (!pads.length) return undefined;
   if (!map.gamepad) return pads[0];
@@ -192,7 +163,6 @@ function refreshPads(e?: GamepadEvent): void {
   const pads = readPads().map(describe);
   useControllers.setState({ pads });
   if (e?.type === 'gamepaddisconnected') {
-    // Whatever the unplugged pad was holding stops now.
     for (const r of runners.values()) if (r.current.source === 'gamepad') emit(r.current, r.releaseAll());
     toast.info(`${describe(e.gamepad).label} disconnected`);
   }
@@ -206,11 +176,8 @@ function refreshPads(e?: GamepadEvent): void {
   syncPolling();
 }
 
-// ── Keyboard ──────────────────────────────────────────────────────────
-
 const heldKeys = new Set<string>();
 
-/** A keydown for the keyboard maps. True = consumed (the typing piano and shortcuts don't see it). */
 export function controllerKeyDown(e: KeyboardEvent): boolean {
   if (e.ctrlKey || e.altKey || e.metaKey) return false;
   if (useControllers.getState().learning?.source === 'keyboard' && learnResolve) {
@@ -244,13 +211,10 @@ export function controllerKeyUp(e: KeyboardEvent): boolean {
   return true;
 }
 
-/** A window lost focus: its key-ups won't arrive, so the keyboard maps let go. */
 export function controllersBlur(): void {
   heldKeys.clear();
   for (const r of runners.values()) if (r.current.source === 'keyboard') emit(r.current, r.releaseAll());
 }
-
-// ── Learn ─────────────────────────────────────────────────────────────
 
 function finishLearn(i: ControllerInput | null): void {
   const done = learnResolve;
@@ -263,7 +227,6 @@ function finishLearn(i: ControllerInput | null): void {
   done?.(i);
 }
 
-/** Wait for the next button / stick move (gamepad) or key (keyboard; Escape cancels). Null = cancelled or timed out. */
 export function learnInput(source: 'gamepad' | 'keyboard', timeoutMs = 15_000): Promise<ControllerInput | null> {
   if (learnResolve) finishLearn(null);
   controllersAllOff();
@@ -280,11 +243,8 @@ export function cancelLearnInput(): void {
   if (learnResolve) finishLearn(null);
 }
 
-// ── Install ───────────────────────────────────────────────────────────
-
 let installed = false;
 
-/** Main window, once: settings feed, pad hot-plug, polling. Keyboard hooks live in installInput (every window). */
 export function installControllers(): void {
   if (installed) return;
   installed = true;

@@ -1,7 +1,3 @@
-// Genre playbooks (shared/playbooks) and factory chain presets (shared/sounds/factory/chains.ts):
-// every genre has a playbook, sections only use parts that exist, the arrangement fits the
-// length targets, every KPN example parses, every mix role resolves to a chain preset, and every
-// chain preset is valid against the stock plugin catalog.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { PLAYBOOKS, listPlaybooks, playbookFor, type Playbook } from '@shared/playbooks';
@@ -22,10 +18,8 @@ const TRANSITIONS: TransitionKind[] = ['riser', 'reverse-cymbal', 'snare-roll', 
 const DRUM_ROLES: InstrumentRole[] = ['kick', 'snare', 'clap', 'hat', 'openhat', 'ride', 'crash', 'perc', 'tom'];
 const LOW_ROLES: InstrumentRole[] = ['808', 'sub', 'bass'];
 const MUSIC_ROLES: InstrumentRole[] = ['lead', 'pluck', 'pad', 'keys', 'piano', 'bell', 'arp', 'stab', 'chord', 'strings', 'brass', 'vox'];
-/** Product names and trademarks that must never appear in factory data (research/10 "Names"). */
 const BANNED = [/\b909\b/, /\bTR-\d/i, /serum/i, /sylenth/i, /\bnexus\b/i, /auto-?tune/i, /\bOTT\b/, /linn ?drum/i, /splice/i, /fruity/i, /image-line/i, /fl studio/i, /massive/i, /vital\b/i, /\bLFO ?tool\b/i];
 
-/** Stock effects that report latency (oversampling / lookahead). */
 const LATENT = new Set(['krypt.drive', 'krypt.clipper', 'krypt.limiter', 'krypt.pitch', 'krypt.heat', 'krypt.grain']);
 
 const pb = (id: string): Playbook => {
@@ -36,8 +30,6 @@ const pb = (id: string): Playbook => {
 const partOf = (p: Playbook, name: string): PlaybookPart | undefined => p.parts.find((x) => x.name.toLowerCase() === name.toLowerCase());
 const chainPath = (role: ChainRole) => role.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 const textOf = (o: unknown): string => JSON.stringify(o);
-
-// ── Registry ──────────────────────────────────────────────────────────
 
 test('every genre id has exactly one playbook, in GENRE_IDS order', () => {
   assert.equal(PLAYBOOKS.length, GENRE_IDS.length);
@@ -61,8 +53,6 @@ test('playbookFor resolves ids, display names and every alias; unknown → null'
   assert.equal(playbookFor(null), null);
   assert.equal(playbookFor(undefined), null);
 });
-
-// ── Shape ─────────────────────────────────────────────────────────────
 
 test('tempo, swing, grid, keys and prose fields are sane', () => {
   for (const p of PLAYBOOKS) {
@@ -111,8 +101,6 @@ test('parts: unique KPN-safe names, valid roles / sample kinds / ranges / chains
   }
 });
 
-// ── Arrangement ───────────────────────────────────────────────────────
-
 test('arrangement: known parts, 4-bar phrases, bar total within targets, real energy contrast', () => {
   for (const p of PLAYBOOKS) {
     const at = `${p.id}:`;
@@ -142,13 +130,10 @@ test('arrangement: known parts, 4-bar phrases, bar total within targets, real en
     assert.ok(peak - Math.min(...energies) >= 0.4, `${at} energy contrast of at least 0.4`);
     assert.ok(p.arrangement[0].energy < peak, `${at} it does not open at full energy`);
     assert.ok(p.arrangement[p.arrangement.length - 1].energy < peak, `${at} it does not end at full energy`);
-    // Minutes at the typical tempo: a real song, not a loop or a mix.
     const minutes = (total * 4 * 60) / p.bpm.typical / 60;
     assert.ok(minutes >= 1.5 && minutes <= 8, `${at} ${minutes.toFixed(1)} min at ${p.bpm.typical} bpm`);
   }
 });
-
-// ── Patterns ──────────────────────────────────────────────────────────
 
 test('patterns: every KPN example parses cleanly, uses the playbook part names and stays in range', () => {
   for (const p of PLAYBOOKS) {
@@ -177,7 +162,6 @@ test('patterns: every KPN example parses cleanly, uses the playbook part names a
         assert.ok(part, `${where}: channel "${t.name}" is not a part of the playbook`);
         assert.ok(t.notes.length > 0, `${where}: ${t.name} has no notes`);
         if (DRUM_ROLES.includes(part.role) && t.kind === 'grid') drums = true;
-        // Toms and pitched percussion (a tuned cowbell riff) may be written as notes; every other drum is a step grid.
         if (DRUM_ROLES.includes(part.role) && part.role !== 'tom' && part.role !== 'perc') {
           assert.equal(t.kind, 'grid', `${where}: drum part ${t.name} is written as a step grid`);
         } else if (!DRUM_ROLES.includes(part.role) && part.role !== 'fx' && part.role !== 'texture') {
@@ -197,8 +181,6 @@ test('patterns: every KPN example parses cleanly, uses the playbook part names a
     assert.ok(musicPatterns >= 1, `${at} a chord or melody example`);
   }
 });
-
-// ── Mix + targets ─────────────────────────────────────────────────────
 
 test('mix plan: buses, sends and levels reference real parts with sane amounts', () => {
   for (const p of PLAYBOOKS) {
@@ -255,8 +237,6 @@ test('no product names, trademarks or FL trade dress in playbooks and chain pres
   for (const c of CHAIN_PRESETS) for (const re of BANNED) assert.ok(!re.test(textOf(c)), `${c.id} mentions ${re}`);
 });
 
-// ── Chain presets ─────────────────────────────────────────────────────
-
 test('chain presets: schema-valid, unique ids under factory:chain/<role>/, every role covered', () => {
   assert.ok(CHAIN_PRESETS.length >= 30, `about 30+ chain presets (${CHAIN_PRESETS.length})`);
   const ids = new Set<string>();
@@ -287,7 +267,6 @@ test('chain presets: stock effects only, every param valid and already clamped t
         assert.equal(clampToSpec(spec, v), v, `${c.id}: ${f.type}.${k} = ${v} is outside ${spec.min}..${spec.max} or off its step`);
       }
       if (f.mix !== undefined) assert.ok(f.mix >= 0 && f.mix <= 1, `${c.id}: ${f.type} mix`);
-      // A slot's dry signal is blended without latency compensation, so a latent effect below mix 1 comb-filters.
       if (LATENT.has(f.type)) assert.ok(f.mix === undefined || f.mix === 1, `${c.id}: ${f.type} has latency and must run at slot mix 1`);
     }
   }
@@ -324,7 +303,7 @@ test('every chain role a playbook asks for resolves to a chain preset; masters m
 });
 
 test('every part resolves to an instrument preset or a factory sample kind (once presets exist)', () => {
-  if (INSTRUMENT_PRESETS.length === 0) return; // instrument presets are designed in parallel; checked once they land
+  if (INSTRUMENT_PRESETS.length === 0) return;
   for (const p of PLAYBOOKS)
     for (const part of p.parts) {
       if (part.sample) continue;

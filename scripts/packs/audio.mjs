@@ -1,14 +1,3 @@
-// Audio header readers for the pack manifest tool (scripts/packs/build.ts).
-// Downloads are untrusted data: this only READS bytes. It parses the WAV `fmt `/`data` chunks and the FLAC
-// STREAMINFO block to learn the sample rate, channel count, bit depth and length in frames. Nothing is decoded
-// or executed.
-
-/**
- * @param {Uint8Array} buf the first bytes of the file (64 KB is plenty for both formats) plus `size`, the whole
- *   file's byte length (WAV frames come from the data chunk size, which may be truncated by a short read).
- * @param {number} size
- * @returns {{ format: 'wav' | 'flac', rate: number, channels: number, bits: number, frames: number }}
- */
 export function probeAudio(buf, size) {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const tag = (o) => String.fromCharCode(buf[o], buf[o + 1], buf[o + 2], buf[o + 3]);
@@ -29,7 +18,6 @@ export function probeAudio(buf, size) {
       } else if (id === 'data') {
         if (!fmt) throw new Error('WAV data chunk before fmt chunk');
         if (fmt.code !== 1 && fmt.code !== 3 && fmt.code !== 0xfffe) throw new Error(`unsupported WAV format code ${fmt.code}`);
-        // A data chunk may claim more than the file holds (streamed writers); trust the smaller.
         const avail = Math.min(len, size - (o + 8));
         return { format: 'wav', rate: fmt.rate, channels: fmt.channels, bits: fmt.bits, frames: Math.floor(avail / fmt.blockAlign) };
       }
@@ -38,7 +26,6 @@ export function probeAudio(buf, size) {
     throw new Error('WAV without a data chunk in the first bytes');
   }
   if (buf.length >= 42 && tag(0) === 'fLaC') {
-    // METADATA_BLOCK_HEADER (4 bytes) then STREAMINFO (34 bytes): the first block is always STREAMINFO.
     const type = buf[4] & 0x7f;
     if (type !== 0) throw new Error('FLAC without STREAMINFO first');
     const s = 8;
@@ -52,12 +39,6 @@ export function probeAudio(buf, size) {
   throw new Error('not a WAV or FLAC file');
 }
 
-/**
- * Peak level and a pitch estimate of an uncompressed PCM WAV (FLAC is not decoded here: its levels are taken as
- * recorded). Returns null for anything else.
- * @param {Uint8Array} buf the whole file
- * @returns {{ peakDb: number, midi: number | null, onset: number } | null}
- */
 export function analyzeWav(buf) {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const tag = (o) => String.fromCharCode(buf[o], buf[o + 1], buf[o + 2], buf[o + 3]);
@@ -69,7 +50,7 @@ export function analyzeWav(buf) {
     const len = dv.getUint32(o + 4, true);
     if (id === 'fmt ') {
       let code = dv.getUint16(o + 8, true);
-      if (code === 0xfffe && len >= 26) code = dv.getUint16(o + 32, true); // EXTENSIBLE: the sub-format GUID's first word
+      if (code === 0xfffe && len >= 26) code = dv.getUint16(o + 32, true);
       fmt = { code, channels: dv.getUint16(o + 10, true), rate: dv.getUint32(o + 12, true), blockAlign: dv.getUint16(o + 20, true), bits: dv.getUint16(o + 22, true) };
     } else if (id === 'data' && fmt) {
       const start = o + 8;
@@ -96,7 +77,6 @@ export function analyzeWav(buf) {
         }
         mono[f] = sum / fmt.channels;
       }
-      // onset: the first frame within 40 dB of the peak, less 2 ms of lead-in (leading silence can be skipped with offset=)
       const gate = peak * 0.01;
       let first = 0;
       while (first < frames && Math.abs(mono[first]) < gate) first++;
@@ -108,13 +88,12 @@ export function analyzeWav(buf) {
   return null;
 }
 
-/** YIN pitch estimate (MIDI note, fractional) of the steady part after the attack, or null when unpitched. */
 function estimatePitch(x, rate) {
   let peakAt = 0;
   for (let i = 1; i < Math.min(x.length, rate); i++) if (Math.abs(x[i]) > Math.abs(x[peakAt])) peakAt = i;
   const start = peakAt + Math.round(0.08 * rate);
   const W = Math.round(0.1 * rate);
-  const maxLag = Math.round(rate / 25); // down to 25 Hz
+  const maxLag = Math.round(rate / 25);
   if (start + W + maxLag > x.length) return null;
   const d = new Float64Array(maxLag);
   for (let lag = 1; lag < maxLag; lag++) {
@@ -125,7 +104,6 @@ function estimatePitch(x, rate) {
     }
     d[lag] = s;
   }
-  // cumulative mean normalised difference
   let run = 0;
   const cm = new Float64Array(maxLag);
   cm[0] = 1;

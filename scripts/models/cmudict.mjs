@@ -45,7 +45,7 @@ for (const raw of dict.split(/\r?\n/)) {
   const sp = line.indexOf(' ');
   if (sp < 0) continue;
   const word = line.slice(0, sp);
-  if (/\(\d+\)$/.test(word)) continue; // alternate pronunciations: keep the first
+  if (/\(\d+\)$/.test(word)) continue;
   if (!map.has(word)) map.set(word, line.slice(sp + 1).trim().replace(/\s+/g, ' '));
 }
 const words = [...map.keys()].sort((a, b) => (Buffer.compare(Buffer.from(a), Buffer.from(b))));

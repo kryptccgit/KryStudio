@@ -1,7 +1,3 @@
-//! AHDSR envelope with exponential ("analog") segments that land exactly on
-//! their target at the stated time: attack is mildly convex, decay and
-//! release cover 60 dB of their range in the stated time.
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Idle,
@@ -45,8 +41,6 @@ impl Default for Ahdsr {
     }
 }
 
-/// Overshoot ratios: attack aims 30% past 1 (gentle curve); decay/release
-/// aim 0.1% past the target (≈ 60 dB of the range in the stage time).
 const ATTACK_RATIO: f32 = 0.3;
 const DECAY_RATIO: f32 = 0.001;
 
@@ -60,19 +54,16 @@ impl Ahdsr {
         (ms * 0.001 * self.sr).max(1.0)
     }
 
-    /// Configure a segment from the current value to `target` over `n` samples.
     fn segment(&mut self, target: f32, n: f32, ratio: f32) {
         let range = (target - self.value).abs().max(1e-6);
         let dir = if target >= self.value { 1.0 } else { -1.0 };
         self.over = target + dir * ratio * range;
         self.target = target;
-        // value(n) = over + (v0 - over) * coef^n == target
         let a = (self.value - self.over).abs().max(1e-12);
         let b = (target - self.over).abs().max(1e-12);
         self.coef = (-(a / b).ln() / n).exp();
     }
 
-    /// Start (or retrigger from the current level — no click).
     pub fn trigger(&mut self, p: &EnvParams) {
         self.sustain = p.sustain.clamp(0.0, 1.0);
         self.stage = Stage::Attack;
@@ -107,7 +98,6 @@ impl Ahdsr {
         self.segment(self.sustain, n, DECAY_RATIO);
     }
 
-    /// Note off.
     pub fn release(&mut self, p: &EnvParams) {
         if self.stage == Stage::Idle || self.stage == Stage::Release {
             return;
@@ -127,8 +117,6 @@ impl Ahdsr {
         self.stage == Stage::Idle
     }
 
-    /// Next envelope value. `p` is consulted at stage transitions only, so
-    /// parameter changes apply from the next stage on.
     #[inline]
     pub fn next(&mut self, p: &EnvParams) -> f32 {
         match self.stage {
@@ -161,7 +149,6 @@ impl Ahdsr {
                 self.value
             }
             Stage::Sustain => {
-                // follow sustain changes smoothly
                 let s = p.sustain.clamp(0.0, 1.0);
                 self.value += (s - self.value) * 0.002;
                 if self.value <= 1e-5 && s <= 0.0 {
@@ -180,8 +167,6 @@ impl Ahdsr {
     }
 }
 
-/// Exponential decay generator (pitch envelopes, drum envelopes):
-/// value starts at 1 and falls by `db` over `ms`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ExpDecay {
     pub value: f32,
@@ -195,7 +180,6 @@ impl ExpDecay {
     }
     pub fn set_time(&mut self, ms: f32, db: f32, sr: f32) {
         let n = (ms * 0.001 * sr).max(1.0);
-        // coef^n = 10^(-db/20)
         self.coef = (-(db / 20.0) * std::f32::consts::LN_10 / n).exp();
     }
     #[inline]

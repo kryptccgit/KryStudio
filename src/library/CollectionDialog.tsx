@@ -1,5 +1,3 @@
-// New / edit collection: a name and comma-separated tags ("dark, trap, 140").
-
 import { useState } from 'react';
 import { FolderPlus, Tags } from 'lucide-react';
 import { DialogForm, Field } from '../components/Dialog';
@@ -11,7 +9,6 @@ interface Spec {
   title: string;
   submitLabel: string;
   initial: { name: string; tags: string[] };
-  /** Resolve true to close the dialog. */
   onSubmit: (name: string, tags: string[]) => Promise<boolean>;
   onCancel?: () => void;
 }

@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Auto Mashup dialog (research/18): two song slots (a file, an audio clip
-// of the project, or a reference-library track) with a swap button; the
-// compatibility readout (score ring, per-song readings with tempo chips,
-// reasons, one-click suggestions, problems with a Model Manager link); the
-// style picker (with the 4×2 stem grid for Stem blend); the options; the
-// plan preview (sections timeline with the shifts); Build with progress and
-// Cancel; the summary. Pure view logic lives in ./logic.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowLeftRight,
@@ -102,7 +92,6 @@ const small =
 const primary =
   'inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-krypt-gradient px-4 text-[12px] font-semibold text-white shadow-krypt-glow transition hover:brightness-110 disabled:opacity-40 disabled:shadow-none';
 
-/** A = indigo, B = pink, both = purple (the gradient's three stops, as flat tones). */
 const SONG_TONE: Record<Song | 'both' | 'none', { text: string; chip: string; block: string }> = {
   a: { text: 'text-indigo-300', chip: 'border-krypt-indigo/40 bg-krypt-indigo/15 text-indigo-200', block: 'border-krypt-indigo/50 bg-krypt-indigo/20' },
   b: { text: 'text-pink-300', chip: 'border-krypt-pink/40 bg-krypt-pink/15 text-pink-200', block: 'border-krypt-pink/50 bg-krypt-pink/20' },
@@ -132,8 +121,6 @@ function MashupView({ close }: { close: () => void }) {
   if (picking) return <LibraryPicker song={picking} />;
   return <FormView close={close} />;
 }
-
-// ── Small parts ───────────────────────────────────────────────────────
 
 function Note({ icon: Icon, tone, children }: { icon: LucideIcon; tone: 'muted' | 'warn' | 'ok' | 'error'; children: ReactNode }) {
   return (
@@ -171,8 +158,6 @@ function SongBadge({ song }: { song: Song }) {
     </span>
   );
 }
-
-// ── The form ──────────────────────────────────────────────────────────
 
 function FormView({ close }: { close: () => void }) {
   const form = useMashup((s) => s.form);
@@ -255,14 +240,12 @@ function FormView({ close }: { close: () => void }) {
   );
 }
 
-// ── Song slots ────────────────────────────────────────────────────────
-
 function SlotCard({ song }: { song: Song }) {
   const slot = useMashup((s) => s.form[song]);
   const factor = useMashup((s) => (song === 'a' ? s.form.factorA : s.form.factorB));
   const check = useMashup((s) => s.check);
   const libCount = useLibrary((s) => libraryTrackCount(s.state?.collections));
-  useDocStore((s) => s.version); // the project's clips can change while the dialog is open
+  useDocStore((s) => s.version);
   const clips = projectSongs();
   const reading: MashupSongReading | null = check.result && (check.status === 'ready' || check.status === 'checking') ? check.result[song] : null;
 
@@ -402,8 +385,6 @@ function Reading({ song, reading, factor, dim }: { song: Song; reading: MashupSo
   );
 }
 
-// ── Reference library picker ──────────────────────────────────────────
-
 function LibraryPicker({ song }: { song: Song }) {
   const [text, setText] = useState('');
   const [tracks, setTracks] = useState<LibraryTrack[] | null>(null);
@@ -474,8 +455,6 @@ function LibraryPicker({ song }: { song: Song }) {
     </div>
   );
 }
-
-// ── Compatibility ─────────────────────────────────────────────────────
 
 function ScoreRing({ score }: { score: number }) {
   const id = useId().replace(/:/g, '');
@@ -633,8 +612,6 @@ function Compatibility() {
   );
 }
 
-// ── Style ─────────────────────────────────────────────────────────────
-
 const STYLES: ReadonlyArray<{ id: MashupStyle; icon: LucideIcon; title: string; body: string }> = [
   { id: 'vocalOverBeat', icon: MicVocal, title: 'Vocal over beat', body: "One song's vocal on the other's instrumental: the classic mashup." },
   { id: 'stemBlend', icon: Layers, title: 'Stem blend', body: 'Pick each stem (vocals, drums, bass, other) from either song.' },
@@ -740,8 +717,6 @@ function StemRow({ label, value, cols, onPick }: { label: string; value: Song | 
   );
 }
 
-// ── Options ───────────────────────────────────────────────────────────
-
 const ANCHORS: Array<{ value: FormOptions['anchor']; label: string; title: string }> = [
   { value: 'auto', label: 'Auto', title: "The instrumental keeps its key; the tempo meets half way when keeping the beat's would stretch the vocal audibly" },
   { value: 'beat', label: 'Keep the beat', title: 'The instrumental stays untouched; the vocal moves to its tempo and key' },
@@ -805,8 +780,6 @@ function Options() {
   );
 }
 
-// ── Plan preview ──────────────────────────────────────────────────────
-
 function PlanPreview({ plan, stale, names }: { plan: MashupPlanSummary | null; stale: MashupPlanSummary | null; names?: { a: string; b: string } }) {
   const stems = useMashup((s) => s.form.stems);
   const shown = plan ?? stale;
@@ -860,8 +833,6 @@ function PlanPreview({ plan, stale, names }: { plan: MashupPlanSummary | null; s
     </section>
   );
 }
-
-// ── Progress ──────────────────────────────────────────────────────────
 
 const STAGE_ICON: Record<StageState, { icon: LucideIcon; className: string }> = {
   done: { icon: Check, className: 'text-emerald-300' },
@@ -960,8 +931,6 @@ function ProgressView({ close }: { close: () => void }) {
     </div>
   );
 }
-
-// ── Done ──────────────────────────────────────────────────────────────
 
 function DoneView({ close }: { close: () => void }) {
   const o = useMashup((s) => s.outcome);

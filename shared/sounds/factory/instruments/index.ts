@@ -1,8 +1,3 @@
-// Factory instrument presets, aggregated from one file per role group
-// (owned by the sound designer; see research/10-sound-and-craft.md).
-// Every preset was auditioned through the engine (scripts/audition-presets.mjs)
-// and is validated against the plugin catalog by test/presets-factory.test.ts.
-
 import type { GenreId } from '../../genres';
 import type { InstrumentPreset } from '../../types';
 import { GENRE_DEFAULTS } from './defaults';
@@ -43,7 +38,6 @@ const ALL: InstrumentPreset[] = [
   ...PACK_PRESETS,
 ];
 
-/** Genres each preset is THE go-to sound for (from defaults.ts), keyed by preset id. */
 function defaultsById(): Map<string, GenreId[]> {
   const out = new Map<string, GenreId[]>();
   for (const [genre, roles] of Object.entries(GENRE_DEFAULTS) as [GenreId, Record<string, string>][]) {

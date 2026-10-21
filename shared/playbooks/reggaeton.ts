@@ -1,4 +1,3 @@
-// Reggaeton: the dembow rhythm, minor four-chord loops, an 808 sub and short chant-like hooks.
 import type { Playbook } from './types';
 
 export const REGGAETON: Playbook = {

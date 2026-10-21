@@ -1,24 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// LibraryService: the reference library (research/08 §4) for the UI (IPC,
-// window.krypt.library), MCP tools and the built-in agent.
-//
-//   import   addFolder / addFiles ─▶ track records (status pending)
-//   light    analyze {sections, drums, beat model unless fast scan}
-//            ─▶ drumGrid('mix') + chordsToBeats + featureVector ─▶ 'light'
-//   deep     (collections with deep on, stem model installed, after light)
-//            separate into userData/library/tmp ─▶ transcribe drums / bass /
-//            vocals (unless silent) / other ─▶ notesToBeats + n-gram hashes
-//            ─▶ 'deep' ─▶ temp stems deleted
-//   queries  query / track / profile (cached per collection rev) / similar /
-//            checkOriginality / focus
-//
-// The queue is persistent (status lives in the DB, pause in meta), resumes a
-// few seconds after start-up, runs 2 light jobs and 1 deep job at a time
-// (light first), records per-file failures with the analyzer's message and
-// never stops on them. Records only: nothing here deletes a user's file.
-// Node-only (no Electron import): tests drive it with the fake analyzer.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { USER, type DocHost } from '@shared/doc/DocHost';
@@ -53,12 +32,7 @@ import { makeDir, removeDir, renameDir } from '../system/download';
 import { LibraryDb, LibraryDbError, parseVector, pathKey, rowToTrack, type TrackRow, type TrackSummary } from './db';
 import { AUDIO_EXTENSIONS, AUDIO_FILE_RE } from '@shared/audio/formats';
 
-/**
- * Audio formats the library imports (shared/audio/formats.ts): the royalty-free ones decode everywhere; m4a / aac /
- * mp4 / wma … go through Windows Media Foundation in the analyzer and the engine (files it can't decode fail with its message).
- */
 export const LIBRARY_AUDIO_EXTENSIONS: readonly string[] = AUDIO_EXTENSIONS;
-/** What the audio engine can play (addToProject): the same decoder, so the same list; the engine's sampleInfo has the final word. */
 const ENGINE_AUDIO = AUDIO_FILE_RE;
 
 export function isLibraryAudio(name: string): boolean {
@@ -66,17 +40,11 @@ export function isLibraryAudio(name: string): boolean {
   return LIBRARY_AUDIO_EXTENSIONS.includes(ext);
 }
 
-/** The model the analyzer uses for beats (light pass, unless fast scan). */
 const BEAT_MODEL = 'beat-this-small';
-/** Light jobs at once (the analyzer runs two analyses in parallel). */
 export const LIGHT_CONCURRENCY = 2;
-/** A stem quieter than this (RMS dBFS) is treated as empty and not transcribed. */
 const STEM_SILENCE_DB = -55;
-/** Vocal stems of instrumentals carry bleed; they need more than that to be worth transcribing. */
 const VOCAL_SILENCE_DB = -42;
-/** Analyzer-side failures (crash, restart) blamed on a file only after this many tries. */
 const MAX_ATTEMPTS = 3;
-/** Separation + transcription seconds per minute of audio (docs/ANALYZER_PROTOCOL.md speeds). */
 const DEEP_SEC_PER_MIN: Record<AnalyzerDevice, number> = { directml: 7 + 2, cpu: 26 + 3 };
 const DEFAULT_TRACK_SEC = 210;
 const PAGE = 200;
@@ -87,7 +55,6 @@ const yieldNow = () => new Promise<void>((r) => setImmediate(r));
 const newId = (prefix: string): string => `${prefix}${crypto.randomBytes(6).toString('hex')}`;
 const fileName = (p: string): string => path.basename(p).replace(/\.[a-z0-9]+$/i, '');
 
-/** Failures of the analyzer itself (not of the file): retried, and the file is blamed only after MAX_ATTEMPTS. */
 const ANALYZER_FAILURE =
   /audio analyzer (crashed|stopped unexpectedly|was shut down|isn't running|is not built|didn't (complete|answer))|couldn't (start|prepare|talk to) the audio analyzer|krypt-studio-analyzer(\.exe)? is missing/i;
 
@@ -99,12 +66,10 @@ function plural(n: number, w: string, pl = `${w}s`): string {
   return `${n} ${n === 1 ? w : pl}`;
 }
 
-/** JSON with floats rounded to 4 decimals (features are estimates; keeps the DB small). */
 export function compactJson(v: unknown): string {
   return JSON.stringify(v, (_k, x) => (typeof x === 'number' && Number.isFinite(x) && !Number.isInteger(x) ? Math.round(x * 1e4) / 1e4 : x));
 }
 
-/** Parse a stored features row (vector stored beside it). */
 export function parseFeatures(json: string, vector?: string | number[]): TrackFeatures | null {
   try {
     const f = JSON.parse(json) as Partial<TrackFeatures>;
@@ -121,7 +86,6 @@ export function parseFeatures(json: string, vector?: string | number[]): TrackFe
   }
 }
 
-/** The light pass: analysis → stored features (drum hits summarised into the grid, never stored raw). */
 export function lightFeatures(a: AudioAnalysis): { features: Omit<TrackFeatures, 'vector'>; vector: number[]; summary: TrackSummary } {
   const { drumHits, ...analysis } = a;
   const drums = Array.isArray(drumHits) ? drumGrid(a, drumHits, 'mix') : null;
@@ -144,7 +108,6 @@ export function lightFeatures(a: AudioAnalysis): { features: Omit<TrackFeatures,
   };
 }
 
-/** n-gram hashes of every transcribed line (drum stems have none). */
 export function linesHashes(lines: TrackFeatures['lines']): { hashes: Array<{ hash: number; stem: string; pos: number }>; lines: number } {
   const hashes: Array<{ hash: number; stem: string; pos: number }> = [];
   let count = 0;
@@ -156,24 +119,16 @@ export function linesHashes(lines: TrackFeatures['lines']): { hashes: Array<{ ha
   return { hashes, lines: count };
 }
 
-// ── Dependencies ──────────────────────────────────────────────────────
-
-/** The analyzer as the library uses it: the shared sidecar + model lookups (electron/analyzer). */
 export interface LibraryBackend {
   run<C extends AnalyzerJobCmd, T = unknown>(cmd: C, args: AnalyzerJobArgs[C], onProgress?: (stage: string, fraction: number) => void): JobHandle<T>;
-  /** The exe exists. */
   available(): boolean;
   status(): AnalyzerProcessStatus;
   onStatus(cb: (s: AnalyzerProcessStatus) => void): () => void;
-  /** Start it to learn its devices (estimateDeep). */
   ensureStarted?(): Promise<JobOutcome<HelloResult>>;
-  /** Installed (verified) model directory, else null. */
   modelDir(id: string): string | null;
-  /** The default catalog model for a task, installed or not. */
   defaultModel(task: ModelDef['task']): ModelDef | undefined;
 }
 
-/** A LibraryBackend over the analyzer's supervisor + Model Manager (app: AnalyzerService.shared(); tests: real instances). */
 export function backendFrom(
   supervisor: Pick<LibraryBackend, 'run' | 'available' | 'status' | 'onStatus'> & { ensureStarted?(): Promise<JobOutcome<HelloResult>> },
   models: { dirFor(id: string): string | null; defaultFor(task: ModelDef['task']): ModelDef | undefined },
@@ -195,15 +150,12 @@ export interface LibraryDeps {
   backend: LibraryBackend | null;
   getSettings(): Settings;
   updateSettings(patch: Partial<Settings>): Settings;
-  /** Engine sample info for addToProject (frames / rate). */
   sampleInfo?(absPath: string): Promise<ActionResult<SampleInfo>>;
   pickFolder?(title: string): Promise<string | null>;
   pickFiles?(title: string, extensions: readonly string[]): Promise<string[] | null>;
   broadcast?(state: LibraryState): void;
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
-  /** Delay before queued work resumes at start-up (default 8 s; user actions start it at once). */
   resumeDelayMs?: number;
-  /** Pause after an analyzer crash before the next job (default 3 s; the supervisor adds its own restart backoff). */
   retryDelayMs?: number;
   now?(): number;
 }
@@ -225,7 +177,6 @@ export class LibraryService {
   private dbError: string | null = null;
   private started = false;
   private stopped = false;
-  /** Queue may run (after the start-up delay or a user action). */
   private queueOpen = false;
   private paused = false;
   private message: string | null = null;
@@ -235,7 +186,6 @@ export class LibraryService {
   private pumpTimer: NodeJS.Timeout | null = null;
   private resumeTimer: NodeJS.Timeout | null = null;
   private backoffUntil = 0;
-  /** After an analyzer crash: one light job at a time until one succeeds, so only the culprit is blamed. */
   private solo = false;
   private doneLight = 0;
   private doneDeep = 0;
@@ -262,9 +212,6 @@ export class LibraryService {
     return this.deps.now?.() ?? Date.now();
   }
 
-  // ── Lifecycle ──────────────────────────────────────────────────────
-
-  /** Open the DB, drop leftover temp stems, resume queued work after a short delay. Never throws. */
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
@@ -276,7 +223,6 @@ export class LibraryService {
         const devs = JSON.parse(this.db.getMeta('devices') ?? '[]');
         if (Array.isArray(devs)) this.lastDevices = devs.filter((d): d is AnalyzerDevice => d === 'cpu' || d === 'directml');
       } catch {
-        /* stale meta */
       }
     } catch (err) {
       this.dbError = errText(err);
@@ -290,7 +236,6 @@ export class LibraryService {
           try {
             this.db?.setMeta('devices', JSON.stringify(this.lastDevices));
           } catch {
-            /* best effort */
           }
         }
       }) ?? null;
@@ -307,7 +252,6 @@ export class LibraryService {
     }
   }
 
-  /** Cancel running jobs (they stay queued), wait briefly for temp cleanup, close the DB. */
   async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
@@ -328,7 +272,6 @@ export class LibraryService {
       return new LibraryDb(this.dbPath);
     } catch (err) {
       const msg = errText(err);
-      // A newer schema is kept untouched; an unreadable file is moved aside and a fresh library started.
       if (/newer Krypt Studio/.test(msg) || !(err instanceof LibraryDbError)) throw err;
       const aside = `${this.dbPath}.corrupt-${this.now().toString(36)}`;
       this.deps.log('error', `${msg}. Moving it to ${path.basename(aside)} and starting an empty library.`);
@@ -353,8 +296,6 @@ export class LibraryService {
       return fail(errText(err));
     }
   }
-
-  // ── State + broadcast ──────────────────────────────────────────────
 
   state(): LibraryState {
     const db = this.db;
@@ -417,7 +358,6 @@ export class LibraryService {
     return DEEP_SEC_PER_MIN[this.lastDevices.includes('directml') ? 'directml' : 'cpu'];
   }
 
-  /** Broadcast now (structural change) or throttled to ~4/s (queue progress). */
   notify(throttle = false): void {
     if (!this.deps.broadcast) return;
     const send = (): void => {
@@ -426,7 +366,6 @@ export class LibraryService {
       try {
         this.deps.broadcast?.(this.state());
       } catch {
-        /* a window mid-teardown */
       }
     };
     if (!throttle) {
@@ -439,9 +378,6 @@ export class LibraryService {
     this.broadcastTimer.unref?.();
   }
 
-  // ── Queue ──────────────────────────────────────────────────────────
-
-  /** Let the queue run (start-up delay over, or the user did something). */
   private openQueue(): void {
     this.queueOpen = true;
     this.pump();
@@ -529,12 +465,10 @@ export class LibraryService {
     return this.stopped || job.cancelled || !this.db;
   }
 
-  /** Analyzer failure (crash / missing) → retry later; else the file's own failure → recorded. */
   private onFailure(job: Inflight, gen: number, message: string, deep: boolean): void {
     const db = this.db;
     if (!db) return;
     if (/crashed \d+ times/i.test(message)) {
-      // The supervisor refused to start a crash-looping analyzer: no file ran, so none is blamed.
       this.backoffUntil = this.now() + 30_000;
       this.deps.log('warn', `Library: ${message}`);
       return;
@@ -553,7 +487,6 @@ export class LibraryService {
     this.deps.log('warn', `Library: ${deep ? 'deep analysis of' : 'analysis of'} "${job.name}" failed: ${message}`);
   }
 
-  /** Before a job: the file must still be there and unchanged (else missing / re-queued). Returns the record's gen, or null to skip. */
   private async checkSource(job: Inflight, row: TrackRow): Promise<number | null> {
     const st = await statSource(row.path);
     if (this.gone(job)) return null;
@@ -568,7 +501,7 @@ export class LibraryService {
       db.requeue(row.id, st);
       this.dropVector(row.id);
       if (row.status === 'pending') return db.track(row.id)?.gen ?? null;
-      return null; // changed since its light pass: the light pass runs again first
+      return null;
     }
     return row.gen;
   }
@@ -578,7 +511,6 @@ export class LibraryService {
     try {
       const gen = await this.checkSource(job, row);
       if (gen === null || this.gone(job)) return;
-      // The same unchanged file was already analysed for another collection: reuse it.
       const cur = this.db!.track(row.id);
       const twin = cur ? this.db!.twinOf(cur) : undefined;
       if (twin && this.db!.copyAnalysis(twin, row.id, gen)) {
@@ -656,7 +588,6 @@ export class LibraryService {
         else if (s.name === 'vocals') args = { mode: 'mono' };
         else if (bpDir) args = { mode: 'poly', modelDir: bpDir };
         if (!args) continue;
-        // Only files inside our temp folder are read (never a path the analyzer made up).
         const stemPath = path.join(tmp, path.basename(String(s.path)));
         const h = be.run<'transcribe', TranscriptionResult>('transcribe', { path: stemPath, ...args });
         job.handle = h as JobHandle<unknown>;
@@ -693,17 +624,14 @@ export class LibraryService {
         try {
           this.db?.markDeepFailed(row.id, row.gen, `Deep analysis failed: ${errText(err)}`);
         } catch {
-          /* the DB closed meanwhile */
         }
       }
     } finally {
-      // Stems are ~60 MB per minute of audio: they never outlive the job.
       await removeDir(tmp).catch((err) => this.deps.log('warn', `Library: couldn't delete temporary stems ${tmp}: ${errText(err)}`));
       this.end(job);
     }
   }
 
-  /** Cancel running jobs matching a predicate (they stay queued unless their records go). */
   private cancelWhere(pred: (j: Inflight) => boolean): number {
     let n = 0;
     for (const j of this.inflight.values()) {
@@ -731,8 +659,6 @@ export class LibraryService {
     });
   }
 
-  // ── Collections ────────────────────────────────────────────────────
-
   private cleanName(name: unknown): string {
     const n = String(name ?? '')
       .replace(/[\u0000-\u001f\u007f]/g, '')
@@ -759,7 +685,6 @@ export class LibraryService {
     return db.collectionRows().some((c) => c.id !== except && c.name.toLowerCase() === name.toLowerCase());
   }
 
-  /** A collection by id or (case-insensitive) name. */
   findCollection(ref: string): Collection | null {
     const db = this.db;
     if (!db) return null;
@@ -899,8 +824,6 @@ export class LibraryService {
     });
   }
 
-  // ── Import ─────────────────────────────────────────────────────────
-
   private queueNote(): string {
     if (this.paused) return ' The analysis queue is paused; resume it to analyse them.';
     const be = this.deps.backend;
@@ -909,7 +832,6 @@ export class LibraryService {
     return ' Analysis runs in the background.';
   }
 
-  /** Insert in chunks (yielding) so a big folder never stalls the UI. */
   private async insertFiles(collectionId: string, files: Array<{ path: string; size: number; mtime: number }>): Promise<{ added: number; skipped: number }> {
     let added = 0;
     let skipped = 0;
@@ -1092,8 +1014,6 @@ export class LibraryService {
     });
   }
 
-  // ── Queries ────────────────────────────────────────────────────────
-
   query(q: TrackQuery): Promise<ActionResult<{ tracks: LibraryTrack[]; total: number }>> {
     return this.guard((db) => {
       const o = (q && typeof q === 'object' ? q : {}) as Record<string, unknown>;
@@ -1128,7 +1048,6 @@ export class LibraryService {
     });
   }
 
-  /** The collection's style profile, cached until its tracks change. */
   profile(collectionId: string): Promise<ActionResult<StyleProfile>> {
     return this.guard(async (db) => {
       const row = db.collectionRow(String(collectionId));
@@ -1154,7 +1073,6 @@ export class LibraryService {
           return p;
         }
       } catch {
-        /* rebuild */
       }
     }
     const key = `${row.id}:${row.rev}`;
@@ -1188,7 +1106,6 @@ export class LibraryService {
     return profile;
   }
 
-  /** Plain-text profile for agents (collection id/name, or the active focus when omitted). */
   async profileText(ref?: string, opts: { brief?: string; maxChars?: number } = {}): Promise<ActionResult<{ text: string; collection: Collection; profile: StyleProfile }>> {
     return this.guard(async () => {
       const focus = this.focus();
@@ -1245,7 +1162,6 @@ export class LibraryService {
     });
   }
 
-  /** Recompute vectors stored by another VECTOR_VERSION (start-up, chunked). */
   private async refreshVectors(): Promise<void> {
     let fixed = 0;
     try {
@@ -1275,9 +1191,6 @@ export class LibraryService {
     }
   }
 
-  // ── Originality ────────────────────────────────────────────────────
-
-  /** The project's melodic lines (optionally one pattern / some patterns) vs every deep-analysed reference line. */
   checkOriginality(opts: { patternId?: string; patternIds?: string[] } = {}): Promise<ActionResult<OriginalityReport>> {
     return this.guard(async (db) => {
       const p = this.deps.doc.project;
@@ -1303,7 +1216,6 @@ export class LibraryService {
           return featCache.get(trackId) ?? null;
         };
         for (const line of lines) {
-          // Beats, like the stored reference hashes (lineHashes' chord-merge tolerance is in beats).
           const hashes = lineHashes(line.notes.map((n) => ({ start: n.tick / PPQ, dur: n.dur / PPQ, key: n.key }))).map((h) => h.hash);
           if (!hashes.length) continue;
           const refs: ReferenceLine[] = [];
@@ -1331,10 +1243,6 @@ export class LibraryService {
     });
   }
 
-  /**
-   * The automatic check after an agent's edit group (MCP commit_edit): only when a focus is set and its
-   * collection has deep-analysed tracks. null = not applicable.
-   */
   async originalityForFocus(patternIds: string[]): Promise<OriginalityReport | null> {
     const f = this.focus();
     if (!f || !this.db || !patternIds.length) return null;
@@ -1342,8 +1250,6 @@ export class LibraryService {
     const r = await this.checkOriginality({ patternIds });
     return r.ok && r.data ? r.data : null;
   }
-
-  // ── Focus ──────────────────────────────────────────────────────────
 
   focus(): LibraryFocus | null {
     const f = this.deps.getSettings().library?.focus ?? null;
@@ -1354,7 +1260,6 @@ export class LibraryService {
         if (!row) return null;
         if (row.name !== f.name) return { ...f, name: row.name };
       } catch {
-        /* fall through */
       }
     }
     return f;
@@ -1374,7 +1279,6 @@ export class LibraryService {
         this.deps.log('info', `Library: cleared the style focus ("${f.name}" no longer exists)`);
       }
     } catch {
-      /* keep it */
     }
   }
 
@@ -1401,7 +1305,6 @@ export class LibraryService {
     });
   }
 
-  /** The built-in agent's context block: changes when the focus, its brief or the profile changes. */
   async focusContext(): Promise<{ key: string; text: string } | null> {
     try {
       const f = this.focus();
@@ -1416,8 +1319,6 @@ export class LibraryService {
       return null;
     }
   }
-
-  // ── Project ────────────────────────────────────────────────────────
 
   addToProject(trackId: string): Promise<ActionResult<{ clipId: string; channelId: string }>> {
     return this.guard(async (db) => {

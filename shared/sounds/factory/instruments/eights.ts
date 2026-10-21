@@ -1,6 +1,3 @@
-// Factory 808 presets (Krypt 808 at true pitch: C2 = MIDI 36). Every 808 is a
-// mono channel with glide, so overlapping notes slide; rootKey 36 makes steps land on C2.
-
 import type { InstrumentPreset } from '../../types';
 import { CRUSH, HARD, K808, TAPE, TUBE, clipper, drive, eq, k808, preset, transient } from './kit';
 

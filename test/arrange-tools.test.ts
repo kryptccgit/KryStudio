@@ -1,5 +1,3 @@
-// Playlist arrangement tools (shared/commands/arrange.ts): split by channel,
-// consolidate, clone as unique, insert / delete time.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -12,7 +10,6 @@ const BAR = PPQ * 4;
 
 function fresh() {
   const p = createDefaultProject('Arrange');
-  // start from an empty arrangement so positions are predictable
   p.playlist.clips = {};
   p.playlist.markers = {};
   const host = new DocHost(p, CATALOG, { strict: true });
@@ -38,7 +35,6 @@ test('split by channel: one pattern + clip per channel, overlap forces a new tra
   ex('notes.add', { patternId: pat, channelId: bass, notes: [{ tick: 0, key: 40, dur: 1900 }] });
   ex('patterns.set', { id: pat, length: BAR * 2 });
   const src = ex<{ id: string }>('playlist.addClip', { kind: 'pattern', trackId: tracks[0], start: BAR, patternId: pat, offset: 120 }).id;
-  // something already on track 2 in the same range → the 2nd channel gets a NEW track there
   ex('playlist.addClip', { kind: 'pattern', trackId: tracks[1], start: BAR * 2, patternId: pat });
   const nTracks = host.project.playlist.trackOrder.length;
   const r = ex<{ patternIds: string[]; clipIds: string[] }>('playlist.splitByChannel', { clipIds: [src] });
@@ -52,7 +48,6 @@ test('split by channel: one pattern + clip per channel, overlap forces a new tra
   assert.deepEqual(Object.keys(p.patterns[r.patternIds[0]].notes), [kick]);
   assert.equal(Object.keys(p.patterns[r.patternIds[0]].notes[kick]).length, 2);
   assert.equal(p.patterns[r.patternIds[2]].color, p.channels[bass].color);
-  // note ids are fresh
   const srcIds = new Set(Object.keys(p.patterns[pat].notes[kick]));
   for (const id of Object.keys(p.patterns[r.patternIds[0]].notes[kick])) assert.ok(!srcIds.has(id));
   const out = r.clipIds.map((id) => p.playlist.clips[id]);
@@ -61,13 +56,11 @@ test('split by channel: one pattern + clip per channel, overlap forces a new tra
     assert.equal(c.start, BAR);
     assert.equal(c.offset, 120);
   }
-  // track 2 was busy → a new track was inserted at index 1, the third goes right after it
   assert.equal(p.playlist.trackOrder.length, nTracks + 2);
   assert.equal(p.playlist.trackOrder.indexOf(out[1].trackId), 1);
   assert.equal(p.playlist.trackOrder.indexOf(out[2].trackId), 2);
   assert.equal(p.playlist.tracks[out[1].trackId].name, p.channels[snare].name);
   ok(host);
-  // one undo step restores everything
   host.undo(USER);
   assert.ok(host.project.playlist.clips[src]);
   assert.equal(host.project.playlist.trackOrder.length, nTracks);
@@ -80,7 +73,7 @@ test('split by channel reuses a free following track and refuses empty patterns'
   ex('notes.add', { patternId: pat, channelId: kick, notes: [{ tick: 0, key: 36 }] });
   ex('notes.add', { patternId: pat, channelId: snare, notes: [{ tick: 480, key: 38 }] });
   const src = ex<{ id: string }>('playlist.addClip', { kind: 'pattern', trackId: tracks[0], start: 0, patternId: pat }).id;
-  ex('playlist.addClip', { kind: 'pattern', trackId: tracks[1], start: BAR * 4, patternId: pat }); // later: no overlap
+  ex('playlist.addClip', { kind: 'pattern', trackId: tracks[1], start: BAR * 4, patternId: pat });
   const n = host.project.playlist.trackOrder.length;
   const r = ex<{ clipIds: string[] }>('playlist.splitByChannel', { clipIds: [src] });
   assert.equal(host.project.playlist.trackOrder.length, n);
@@ -96,12 +89,10 @@ test('consolidate renders offset, looping and the clip-end cut into one pattern'
   const { host, pat, kick, bass, tracks, ex } = fresh();
   ex('notes.clear', { patternId: pat });
   ex('notes.add', { patternId: pat, channelId: kick, notes: [{ tick: 0, key: 36, dur: 240 }, { tick: 1920, key: 36, dur: 240 }] });
-  ex('patterns.set', { id: pat, length: BAR }); // 3840 ticks
+  ex('patterns.set', { id: pat, length: BAR });
   const p2 = ex<{ id: string }>('patterns.add', { select: false }).id;
   ex('notes.add', { patternId: p2, channelId: bass, notes: [{ tick: 0, key: 40, dur: 3000 }] });
-  // clip A: offset 1920, length 2 bars → plays pattern from 1920 and loops
   const a = ex<{ id: string }>('playlist.addClip', { kind: 'pattern', trackId: tracks[1], start: BAR, length: BAR * 2, offset: 1920, patternId: pat }).id;
-  // clip B: muted, on the top track, cut short (bass note 3000 long cut at 1000)
   const b = ex<{ id: string }>('playlist.addClip', { kind: 'pattern', trackId: tracks[0], start: BAR * 2, length: 1000, patternId: p2 }).id;
   ex('playlist.updateClips', { updates: [{ id: b, mute: true }] });
   const r = ex<{ patternId: string; clipId: string }>('playlist.consolidate', { clipIds: [a, b] });
@@ -109,19 +100,18 @@ test('consolidate renders offset, looping and the clip-end cut into one pattern'
   assert.equal(p.playlist.clips[a], undefined);
   assert.equal(p.playlist.clips[b], undefined);
   const c = p.playlist.clips[r.clipId];
-  assert.equal(c.trackId, tracks[0]); // topmost involved track
+  assert.equal(c.trackId, tracks[0]);
   assert.equal(c.start, BAR);
   assert.equal(c.length, BAR * 2);
   const np = p.patterns[r.patternId];
   assert.equal(np.length, BAR * 2);
-  // kick: source ticks 1920 (at song BAR), 3840+0 (BAR+1920), 3840+1920 (BAR+3840), 7680 (BAR+5760)
   const kicks = Object.values(np.notes[kick]).map((n) => n.tick).sort((x, y) => x - y);
   assert.deepEqual(kicks, [0, 1920, 3840, 5760]);
   const bassNotes = Object.values(np.notes[bass]);
   assert.equal(bassNotes.length, 1);
   assert.equal(bassNotes[0].tick, BAR);
-  assert.equal(bassNotes[0].dur, 1000); // cut at the clip end
-  assert.equal(bassNotes[0].mute, true); // came from a muted clip
+  assert.equal(bassNotes[0].dur, 1000);
+  assert.equal(bassNotes[0].mute, true);
   assert.equal(patternLength(np, p.transport.timeSig), BAR * 2);
   ok(host);
 });
@@ -141,7 +131,6 @@ test('cloneClips makes one unique pattern copy per source pattern', () => {
   assert.equal(ca.start, len);
   assert.notEqual(r.patternIds[0], pat);
   assert.match(p.patterns[r.patternIds[0]].name, /#\d+$/);
-  // editing the clone's pattern leaves the source alone
   const before = JSON.stringify(p.patterns[pat].notes);
   ex('notes.clear', { patternId: r.patternIds[0] });
   assert.equal(JSON.stringify(host.project.patterns[pat].notes), before);
@@ -168,9 +157,9 @@ test('insertTime moves later clips, splits crossing clips, shifts markers and th
   assert.equal(right.length, BAR);
   assert.equal(p.playlist.markers[m1].tick, BAR);
   assert.equal(p.playlist.markers[m2].tick, BAR * 4);
-  assert.deepEqual(p.transport.loop, { enabled: true, start: BAR, end: BAR * 5 }); // contained the point → stretched
+  assert.deepEqual(p.transport.loop, { enabled: true, start: BAR, end: BAR * 5 });
   ex('playlist.insertTime', { at: 0, length: BAR });
-  assert.deepEqual(host.project.transport.loop, { enabled: true, start: BAR * 2, end: BAR * 6 }); // after the point → moved
+  assert.deepEqual(host.project.transport.loop, { enabled: true, start: BAR * 2, end: BAR * 6 });
   ok(host);
 });
 
@@ -184,7 +173,6 @@ test('deleteTime removes, trims, joins and shifts; loop collapses to off', () =>
   const mIn = ex<{ id: string }>('playlist.addMarker', { tick: BAR * 2 + 10, name: 'gone' }).id;
   const mAfter = ex<{ id: string }>('playlist.addMarker', { tick: BAR * 5, name: 'kept' }).id;
   ex('transport.set', { loop: { enabled: true, start: BAR * 2, end: BAR * 4 } });
-  // delete bars 3..4 (ticks 2·BAR .. 4·BAR)
   const r = ex<{ removed: number; trimmed: number; moved: number }>('playlist.deleteTime', { start: BAR * 2, end: BAR * 4 });
   assert.deepEqual(r, { removed: 1, trimmed: 3, moved: 1 });
   const p = host.project;
@@ -198,11 +186,10 @@ test('deleteTime removes, trims, joins and shifts; loop collapses to off', () =>
   assert.equal(p.playlist.clips[later].start, BAR * 4);
   assert.equal(p.playlist.markers[mIn], undefined);
   assert.equal(p.playlist.markers[mAfter].tick, BAR * 3);
-  assert.equal(p.transport.loop.enabled, false); // the whole loop region was deleted
+  assert.equal(p.transport.loop.enabled, false);
   ok(host);
   const bad = host.exec('playlist.deleteTime', { start: 100, end: 100 }, { actor: USER });
   assert.equal(bad.ok, false);
-  // one undo step
   host.undo(USER);
   assert.ok(host.project.playlist.clips[inside]);
   assert.equal(host.project.transport.loop.enabled, true);

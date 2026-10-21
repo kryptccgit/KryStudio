@@ -1,15 +1,3 @@
-// Auto Mix service (electron/automix) + the auto_mix MCP tool, over the real
-// DocHost + commands and a fake measurement that "renders" the project: stem
-// loudness follows the insert faders, the master follows Krypt's limiter
-// input (slope 0.8: a limiter never gives back 1 LU per dB) and its ceiling.
-//
-//  - a run is ONE history entry; DocHost.toggleEntry A/B restores / re-applies;
-//  - cancel (while measuring, and while refining) changes nothing;
-//  - converging stops within 3 passes;
-//  - vocal mode without vocals is a clear note, not a crash;
-//  - masterFile opens a new tab with the audio and masters it;
-//  - understand: the AI when it answers, else keywords;
-//  - auto_mix: dry_run edits nothing, a run is one agent history entry.
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
@@ -30,18 +18,12 @@ import { mixDoc, PARTS, type PartName } from './automix-fixtures';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'kstudio-automix-'));
 
-// ── The fake render ─────────────────────────────────────────────────────
-
 const pw = (dbs: number[]) => 10 * Math.log10(dbs.reduce((s, d) => s + Math.pow(10, d / 10), 0));
 
 interface SimOpts {
-  /** LUFS per dB of limiter input (default 0.8). */
   slope?: number;
-  /** No gain-reduction readings (so the crest guard can't stop the walk). */
   noGr?: boolean;
-  /** Limiter reduction (avg dB) per dB of input (default 0.25). */
   grScale?: number;
-  /** Awaited before each measurement (the n-th call, 0-based). */
   gate?: (n: number) => Promise<void>;
 }
 
@@ -79,8 +61,6 @@ function simulator(o: SimOpts = {}): { fn: MeasureFn; calls: () => number } {
   };
   return { fn, calls: () => n };
 }
-
-// ── Rig ─────────────────────────────────────────────────────────────────
 
 function rig(o: { sim?: SimOpts; ai?: AiIntentFn | null; vocals?: boolean; tabs?: boolean } = {}) {
   const { doc, ids } = mixDoc({ drumBus: false, vocals: o.vocals });
@@ -141,8 +121,6 @@ function rig(o: { sim?: SimOpts; ai?: AiIntentFn | null; vocals?: boolean; tabs?
 const live = (doc: DocHost) => doc.getHistory().filter((h) => !h.undone);
 const mixerJson = (doc: DocHost) => JSON.stringify(doc.project.mixer);
 
-// ── Tests ───────────────────────────────────────────────────────────────
-
 test('run (full): ONE history entry, before → after, converged within 3 passes; toggleEntry is the A/B', async () => {
   const r = rig();
   const before = mixerJson(r.doc);
@@ -163,7 +141,6 @@ test('run (full): ONE history entry, before → after, converged within 3 passes
   assert.match(out.message!, /One undo step/);
   assert.ok(r.progress.some((p) => p.stage === 'measuring') && r.progress[r.progress.length - 1].stage === 'done');
   const after = mixerJson(r.doc);
-  // A/B: off restores the exact mixer, on brings the mix back
   assert.equal(r.doc.toggleEntry(o.entryId!, USER).ok, true);
   assert.equal(mixerJson(r.doc), before, 'A: the mix as it was');
   assert.equal(r.doc.toggleEntry(o.entryId!, USER).ok, true);
@@ -189,7 +166,6 @@ test('run: converging stops within 3 passes and says where it ended', async () =
   assert.ok(r.sim.calls() <= 4, `renders ${r.sim.calls()}`);
   assert.ok(o.notes.some((n) => /Loudness ended at/.test(n)), o.notes.join(' | '));
   assert.equal(o.entryId !== null && r.doc.getHistory().filter((h) => h.id === o.entryId).length, 1, 'still one entry');
-  // with the limiter's reduction measured, the crest guard stops earlier and says so
   const g = rig({ sim: { slope: 0.05, grScale: 0.6 } });
   const capped = await g.svc.run({ mode: 'master', preset: 'club-edm', targetLufs: -6 }, { actor: USER });
   assert.ok(capped.data!.passes <= 3);
@@ -282,7 +258,6 @@ test('masterFile: a new tab with the audio, mastered; import and mastering are s
   assert.equal(live(r.doc).length, 2, 'the import, then the mastering');
   assert.ok(Math.abs(out.data!.after.lufs - -14) <= 0.5, `${out.data!.after.lufs}`);
   assert.match(out.message!, /new project tab/);
-  // bad input is refused clearly
   assert.match((await r.svc.masterFile({ path: 'relative.wav' }, USER)).message!, /isn't an audio file/);
   assert.match((await r.svc.masterFile({ path: path.join(TMP, 'notes.txt') }, USER)).message!, /isn't an audio file/);
 });

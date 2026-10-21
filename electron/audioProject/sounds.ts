@@ -1,9 +1,3 @@
-// Sounds for the parts of a transcribed song: the closest match to the
-// reference's own sound (fingerprints of its stem segments → match-core),
-// else the role / genre pick every other tool uses (shared/sounds/select.ts
-// through instruments.ts), else the legacy kit / a TriOsc patch. Never fails:
-// a part always gets something that plays, and `why` says how it was chosen.
-
 import fs from 'node:fs';
 import type { MainDeps } from '../mcp/types';
 import type { GenreId } from '@shared/sounds/genres';
@@ -15,10 +9,8 @@ import { DRUM_ROLES } from '../analyzer/convert';
 import { bestDrumSample, bestPreset, presetPlayable, soundLibrary, SYNTH_PRESETS } from '../mcp/tools/instruments';
 import type { PartSound } from './build';
 
-/** Ranks candidates for a part from its fingerprints (match-core); `problem` = it can't match here (no index …). */
 export type SoundMatcher = (fps: SoundFingerprint[], target: MatchTarget) => Promise<{ ok: true; matches: SoundMatch[] } | { ok: false; problem: string }>;
 
-/** The instrument role a part plays. */
 export function partRole(part: Pick<TranscribedPart, 'kind' | 'name' | 'drumRole'>): InstrumentRole {
   if (part.kind === 'drum') return (part.drumRole ?? roleFromName(part.name) ?? 'perc') as InstrumentRole;
   const named = roleFromName(part.name);
@@ -36,7 +28,6 @@ export function matchTarget(part: Pick<TranscribedPart, 'kind' | 'name' | 'drumR
   return { kind: 'instrument', role };
 }
 
-/** The role / genre pick (no fingerprints). */
 export function fallbackSound(deps: MainDeps, presets: readonly Preset[], part: Pick<TranscribedPart, 'kind' | 'name' | 'drumRole'>, genre: GenreId | null): PartSound {
   const role = partRole(part);
   if (part.kind === 'drum') {
@@ -69,7 +60,6 @@ function sampleExists(deps: MainDeps, p: string): boolean {
   }
 }
 
-/** A matcher candidate → a PartSound, when it plays here (the preset exists and is playable; the sample is on disk). */
 export function soundFromMatch(deps: MainDeps, presets: readonly Preset[], m: SoundMatch, role: InstrumentRole): PartSound | null {
   const src = m.source;
   if (src.kind === 'preset') {
@@ -82,7 +72,6 @@ export function soundFromMatch(deps: MainDeps, presets: readonly Preset[], m: So
   return { load: { kind: 'sample', path: src.path }, label, role, similarity: m.similarity, tweaks: { ...m.tweaks }, why: m.why };
 }
 
-/** The best playable match, or null. */
 export function bestMatch(deps: MainDeps, presets: readonly Preset[], matches: readonly SoundMatch[], role: InstrumentRole): PartSound | null {
   for (const m of [...matches].sort((a, b) => b.similarity - a.similarity)) {
     const s = soundFromMatch(deps, presets, m, role);
@@ -91,7 +80,6 @@ export function bestMatch(deps: MainDeps, presets: readonly Preset[], matches: r
   return null;
 }
 
-/** "Kick → Punchy Kick 2 (similarity 0.86)" / "Bass → Deep Sub (picked by role)". */
 export function soundLine(name: string, s: PartSound): string {
   return `${name} → ${s.label} (${s.similarity !== null ? `similarity ${Math.round(s.similarity * 100) / 100}` : 'picked by role'})`;
 }

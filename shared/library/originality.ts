@@ -1,30 +1,3 @@
-// Originality check (research/08 §4.4): the project's melodic lines vs the
-// deep-analysed references' transcribed lines, transposition-invariant
-// (pitch intervals) with rhythm (duration ratios). Pure. The DB layer
-// stores lineHashes() for every reference line and looks candidates up by
-// hash; findMatches() verifies them.
-//
-// Pipeline:
-//  1. Monophonic reduction: notes whose onsets lie within 0.06 beat are one
-//     onset; the highest note wins (the melody usually sits on top).
-//  2. lineHashes: every NGRAM_NOTES-note window → (4 pitch intervals, 3 IOI
-//     ratio classes shorter/same/longer) → FNV-1a 32-bit. Intervals make it
-//     transposition-invariant, IOI ratios make it tempo-invariant (a melody
-//     written at double speed hashes the same).
-//  3. findMatches: seeds = windows whose 4 intervals agree exactly; each seed
-//     is extended both ways while intervals agree and the rhythm stays within
-//     tolerance of the seed's tempo ratio. Near-misses ride over transcription
-//     errors: a rhythm off by up to ~75 %, an interval off by a semitone, or
-//     one wrong note (two neighbouring intervals off by +e / -e) — at most one
-//     per 8 notes, never two in a row, and a run never ends on one. Runs of
-//     ≥ minNotes notes that aren't "too generic" (repeated notes, plain scale
-//     runs, two-note trills, ≤ 2 pitch classes, low interval entropy) are
-//     reported; runs overlapping in the project line are deduped per reference.
-//
-// Units: lineHashes() and findMatches() work in BEATS. Use beatNoteHashes()
-// for reference lines (BeatNote) and projectLineHashes() for project lines
-// (ticks) so both sides of the hash index agree.
-
 import type { AudioAnalysis } from '../analyzer/protocol';
 import type { Channel, Project } from '../schema/project';
 import { PPQ, ticksPerBar } from '../schema/time';
@@ -32,27 +5,20 @@ import type { BeatNote, OriginalityMatch, OriginalityReport, ProjectLine } from 
 import { beatToSec } from './grid';
 import { isNum, round } from './stats';
 
-/** n-gram length used for hashing (notes per n-gram). */
 export const NGRAM_NOTES = 5;
-/** Default minimum run (notes) that counts as a match. */
 export const MIN_MATCH_NOTES = 8;
-/** Onsets closer than this (beats) are one onset (chord / transcription double). */
 export const ONSET_TOLERANCE = 0.06;
-/** |log2(IOI ratio)| below this counts as "same length" in a hash. */
 const RHYTHM_SAME = 0.25;
-/** Rhythm tolerance when verifying (|log2| deviation from the run's tempo ratio). */
 const RHYTHM_OK = 0.35;
 const RHYTHM_SOFT = 0.8;
 const MAX_INTERVAL = 36;
 const MAX_MATCHES_PER_LINE = 24;
 
 export interface MonoLine {
-  /** Onsets, in the input's time unit (beats). */
   start: number[];
   key: number[];
 }
 
-/** Monophonic reduction: one note per onset (the highest), onsets within `tolerance` merged. */
 export function monophonic(notes: ReadonlyArray<{ start: number; dur?: number; key: number }>, tolerance = ONSET_TOLERANCE): MonoLine {
   const sorted = notes.filter((n) => n && isNum(n.start) && isNum(n.key)).slice().sort((a, b) => a.start - b.start || b.key - a.key);
   const start: number[] = [];
@@ -91,11 +57,6 @@ function fnvByte(h: number, b: number): number {
   return Math.imul(h ^ (b & 0xff), 0x01000193);
 }
 
-/**
- * Hashes of every n-gram of a line (positions = note index of the n-gram start). Monophonic reduction first (highest note per onset).
- * Times are beats (any unit works when `tolerance` — the chord-onset merge window — is given in that unit).
- * Windows of one repeated note are skipped (they would match everything).
- */
 export function lineHashes(notes: Array<{ start: number; dur: number; key: number }>, opts: { tolerance?: number } = {}): Array<{ hash: number; pos: number }> {
   const m = monophonic(notes, opts.tolerance ?? ONSET_TOLERANCE);
   const iv = intervalsOf(m);
@@ -116,35 +77,28 @@ export function lineHashes(notes: Array<{ start: number; dur: number; key: numbe
   return out;
 }
 
-/** lineHashes of a reference line (BeatNote, beats from the first downbeat). */
 export function beatNoteHashes(notes: readonly BeatNote[]): Array<{ hash: number; pos: number }> {
   return lineHashes(notes.map((n) => ({ start: n.beat, dur: n.dur, key: n.key })));
 }
 
-/** lineHashes of a project line (ticks at PPQ 960 → beats). */
 export function projectLineHashes(line: Pick<ProjectLine, 'notes'>): Array<{ hash: number; pos: number }> {
   return lineHashes(line.notes.map((n) => ({ start: n.tick / PPQ, dur: n.dur / PPQ, key: n.key })));
 }
-
-// ── Project lines ───────────────────────────────────────────────────────
 
 const DRUM_NAME = /kick|snare|clap|hi-?hat|\bhats?\b|perc|rim|\btoms?\b|cymbal|crash|\bride\b|shaker|tamb|conga|bongo|cowbell|\bsnap|drum|\bkit\b/i;
 const DRUM_CODE = /^(bd|sd|cp|hh|oh|ch|ohh|chh|rs|cb)\d*$/i;
 const DRUM_GENERATORS = new Set(['krypt.drumsynth', 'krypt.audioclip']);
 
-/** Whether a channel is percussion (excluded from the originality check). */
 export function isPercussionChannel(ch: Channel, distinctKeys: number): boolean {
   const name = ch.name.trim();
   const group = ch.group?.trim();
   if (group && /drum|perc/i.test(group)) return true;
   if (DRUM_GENERATORS.has(ch.generator.type)) return true;
   if (DRUM_NAME.test(name) || DRUM_CODE.test(name)) return true;
-  // A sampler is a one-shot (drum) unless it plays a line, or the user grouped it elsewhere.
   if (ch.generator.type === 'krypt.sampler' && !group && distinctKeys < 3) return true;
   return false;
 }
 
-/** Melodic lines of the project: every pattern × pitched channel with ≥ NGRAM_NOTES notes (drum channels excluded). */
 export function projectLines(p: Project): ProjectLine[] {
   const barTicks = ticksPerBar(p.transport.timeSig);
   const out: ProjectLine[] = [];
@@ -161,7 +115,6 @@ export function projectLines(p: Project): ProjectLine[] {
         .sort((a, b) => a.tick - b.tick || a.key - b.key);
       if (notes.length < NGRAM_NOTES) continue;
       const distinct = new Set(notes.map((n) => n.key)).size;
-      // Fewer than 3 pitches is a drum part or a pedal, never a melody worth checking.
       if (distinct < 3 || isPercussionChannel(ch, distinct)) continue;
       out.push({ label: `Pattern "${pat.name}" · ${ch.name}`, patternId: pid, channelId: cid, notes, barTicks });
     }
@@ -169,22 +122,16 @@ export function projectLines(p: Project): ProjectLine[] {
   return out;
 }
 
-// ── Verification ────────────────────────────────────────────────────────
-
 export interface ReferenceLine {
   trackId: string;
   trackName: string;
   stem: string;
   notes: BeatNote[];
-  /** Track tempo, to report positions in seconds. */
   bpm: number;
-  /** Seconds of the first downbeat (beat 0). */
   downbeatSec: number;
-  /** Optional: the track's analysis. When given, refAtSec follows its beat grid exactly (tempo drift safe) instead of bpm + downbeatSec. */
   analysis?: AudioAnalysis;
 }
 
-/** Shannon entropy (bits) of a list of values. */
 function entropy(values: readonly number[]): number {
   const c = new Map<number, number>();
   for (const v of values) c.set(v, (c.get(v) ?? 0) + 1);
@@ -196,11 +143,6 @@ function entropy(values: readonly number[]): number {
   return h;
 }
 
-/**
- * True when a run of intervals is too generic to flag: a repeated note, a
- * two-note trill / alternation, a plain stepwise scale run (at most one turn),
- * one or two pitch classes, or very low interval entropy.
- */
 export function isGenericRun(intervals: readonly number[], keys?: readonly number[]): boolean {
   if (intervals.length < 2) return true;
   if (new Set(intervals).size < 3) return true;
@@ -215,17 +157,14 @@ export function isGenericRun(intervals: readonly number[], keys?: readonly numbe
 }
 
 interface Run {
-  /** First transition index in the project line / reference (note index of the run's first note). */
   i: number;
   j: number;
-  /** Transitions in the run (notes = len + 1). */
   len: number;
   similarity: number;
 }
 
 type Verdict = 'ok' | 'soft' | 'bad';
 
-/** Verified matches of ≥ minNotes consecutive notes between a project line and candidate reference lines. */
 export function findMatches(line: ProjectLine, refs: ReferenceLine[], opts: { minNotes?: number; barTicks?: number } = {}): OriginalityMatch[] {
   const minNotes = Math.max(NGRAM_NOTES, Math.round(opts.minNotes ?? MIN_MATCH_NOTES));
   const barTicks = line.barTicks && line.barTicks > 0 ? line.barTicks : opts.barTicks && opts.barTicks > 0 ? opts.barTicks : PPQ * 4;
@@ -235,7 +174,6 @@ export function findMatches(line: ProjectLine, refs: ReferenceLine[], opts: { mi
   const pIoi = ioisOf(P);
   const seedLen = NGRAM_NOTES - 1;
 
-  // Seed index: project interval 4-grams → positions.
   const index = new Map<string, number[]>();
   for (let i = 0; i + seedLen <= pIv.length; i++) {
     const k = pIv.slice(i, i + seedLen).join(',');
@@ -252,7 +190,6 @@ export function findMatches(line: ProjectLine, refs: ReferenceLine[], opts: { mi
     const rIv = intervalsOf(R);
     const rIoi = ioisOf(R);
 
-    /** Signed pitch-interval difference and |rhythm deviation| from the run's tempo ratio for one transition pair. */
     const look = (a: number, b: number, logS: number) => ({ dp: pIv[a] - rIv[b], dr: Math.abs(Math.log2(pIoi[a] / rIoi[b]) - logS) });
 
     const covered = new Map<number, Array<[number, number]>>();
@@ -269,12 +206,10 @@ export function findMatches(line: ProjectLine, refs: ReferenceLine[], opts: { mi
       if (!seeds) continue;
       for (const i of seeds) {
         if (isCovered(i, j)) continue;
-        // The run's tempo ratio (project beats per reference beat) from the seed's median IOI ratio.
         const logs: number[] = [];
         for (let t = 0; t < seedLen; t++) logs.push(Math.log2(pIoi[i + t] / rIoi[j + t]));
         const sortedLogs = logs.slice().sort((x, y) => x - y);
         const logS = (sortedLogs[(seedLen - 1) >> 1] + sortedLogs[seedLen >> 1]) / 2;
-        // Verdict per transition, keyed by offset from the seed start.
         const verdicts = new Map<number, Verdict>();
         let softs = 0;
         let seedBad = false;
@@ -293,9 +228,6 @@ export function findMatches(line: ProjectLine, refs: ReferenceLine[], opts: { mi
         let hi = seedLen - 1;
         const budget = (notes: number) => Math.max(1, Math.floor(notes / 8));
         const inRange = (t: number) => i + t >= 0 && j + t >= 0 && i + t < pIv.length && j + t < rIv.length;
-        // Extend right (dir 1) then left (dir -1). Near-misses ("soft"): the rhythm off by up to ~75 %,
-        // an interval off by a semitone, or one wrong note (two neighbouring intervals off by +e / -e, |e| <= 2).
-        // Never two near-misses in a row, at most one per 8 notes.
         for (const dir of [1, -1] as const) {
           let t = dir > 0 ? hi + 1 : lo - 1;
           let lastSoft = verdicts.get(dir > 0 ? hi : lo) === 'soft';
@@ -334,7 +266,6 @@ export function findMatches(line: ProjectLine, refs: ReferenceLine[], opts: { mi
           if (dir > 0) hi = edge;
           else lo = edge;
         }
-        // Runs end on solid matches.
         while (hi > lo && verdicts.get(hi) === 'soft') hi--;
         while (lo < hi && verdicts.get(lo) === 'soft') lo++;
         cover(i, j, i + lo, i + hi);
@@ -354,7 +285,6 @@ export function findMatches(line: ProjectLine, refs: ReferenceLine[], opts: { mi
       }
     }
 
-    // Dedupe: per reference, keep the best run for each stretch of the project line.
     runs.sort((x, y) => y.len - x.len || y.similarity - x.similarity || x.i - y.i || x.j - y.j);
     const kept: Run[] = [];
     for (const r of runs) {
@@ -386,8 +316,6 @@ export function findMatches(line: ProjectLine, refs: ReferenceLine[], opts: { mi
   return matches.slice(0, MAX_MATCHES_PER_LINE);
 }
 
-// ── Summary ─────────────────────────────────────────────────────────────
-
 export const ORIGINALITY_DISCLAIMER =
   'This is a production aid, not legal advice: it only compares transcribed melodies (transcription can be wrong), so it can miss similarities and it does not certify that anything is non-infringing.';
 
@@ -400,7 +328,6 @@ function fmtSec(sec: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-/** Plain-language summary for a report (always ends with the "production aid, not legal advice" note). */
 export function originalitySummary(r: Omit<OriginalityReport, 'summary'>, opts: { minNotes?: number } = {}): string {
   const minNotes = Math.max(NGRAM_NOTES, Math.round(opts.minNotes ?? MIN_MATCH_NOTES));
   const parts: string[] = [];

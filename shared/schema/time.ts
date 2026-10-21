@@ -1,13 +1,6 @@
-// ──────────────────────────────────────────────────────────────────────
-// Musical time. Everything in the document is stored in integer TICKS.
-// PPQ = 960 (FL defaults to 96, which is too coarse for agents writing
-// swung / tuplet material — see research/01 §7).
-// ──────────────────────────────────────────────────────────────────────
-
 export const PPQ = 960;
-/** The step sequencer grid: 16th notes. */
 export const STEPS_PER_BEAT = 4;
-export const TICKS_PER_STEP = PPQ / STEPS_PER_BEAT; // 240
+export const TICKS_PER_STEP = PPQ / STEPS_PER_BEAT;
 
 export interface TimeSig {
   num: number;
@@ -30,7 +23,6 @@ export function secondsToTicks(seconds: number, bpm: number): number {
   return (seconds * bpm * PPQ) / 60;
 }
 
-/** Snap a tick to a grid (in ticks). mode 'round' | 'floor' | 'ceil'. */
 export function snapTick(tick: number, grid: number, mode: 'round' | 'floor' | 'ceil' = 'round'): number {
   if (grid <= 1) return Math.round(tick);
   const q = tick / grid;
@@ -38,7 +30,6 @@ export function snapTick(tick: number, grid: number, mode: 'round' | 'floor' | '
   return n * grid;
 }
 
-/** Bars:Beats:Ticks, 1-based bars and beats (FL style "3:2:120"). */
 export function formatBBT(tick: number, ts: TimeSig): string {
   const tpb = ticksPerBeat(ts);
   const tpbar = ticksPerBar(ts);
@@ -49,7 +40,6 @@ export function formatBBT(tick: number, ts: TimeSig): string {
   return `${bar}:${beat}:${String(rem).padStart(3, '0')}`;
 }
 
-/** Common snap grids for editors, in ticks. */
 export const SNAP_GRIDS: Array<{ id: string; label: string; ticks: number }> = [
   { id: 'none', label: 'None', ticks: 1 },
   { id: 'bar', label: 'Bar', ticks: PPQ * 4 },

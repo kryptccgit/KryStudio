@@ -1,20 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Browser-mock reference library (npm run dev:web): window.krypt.library
-// with fake but realistic data, so every Library panel / profile / focus /
-// originality state can be exercised without Electron.
-//
-//   Collections: "Dark trap" (1,500 tracks: virtualisation, deep on, some
-//   failed + missing, rich profile), "90s R&B" (180, light only: profile
-//   without bass), "Lo-fi sketches" (24, mostly queued: thin profile with
-//   caveats) and an empty "Ambient ideas".
-//   Queue: runs (~1 track / 0.9 s) through the queued tracks, sometimes
-//   failing one; pause / resume persist for the session.
-//   Similar: deterministic scores. Originality: matches against the deep
-//   tracks (remove "Dark trap" to see the "needs deep analysis" state).
-//   Folder / file pickers add a batch of fake files.
-//   devtools: window.__kryptMockLibrary (the in-memory db).
-// ──────────────────────────────────────────────────────────────────────
-
 import { USER, type DocHost } from '@shared/doc/DocHost';
 import type { ActionResult, KryptApi } from '@shared/types';
 import type {
@@ -110,7 +93,6 @@ function makeTrack(collectionId: string, folder: string, style: Style, i: number
   };
 }
 
-/** Analysis fields only exist once a pass ran. */
 function visible(t: LibraryTrack): LibraryTrack {
   const out: LibraryTrack = { ...t, tags: [...t.tags] };
   if (t.status === 'light' || t.status === 'deep' || t.status === 'missing') return out;
@@ -118,8 +100,6 @@ function visible(t: LibraryTrack): LibraryTrack {
   if (t.status === 'failed') delete out.durationSec;
   return out;
 }
-
-// ── Profiles ──────────────────────────────────────────────────────────
 
 const pct = (p10: number, p25: number, median: number, p75: number, p90: number) => ({ p10, p25, median, p75, p90 });
 
@@ -406,8 +386,6 @@ function thinProfile(c: Collection, now: number): StyleProfile {
   };
 }
 
-// ── The mock ──────────────────────────────────────────────────────────
-
 export function createMockLibrary(host: DocHost, analyzer: KryptApi['analyzer']): LibraryApi {
   const now = Date.now();
   const collections: Collection[] = [];
@@ -454,7 +432,6 @@ export function createMockLibrary(host: DocHost, analyzer: KryptApi['analyzer'])
     }
   }
   recount();
-  // This "import session" started a while ago: part of the queue is done.
   const pendingAtStart = tracks.filter((t) => t.status === 'pending').length;
   queue.done = 820;
   queue.total = 820 + pendingAtStart;
@@ -687,7 +664,6 @@ export function createMockLibrary(host: DocHost, analyzer: KryptApi['analyzer'])
       try {
         device = (await analyzer.state()).devices.includes('directml') ? 'directml' : 'cpu';
       } catch {
-        /* cpu */
       }
       const n = tracks.filter((t) => t.collectionId === c.id && (t.status === 'light' || t.status === 'pending')).length;
       return ok({ tracks: n, seconds: n * (device === 'directml' ? 11 : 48), device });
@@ -718,7 +694,6 @@ export function createMockLibrary(host: DocHost, analyzer: KryptApi['analyzer'])
       const list = tracks.filter((t) => matches(q, t));
       const k = q.sort ?? 'name';
       const dir = q.desc ? -1 : 1;
-      // Unknown values (not analysed yet) sort last in both directions.
       const unknown = (v: number | string): boolean => v === Infinity || v === '~';
       list.sort((a, b) => {
         const va = sortVal(a, k);
@@ -770,7 +745,6 @@ export function createMockLibrary(host: DocHost, analyzer: KryptApi['analyzer'])
       await sleep(1100);
       const p = host.project;
       const refs = tracks.filter((t) => t.status === 'deep');
-      // Lines = pattern × channel with notes (the mock fakes one when the project has none).
       const lines: Array<{ label: string; patternId: string; channelId: string }> = [];
       for (const pid of p.patternOrder) {
         if (opts?.patternId && pid !== opts.patternId) continue;

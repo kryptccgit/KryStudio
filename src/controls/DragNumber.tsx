@@ -1,6 +1,3 @@
-// FL-style numeric field (tempo, lengths): drag vertically to change,
-// Ctrl = fine, wheel steps, double-click to type, Alt-click resets.
-
 import { useEffect, useRef, useState } from 'react';
 import { setLiveHint } from '../app/hints';
 import { cls } from '../utils/format';

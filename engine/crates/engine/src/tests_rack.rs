@@ -1,12 +1,5 @@
-//! Racks and macros (rack.rs, rack_compile.rs): zones, chokes, chain
-//! mute/solo, FX-rack sums with internal PDC, macro maps, param-only edits
-//! vs rebuilds, unsupported inner devices, macro automation, a drum rack of
-//! factory samples, NaN safety and the allocation-free audio path.
-
 use super::*;
 use crate::rack::{DRUM_RACK_PLUGIN, FX_RACK_PLUGIN, RACK_PLUGIN};
-
-// ── Builders ─────────────────────────────────────────────────────────────
 
 fn chain(id: &str, inst: Option<&str>, zone: Option<(u8, u8, f64, f64)>) -> Value {
     let mut c = json!({ "id": id, "name": id, "color": null, "volume": 1, "pan": 0, "mute": false, "solo": false,
@@ -109,8 +102,6 @@ fn last_cutoff() -> f32 {
     CUTOFFS.with(|c| *c.borrow().last().expect("cutoff was set"))
 }
 
-// ── Catalog ──────────────────────────────────────────────────────────────
-
 #[test]
 fn rack_devices_are_in_the_stock_catalog() {
     let text = crate::plugins::catalog_text(&PluginHost::stock());
@@ -128,11 +119,8 @@ fn rack_devices_are_in_the_stock_catalog() {
             assert_eq!(p["automatable"], true);
         }
     }
-    // The dsp plugins keep their order in front.
     assert_eq!(v["plugins"][0]["id"], krypt_studio_dsp::descriptors()[0].id);
 }
-
-// ── Instrument / drum racks ──────────────────────────────────────────────
 
 #[test]
 fn notes_route_by_key_and_velocity_zone_inclusive() {
@@ -146,11 +134,11 @@ fn notes_route_by_key_and_velocity_zone_inclusive() {
     c["pan"] = json!(1.0);
     c["volume"] = json!(2.0);
     add_rack_channel(&mut p, "c1", RACK_PLUGIN, "i1", rack("instrument", vec![a, b, c]));
-    add_note(&mut p, "pa", "c1", "n1", 0.0, 240.0, 48); // a only
-    add_note(&mut p, "pa", "c1", "n2", 960.0, 240.0, 72); // vel 0.8: c only
-    add_note(&mut p, "pa", "c1", "n3", 1920.0, 240.0, 60); // vel 0.5: b AND c (inclusive)
+    add_note(&mut p, "pa", "c1", "n1", 0.0, 240.0, 48);
+    add_note(&mut p, "pa", "c1", "n2", 960.0, 240.0, 72);
+    add_note(&mut p, "pa", "c1", "n3", 1920.0, 240.0, 60);
     note_vel(&mut p, "c1", "n3", 0.5);
-    add_note(&mut p, "pa", "c1", "n4", 2880.0, 240.0, 59); // a (top key inclusive)
+    add_note(&mut p, "pa", "c1", "n4", 2880.0, 240.0, 59);
     note_vel(&mut p, "c1", "n4", 1.0);
     let o = render_p(&p, PATTERN, 0.0);
     assert!(o.warnings.is_empty(), "{:?}", o.warnings);
@@ -159,7 +147,6 @@ fn notes_route_by_key_and_velocity_zone_inclusive() {
     assert!(at(24100).0 == 0.0 && near(at(24100).1, 2.0 * DC1, 1e-5), "{:?}", at(24100));
     assert!(at(48100).0 == 0.0 && near(at(48100).1, 3.0 * DC1, 1e-5), "{:?}", at(48100));
     assert!(near(at(72100).0, DC1, 1e-5) && at(72100).1 == 0.0, "{:?}", at(72100));
-    // Instrument racks play like a channel with root 60: pitch = key.
     let log = log_take();
     assert!(log.iter().filter(|r| r.kind == "on").all(|r| r.pitch == r.key as f32));
     assert_eq!(log.iter().filter(|r| r.kind == "on").count(), 5);
@@ -188,10 +175,7 @@ fn drum_rack_pads_choke_their_group() {
     assert!(near(o.r[24000], DC1, 1e-5));
     let log = log_take();
     let chokes: Vec<u64> = log.iter().filter(|r| r.kind == "choke").map(|r| r.frame).collect();
-    // The open hat at 0 chokes the (idle) closed hat, the closed hat at 24000 the open
-    // one; the ride (group 2) is never choked.
     assert_eq!(chokes, vec![0, 24000]);
-    // Drum pads play their instrument at C4 on their own note.
     assert!(log.iter().filter(|r| r.kind == "on").all(|r| r.pitch == 60.0), "{:?}", log);
 }
 
@@ -207,7 +191,7 @@ fn chain_mute_and_solo_within_the_rack() {
         let mut b = chain("b", Some("test.dc"), None);
         b["pan"] = json!(1.0);
         b["solo"] = json!(solo_b);
-        let c = chain("c", Some("test.dc"), None); // centre: both sides
+        let c = chain("c", Some("test.dc"), None);
         add_rack_channel(&mut p, "c1", RACK_PLUGIN, "i1", rack("instrument", vec![a, b, c]));
         add_note(&mut p, "pa", "c1", "n", 0.0, 960.0, 60);
         let o = render_p(&p, PATTERN, 0.0);
@@ -225,8 +209,6 @@ fn chain_mute_and_solo_within_the_rack() {
     assert!(l == 0.0 && r == 0.0, "the only soloed chain is muted: {l} {r}");
 }
 
-// ── FX racks ─────────────────────────────────────────────────────────────
-
 #[test]
 fn fx_rack_sums_parallel_chains_latency_aligned() {
     let mut p = base(120.0, "pattern");
@@ -239,18 +221,15 @@ fn fx_rack_sums_parallel_chains_latency_aligned() {
     b["devices"]["g"]["params"]["gain"] = json!(-6.020_6);
     add_rack_slot(&mut p, "i1", "s1", rack("effect", vec![a, b]));
     add_channel(&mut p, "c1", "test.dc", "i1");
-    // A parallel insert without the rack: the engine's PDC must delay it by the rack's latency.
     add_insert(&mut p, "i2", json!({ "m": 1 }));
     add_channel(&mut p, "c2", "test.dc", "i2");
     add_note(&mut p, "pa", "c1", "n", 960.0, 480.0, 60);
     add_note(&mut p, "pa", "c2", "n", 960.0, 480.0, 60);
     let o = render_p(&p, PATTERN, 0.0);
     assert!(o.warnings.is_empty(), "{:?}", o.warnings);
-    // Chain b (no latency) is delayed inside the rack to line up with chain a.
     assert_eq!(o.l[24000 + LAT - 1], 0.0, "nothing before the aligned onset");
     assert!(near(o.l[24000 + LAT], 1.5 * DC1 + DC1, 1e-4), "1 + 0.5 summed, plus the PDC'd parallel insert: {}", o.l[24000 + LAT]);
 
-    // An empty FX rack passes audio through.
     let mut p = base(120.0, "pattern");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     add_rack_slot(&mut p, "i1", "s1", rack("effect", vec![]));
@@ -259,12 +238,11 @@ fn fx_rack_sums_parallel_chains_latency_aligned() {
     let o = render_p(&p, PATTERN, 0.0);
     assert!(near(o.l[100], DC1, 1e-6));
 
-    // The slot mix is the outer wet/dry: 50 % of (2 × gain chains) + 50 % dry.
     let mut p = base(120.0, "pattern");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     let mut a = chain("a", None, None);
     device(&mut a, "g", "test.gain");
-    let b = chain("b", None, None); // no devices: the split input itself
+    let b = chain("b", None, None);
     add_rack_slot(&mut p, "i1", "s1", rack("effect", vec![a, b]));
     p["mixer"]["inserts"]["i1"]["slots"]["s1"]["mix"] = json!(0.5);
     add_channel(&mut p, "c1", "test.dc", "i1");
@@ -294,8 +272,6 @@ fn fx_rack_with_an_echo_inside_keeps_its_insert_awake() {
     assert!(calls >= blocks, "an echo inside never sleeps: {calls} of {blocks}");
 }
 
-// ── Macros ───────────────────────────────────────────────────────────────
-
 fn macro_rack() -> (Value, Value) {
     let mut p = base(120.0, "pattern");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
@@ -312,7 +288,6 @@ fn first_instrument(s: &mut Session) -> Box<dyn Instrument> {
 fn macro_maps_in_normalized_space_through_the_param_scale() {
     let inst_cutoff = json!({ "chainId": "a", "kind": "instrument", "param": "cutoff" });
     let log = |n: f32| 20.0 * 1000f32.powf(n);
-    // Log-scale param, full range: macro 0.5 → normalized 0.5 → 20·1000^0.5 Hz.
     let (mut p, mut r) = macro_rack();
     map_macro(&mut r, 0, "m1", inst_cutoff.clone(), 0.0, 1.0);
     add_rack_channel(&mut p, "c1", RACK_PLUGIN, "i1", r);
@@ -323,10 +298,9 @@ fn macro_maps_in_normalized_space_through_the_param_scale() {
     assert!((last_cutoff() - log(0.5)).abs() < 0.01, "{}", last_cutoff());
     inst.set_param(0, 1.0);
     assert!((last_cutoff() - 20000.0).abs() < 0.5);
-    inst.set_param(0, f32::NAN); // ignored
+    inst.set_param(0, f32::NAN);
     assert!((last_cutoff() - 20000.0).abs() < 0.5);
 
-    // Inverted range: min 0.8 > max 0.2.
     let (mut p, mut r) = macro_rack();
     map_macro(&mut r, 2, "m1", inst_cutoff.clone(), 0.8, 0.2);
     add_rack_channel(&mut p, "c1", RACK_PLUGIN, "i1", r);
@@ -337,7 +311,6 @@ fn macro_maps_in_normalized_space_through_the_param_scale() {
     inst.set_param(2, 1.0);
     assert!((last_cutoff() - log(0.2)).abs() / log(0.2) < 1e-4, "macro 1 → max: {}", last_cutoff());
 
-    // Two macros on one param: the later macro wins; the earlier one moves nothing.
     let (mut p, mut r) = macro_rack();
     map_macro(&mut r, 0, "m1", inst_cutoff.clone(), 0.0, 1.0);
     map_macro(&mut r, 4, "m5", inst_cutoff.clone(), 0.0, 0.5);
@@ -353,7 +326,6 @@ fn macro_maps_in_normalized_space_through_the_param_scale() {
     assert!((last_cutoff() - log(0.5)).abs() < 0.01);
     assert!(s.logs.is_empty(), "{:?}", s.logs);
 
-    // A map to a param that isn't there warns and is ignored.
     let (mut p, mut r) = macro_rack();
     map_macro(&mut r, 0, "bad", json!({ "chainId": "a", "kind": "instrument", "param": "nope" }), 0.0, 1.0);
     add_rack_channel(&mut p, "c1", RACK_PLUGIN, "i1", r);
@@ -364,7 +336,6 @@ fn macro_maps_in_normalized_space_through_the_param_scale() {
 
 #[test]
 fn macros_drive_chain_volume_pan_and_device_params_and_mix() {
-    // Linear device param: gain −24..24 dB, normalized 0.5..0.625 → 0..+6 dB.
     let run = |m1: f64, m2: f64| {
         let mut p = base(120.0, "pattern");
         add_insert(&mut p, "i1", json!({ "m": 1 }));
@@ -382,11 +353,9 @@ fn macros_drive_chain_volume_pan_and_device_params_and_mix() {
     assert!(near(run(0.0, 0.0), DC1, 1e-6));
     let g6 = 10f32.powf(6.0 / 20.0);
     assert!(near(run(1.0, 0.0), DC1 * g6, 1e-5), "{}", run(1.0, 0.0));
-    // Inverted mix map: macro 2 at 1 → mix 0 → the device is bypassed.
     assert!(near(run(1.0, 1.0), DC1, 1e-6));
     assert!(near(run(1.0, 0.5), DC1 * (0.5 + 0.5 * g6), 1e-5));
 
-    // Chain volume (gain scale 0..2: 2·n³) and pan (linear −1..1).
     let mut p = base(120.0, "pattern");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     let mut r = rack("instrument", vec![chain("a", Some("test.dc"), None)]);
@@ -397,13 +366,11 @@ fn macros_drive_chain_volume_pan_and_device_params_and_mix() {
     add_note(&mut p, "pa", "c1", "n", 0.0, 480.0, 60);
     let o = render_p(&p, PATTERN, 0.0);
     let vol = 2.0 * 0.125;
-    // pan = −1 + 2·0.75 = 0.5 → L × 0.5, R × 1.
     assert!(near(o.l[100], DC1 * vol * 0.5, 1e-5) && near(o.r[100], DC1 * vol, 1e-5), "{} {}", o.l[100], o.r[100]);
 }
 
 #[test]
 fn macro_automation_moves_mapped_targets() {
-    // Instrument rack: channel/c1/gen/macro1 sweeps chain pan −1 → 1.
     let mut p = base(120.0, "song");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     let mut r = rack("instrument", vec![chain("a", Some("test.dc"), None)]);
@@ -420,7 +387,6 @@ fn macro_automation_moves_mapped_targets() {
     assert!(near(o.l[48_000], DC1, 0.01) && near(o.r[48_000], DC1, 0.01), "middle: centre {} {}", o.l[48_000], o.r[48_000]);
     assert!(o.l[95_900] < 0.01 && near(o.r[95_900], DC1, 1e-4), "end: hard right {} {}", o.l[95_900], o.r[95_900]);
 
-    // FX rack: insert/i1/slot/s1/macro1 does the same through the slot param path.
     let mut p = base(120.0, "song");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
     let mut r = rack("effect", vec![chain("a", None, None)]);
@@ -438,8 +404,6 @@ fn macro_automation_moves_mapped_targets() {
     assert!(o.l[95_900] < 0.01 && near(o.r[95_900], DC1, 1e-4), "end {} {}", o.l[95_900], o.r[95_900]);
 }
 
-// ── Edits: param-only vs structural ──────────────────────────────────────
-
 #[test]
 fn param_only_edits_keep_the_instance_and_its_voices() {
     let mut p = base(120.0, "pattern");
@@ -449,7 +413,7 @@ fn param_only_edits_keep_the_instance_and_its_voices() {
     map_macro(&mut r, 0, "m", json!({ "chainId": "a", "kind": "chain", "param": "volume" }), 0.0, 1.0);
     add_rack_channel(&mut p, "c1", RACK_PLUGIN, "i1", r);
     add_rack_slot(&mut p, "i1", "s1", rack("effect", vec![chain("x", None, None)]));
-    p["channels"]["c1"]["generator"]["params"]["macro1"] = json!(0.793_700_5); // 2·n³ = 1
+    p["channels"]["c1"]["generator"]["params"]["macro1"] = json!(0.793_700_5);
     let mut live = Live::new(&p);
     live.run(480);
     let slot = live.session.channel_slot("c1").unwrap();
@@ -466,14 +430,11 @@ fn param_only_edits_keep_the_instance_and_its_voices() {
         assert!(!b.inst_params.is_empty(), "the edit reached the instance as set_param");
         live.send(Cmd::Batch(b));
     };
-    // Macro value: macro 1 → 0.5 → chain volume 2·0.125 = 0.25.
     edit(&mut live, &|_, params| {
         params.insert("macro1".into(), 0.5);
     });
     let o = live.run(4800);
     assert!(near(o[2 * 4799], 0.25 * DC1, 1e-4), "voice continues at the new level: {}", o[2 * 4799]);
-    // Unmap (macro map edit): back to the chain's own volume (1), then edit it, the
-    // inner device param, the zone of b (now catching key 60? no: still a new note only) and mute.
     edit(&mut live, &|r, _| {
         r.macros[0].maps.clear();
     });
@@ -488,7 +449,6 @@ fn param_only_edits_keep_the_instance_and_its_voices() {
     });
     let o = live.run(4800);
     assert!(near(o[2 * 4799], 0.25 * DC1, 1e-4), "volume 0.5 × gain 0.5 on the same voice: {}", o[2 * 4799]);
-    // b's new zone catches the next note.
     live.send(Cmd::NoteOn { slot, key: 61, vel: 0.8 });
     let o = live.run(4800);
     assert!(near(o[2 * 4799], 0.25 * DC1 + 0.25 * DC1 + DC1, 1e-4), "a (2 notes × 0.25) + b: {}", o[2 * 4799]);
@@ -497,14 +457,12 @@ fn param_only_edits_keep_the_instance_and_its_voices() {
     });
     let o = live.run(4800);
     assert!(near(o[2 * 4799], 0.5 * DC1, 1e-4), "b muted: {}", o[2 * 4799]);
-    // FX-rack chain edit: param-only too.
     let ins = live.session.model.inserts.get_mut("i1").unwrap();
     ins.slots.get_mut("s1").unwrap().rack.as_mut().unwrap().chains.get_mut("x").unwrap().pan = 0.3;
     live.session.version += 1;
     let b = live.session.build(false);
     assert!(b.effects.is_empty() && !b.fx_params.is_empty());
 
-    // Structural edits rebuild: a device added, an instrument type changed, a chain removed.
     let structural: [&dyn Fn(&mut crate::model_ext::RackDef); 3] = [
         &|r| {
             let a = r.chains.get_mut("a").unwrap();
@@ -546,15 +504,11 @@ fn nested_racks_third_party_and_inner_sidechains_are_skipped_with_warnings() {
     assert_eq!(has("racks inside racks"), 2, "{:?}", o.warnings);
     assert_eq!(has("third-party plugins can't go inside a rack"), 2, "{:?}", o.warnings);
     assert_eq!(has("sidechain inputs inside a rack"), 1, "{:?}", o.warnings);
-    // Chain a still plays: test.sc without its sidechain outputs silence (that's
-    // the stand-in's behaviour), so drop it and check the rest of the rack plays.
     let mut p2 = p.clone();
     p2["channels"]["c1"]["generator"]["rack"]["chains"]["a"]["deviceOrder"] = json!(["nest", "vst"]);
     let o = render_p(&p2, PATTERN, 0.0);
     assert!(near(o.l[100], DC1, 1e-5), "the supported part of the rack plays: {}", o.l[100]);
 }
-
-// ── Factory drum kit, stock plugins ──────────────────────────────────────
 
 fn factory_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../resources/factory"))
@@ -584,7 +538,7 @@ fn drum_rack_of_factory_samples_renders_like_channels() {
     add_note(&mut p, "pa", "dr", "s", 960.0, 240.0, 38);
     add_note(&mut p, "pa", "dr", "o", 1920.0, 480.0, 46);
     add_note(&mut p, "pa", "dr", "c", 2400.0, 240.0, 42);
-    add_note(&mut p, "pa", "dr", "x", 2880.0, 240.0, 50); // no pad: silence
+    add_note(&mut p, "pa", "dr", "x", 2880.0, 240.0, 50);
     let o = render_with(&p, PluginHost::stock(), factory_dir(), PATTERN);
     assert!(o.warnings.iter().all(|w| !w.contains("missing") && !w.contains("not available")), "{:?}", o.warnings);
     assert!(o.l.iter().chain(&o.r).all(|v| v.is_finite()));
@@ -593,7 +547,6 @@ fn drum_rack_of_factory_samples_renders_like_channels() {
     assert!(pk(24_000, 28_000) > 0.02, "snare: {}", pk(24_000, 28_000));
     assert!(pk(48_000, 52_000) > 0.01, "open hat: {}", pk(48_000, 52_000));
 
-    // A pad plays its sample exactly like a sampler channel at its root key.
     let mut q = base(120.0, "pattern");
     add_insert(&mut q, "i1", json!({ "m": 1 }));
     q["samples"]["kick"] = p["samples"]["kick"].clone();
@@ -612,9 +565,6 @@ fn drum_rack_of_factory_samples_renders_like_channels() {
     assert!(diff < 1e-5, "pad vs channel differ by {diff}");
 }
 
-// ── Robustness ───────────────────────────────────────────────────────────
-
-/// Outputs NaN (effect) / NaN + Inf (instrument).
 struct NanFx;
 impl Effect for NanFx {
     fn prepare(&mut self, _sr: f32, _max: usize) {}
@@ -683,7 +633,6 @@ fn nan_from_inner_plugins_never_leaves_the_rack() {
     add_note(&mut p, "pa", "c2", "n", 0.0, 480.0, 60);
     let o = render_with(&p, host, ".".into(), PATTERN);
     assert!(o.l.iter().chain(&o.r).all(|v| v.is_finite()));
-    // The healthy chains still sound: c1 through the "ok" chain, c2 through its Dc chain.
     assert!(near(o.l[100], 2.0 * DC1, 1e-5), "{}", o.l[100]);
 }
 
@@ -712,7 +661,6 @@ fn rack_audio_path_does_not_allocate() {
     for _ in 0..300 {
         crate::rt::no_alloc(|| live.core.process_interleaved(&mut buf, 2));
     }
-    // Param-only edits (macro, chain pan, fx-rack chain volume) applied on the audio thread.
     let ch = live.session.model.channels.get_mut("c1").unwrap();
     ch.generator.params.insert("macro1".into(), 0.7);
     ch.generator.rack.as_mut().unwrap().chains.get_mut("b").unwrap().pan = 0.4;
@@ -733,6 +681,5 @@ fn rack_audio_path_does_not_allocate() {
     }
 }
 
-// The loop slicer (krypt.slicer), reusing the factory-sample render above.
 #[path = "tests_slicer.rs"]
 mod slicer;

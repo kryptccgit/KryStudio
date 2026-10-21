@@ -1,7 +1,3 @@
-// Home ▸ Projects: new / open / from an audio file / the demo / import MIDI, and every recent
-// project with Open and Show in folder. Opening anything goes straight to
-// the Studio (onProjectPicked).
-
 import { useMemo, useState } from 'react';
 import { AudioLines, FileMusic, FilePlus2, FolderOpen, FolderSearch, Play, type LucideIcon } from 'lucide-react';
 import { useProjectStatus, useSettings } from '../../state/status';

@@ -1,19 +1,11 @@
-// Harmony for the MIDI generators: keys, progressions by scale degree
-// (presets per mood + roman numerals like "i VI III VII"), diatonic chords,
-// voicings with voice leading, and reading the chords already in a pattern.
-// Pure: no I/O, no randomness except through the Rng it is given.
-
 import { CHORD_QUALITIES, NOTE_NAMES_FLAT, NOTE_NAMES_SHARP, SCALES } from '../theory';
 import type { Rng } from './random';
 
 export interface GenKey {
-  /** Pitch class 0..11 (C = 0). */
   root: number;
-  /** A SCALES id ("minor", "dorian", "majorPentatonic" …). */
   scale: string;
 }
 
-/** A thrown generator error: the message is for the user. */
 export class GenerateError extends Error {
   constructor(message: string) {
     super(message);
@@ -29,13 +21,11 @@ export function scaleSteps(scale: string): number[] {
   return s;
 }
 
-/** True when the key's scale has a minor third (minor, dorian, phrygian, minor pentatonic, blues …). */
 export function isMinorKey(key: GenKey): boolean {
   const s = scaleSteps(key.scale);
   return s.includes(3) && !s.includes(4);
 }
 
-/** The 7-note scale chords are built from: the scale itself, or its parent for pentatonic / blues / chromatic. */
 export function chordScale(key: GenKey): number[] {
   const s = scaleSteps(key.scale);
   if (s.length === 7) return s;
@@ -52,15 +42,12 @@ export function inKey(midi: number, key: GenKey): boolean {
   return scaleSteps(key.scale).includes(mod12(midi - key.root));
 }
 
-// ── Scale degrees (absolute index into the scale, octaves included) ──
-
 export function degreeToMidi(deg: number, key: GenKey, steps = scaleSteps(key.scale)): number {
   const n = steps.length;
   const o = Math.floor(deg / n);
   return key.root + o * 12 + steps[((deg % n) + n) % n];
 }
 
-/** The degree of the in-scale key nearest to `midi` (ties go down). */
 export function midiToDegree(midi: number, key: GenKey, steps = scaleSteps(key.scale)): number {
   let best = 0;
   let bestDist = Infinity;
@@ -78,14 +65,9 @@ export function midiToDegree(midi: number, key: GenKey, steps = scaleSteps(key.s
   return best;
 }
 
-// ── Chords ────────────────────────────────────────────────────────────
-
 export interface Chord {
-  /** Root pitch class. */
   root: number;
-  /** Semitones above the root, ascending, starting at 0. */
   tones: number[];
-  /** "Am7", "F", "Bdim". */
   name: string;
 }
 
@@ -93,7 +75,6 @@ export type Extensions = 'triads' | 'sevenths' | 'ninths';
 
 const SIZE: Record<Extensions, number> = { triads: 3, sevenths: 4, ninths: 5 };
 
-/** Display name for a chord ("Am7"). */
 export function chordName(root: number, tones: number[], flats = false): string {
   const set = [...new Set(tones)].sort((a, b) => a - b);
   const sig = set.join(',');
@@ -101,12 +82,10 @@ export function chordName(root: number, tones: number[], flats = false): string 
   const q = pref.find((k) => CHORD_QUALITIES[k] && CHORD_QUALITIES[k].join(',') === sig);
   const nm = (flats ? NOTE_NAMES_FLAT : NOTE_NAMES_SHARP)[mod12(root)];
   if (q !== undefined) return `${nm}${q}`;
-  // m7b9-ish leftovers: name the triad underneath
   const tri = set.includes(3) ? (set.includes(6) && !set.includes(7) ? 'dim' : 'm') : set.includes(8) && !set.includes(7) ? 'aug' : '';
   return `${nm}${tri}${set.some((t) => t >= 12) ? '(add)' : ''}`;
 }
 
-/** The chord a key's scale stacks in thirds on a 0-based degree. */
 export function diatonicChord(key: GenKey, degree: number, ext: Extensions, accidental = 0): Chord {
   const steps = chordScale(key);
   const d = ((degree % 7) + 7) % 7;
@@ -120,15 +99,11 @@ function useFlats(key: GenKey): boolean {
   return (isMinorKey(key) ? [0, 2, 3, 5, 7, 10] : [1, 3, 5, 8, 10]).includes(mod12(key.root));
 }
 
-// ── Progressions ──────────────────────────────────────────────────────
-
 export interface ProgressionPreset {
   id: string;
   label: string;
-  /** 1-based degrees for major-ish keys and minor-ish keys. */
   major: number[];
   minor: number[];
-  /** Sounds right with 7th chords. */
   sevenths?: boolean;
 }
 
@@ -145,12 +120,6 @@ export const PROGRESSIONS: ProgressionPreset[] = [
 
 const ROMAN: Record<string, number> = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7 };
 
-/**
- * Parse one numeral: "VI", "iv", "bVII", "ii°", "V7", "IVmaj7", "vii°7", "iiø",
- * "I+", "Vsus4", or an Arabic degree "6". Numerals count in the key's scale
- * (in A minor, VI = F); upper case = major, lower case = minor; b / # move the
- * root a semitone. Arabic degrees stay diatonic.
- */
 export function parseNumeral(tok: string, key: GenKey, ext: Extensions): Chord | null {
   const t = tok.trim().replace('♭', 'b').replace('♯', '#');
   const arabic = /^([b#]?)([1-7])$/.exec(t);
@@ -179,7 +148,6 @@ export function parseNumeral(tok: string, key: GenKey, ext: Extensions): Chord |
   if (suf === 'maj9') tones = [...tones, 14];
   if (suf === 'add9') tones = [...tones, 14];
   if (!suf && ext !== 'triads' && tones.length === 3) {
-    // the 7th (and 9th) the scale gives on this degree, or a flat 7th on a borrowed root
     const dia = diatonicChord(key, degree, ext);
     tones = [...tones, acc === 0 ? dia.tones[3] : 10];
     if (ext === 'ninths') tones.push(acc === 0 ? dia.tones[4] : 14);
@@ -190,15 +158,10 @@ export function parseNumeral(tok: string, key: GenKey, ext: Extensions): Chord |
 
 export interface ProgressionResult {
   chords: Chord[];
-  /** The preset used ("pop"), or "custom". */
   id: string;
   label: string;
 }
 
-/**
- * A progression for a key: a preset id, "auto" (a preset picked by the
- * seed), or custom numerals separated by spaces, dashes or bars.
- */
 export function resolveProgression(spec: string, key: GenKey, ext: Extensions | 'auto', rng: Rng): ProgressionResult {
   const s = spec.trim() || 'auto';
   const preset = s === 'auto' ? rng.pick(PROGRESSIONS) : PROGRESSIONS.find((p) => p.id === s.toLowerCase());
@@ -218,12 +181,9 @@ export function resolveProgression(spec: string, key: GenKey, ext: Extensions | 
   return { chords, id: 'custom', label: tokens.join(' ') };
 }
 
-// ── Voicing + voice leading ───────────────────────────────────────────
-
 export type Voicing = 'close' | 'open' | 'spread';
 export type Inversion = 'auto' | 'root' | 'first' | 'second' | 'third';
 
-/** Close-position voicing of `inv` with its lowest note at or above `floor`. */
 function closeAt(chord: Chord, inv: number, floor: number): number[] {
   const pcs = chord.tones.map((t) => t % 12);
   const n = pcs.length;
@@ -238,7 +198,6 @@ function closeAt(chord: Chord, inv: number, floor: number): number[] {
   return out;
 }
 
-/** Distance between two voicings: every note to the nearest note of the other, both ways. */
 export function voiceDistance(a: number[], b: number[]): number {
   const near = (x: number, ys: number[]): number => Math.min(...ys.map((y) => Math.abs(x - y)));
   return a.reduce((s, x) => s + near(x, b), 0) + b.reduce((s, y) => s + near(y, a), 0);
@@ -246,11 +205,6 @@ export function voiceDistance(a: number[], b: number[]): number {
 
 const INV: Record<Exclude<Inversion, 'auto'>, number> = { root: 0, first: 1, second: 2, third: 3 };
 
-/**
- * Close voicing near `center` (MIDI). inversion "auto" picks, among every
- * inversion and octave, the one that moves least from `prev` (voice leading),
- * with a pull back toward the center so the chords never drift away.
- */
 export function voiceClose(chord: Chord, center: number, inversion: Inversion, prev: number[] | null): number[] {
   const n = chord.tones.length;
   const cands: Array<{ v: number[]; inv: number }> = [];
@@ -276,20 +230,15 @@ export function voiceClose(chord: Chord, center: number, inversion: Inversion, p
   return best.v;
 }
 
-/** Apply the voicing style to a close voicing (kept voice-led). */
 export function applyVoicing(close: number[], chord: Chord, voicing: Voicing): number[] {
   const v = [...close].sort((a, b) => a - b);
   if (voicing === 'close' || v.length < 3) return v;
-  // open: lift every second voice an octave (C E G → C G E', C E G B → C G E' B')
   const open = v.map((k, i) => (i % 2 === 1 ? k + 12 : k)).sort((a, b) => a - b);
   if (voicing === 'open') return open;
-  // spread: the root an octave under the open voicing (left-hand bass)
   let bass = open[0] - 12 + mod12(chord.root - (open[0] - 12));
   if (bass >= open[0]) bass -= 12;
   return [bass, ...open.filter((k) => mod12(k) !== chord.root || k > open[0])].sort((a, b) => a - b);
 }
-
-// ── Chords already in a pattern ───────────────────────────────────────
 
 export interface NoteIn {
   tick: number;
@@ -299,9 +248,7 @@ export interface NoteIn {
 
 export interface ChordEvent {
   tick: number;
-  /** Where the harmony changes (next chord) or the range ends. */
   end: number;
-  /** Sounding keys, ascending. */
   keys: number[];
   root: number;
   tones: number[];
@@ -322,7 +269,6 @@ const TEMPLATES: Array<{ iv: number[]; w: number }> = [
   { iv: [0, 7], w: 0.3 },
 ];
 
-/** Root and tones of a set of keys (template match; ties go to the bass note). */
 export function identifyChord(keys: number[]): { root: number; tones: number[] } {
   const pcs = [...new Set(keys.map(mod12))];
   const bass = mod12(Math.min(...keys));
@@ -341,11 +287,6 @@ export function identifyChord(keys: number[]): { root: number; tones: number[] }
   return { root: best.root, tones };
 }
 
-/**
- * Chords already written: on each channel, notes that start together
- * (within `window` ticks) with 3+ different pitch classes. Simultaneous
- * chords on different channels merge. Each chord holds until the next one.
- */
 export function detectChords(channels: NoteIn[][], window = 20): ChordEvent[] {
   const raw: Array<{ tick: number; end: number; keys: number[] }> = [];
   for (const notes of channels) {
@@ -378,7 +319,6 @@ export function detectChords(channels: NoteIn[][], window = 20): ChordEvent[] {
   });
 }
 
-/** The chord sounding at `tick` (the first chord also covers any pickup before it). */
 export function chordAt(events: ChordEvent[], tick: number): ChordEvent | null {
   if (!events.length) return null;
   let found = events[0];
@@ -389,7 +329,6 @@ export function chordAt(events: ChordEvent[], tick: number): ChordEvent | null {
   return found;
 }
 
-/** Pitch classes of a chord event. */
 export function chordPcs(e: { root: number; tones: number[] }): number[] {
   return e.tones.map((t) => mod12(e.root + t));
 }

@@ -1,33 +1,15 @@
-// ──────────────────────────────────────────────────────────────────────
-// The built-in chat's AI providers (pure data + helpers; tested in
-// test/agent-providers.test.ts). Anthropic runs on its own SDK loop
-// (electron/agent/loop.ts); OpenAI (ChatGPT) and OpenRouter speak the
-// OpenAI-compatible Chat Completions API with tool calling
-// (electron/agent/openaiLoop.ts). Each provider keeps its own key, encrypted
-// in userData (electron/agent/key.ts), and its own model choice.
-// ──────────────────────────────────────────────────────────────────────
-
 export type AgentProvider = 'anthropic' | 'openai' | 'openrouter';
 
 export interface AgentProviderInfo {
   id: AgentProvider;
-  /** The name in the UI. */
   label: string;
-  /** Where to get a key (shown as a link). */
   keyUrl: string;
-  /** Placeholder for the key box. */
   keyHint: string;
-  /** What a key looks like (checked before it's saved). */
   keyPattern: RegExp;
-  /** The sentence when a key doesn't fit keyPattern. */
   keyMismatch: string;
-  /** The model used until the user picks another. */
   defaultModel: string;
-  /** Suggestions for the model box (free text: any model the provider offers works). */
   models: string[];
-  /** OpenAI-compatible endpoint (absent = Anthropic's own SDK). */
   baseUrl?: string;
-  /** Env var read when no key is saved (developers). */
   envKey: string;
 }
 
@@ -62,7 +44,6 @@ export const AGENT_PROVIDERS: Record<AgentProvider, AgentProviderInfo> = {
     keyHint: 'sk-or-…',
     keyPattern: /^sk-or-[A-Za-z0-9_-]{20,}$/,
     keyMismatch: "That doesn't look like an OpenRouter key (it starts with sk-or-).",
-    // OpenRouter's own router: always available, it picks a capable model for each request.
     defaultModel: 'openrouter/auto',
     models: ['openrouter/auto', 'anthropic/claude-sonnet-4.5', 'openai/gpt-5', 'google/gemini-2.5-pro'],
     baseUrl: 'https://openrouter.ai/api/v1',
@@ -76,12 +57,10 @@ export function isAgentProvider(v: unknown): v is AgentProvider {
   return typeof v === 'string' && (AGENT_PROVIDER_IDS as string[]).includes(v);
 }
 
-/** The key file in userData (Anthropic keeps the original name, so existing keys still work). */
 export function keyFileFor(p: AgentProvider): string {
   return p === 'anthropic' ? 'agent-key.bin' : `agent-key-${p}.bin`;
 }
 
-/** Why a key can't be saved for this provider, or null. A key for another provider says which one it is. */
 export function keyProblem(p: AgentProvider, key: string): string | null {
   const k = key.trim();
   if (AGENT_PROVIDERS[p].keyPattern.test(k)) return null;
@@ -90,7 +69,6 @@ export function keyProblem(p: AgentProvider, key: string): string | null {
   return AGENT_PROVIDERS[p].keyMismatch;
 }
 
-/** The model to use for a provider: the user's choice, else the provider default. */
 export function modelFor(agent: { provider?: AgentProvider; model: string; models?: Partial<Record<AgentProvider, string>> }, p: AgentProvider = agent.provider ?? 'anthropic'): string {
   const chosen = p === 'anthropic' ? agent.models?.anthropic || agent.model : agent.models?.[p];
   return chosen?.trim() || AGENT_PROVIDERS[p].defaultModel;

@@ -1,44 +1,18 @@
-// ──────────────────────────────────────────────────────────────────────
-// Controller mapping: gamepads (Xbox, PlayStation, Switch Pro, generic) and
-// the computer keyboard / numpad as MIDI controllers
-// (docs/ENGINE_PROTOCOL.md §7 "Virtual MIDI inputs").
-//
-// A ControllerMap turns button presses, stick and trigger moves and key
-// presses into MIDI notes and CCs, a transpose, or an app command (play,
-// record arm …). The renderer runs the maps (src/input/controllers.ts: the
-// Gamepad API + key events) and sends the MIDI to the engine as a virtual
-// input named `map.device`. That is the same path as a hardware device, so
-// notes play the MIDI target channel and record, and CCs reach controller
-// links (MIDI-learn) and the clip-launcher grid.
-//
-// Pure: types, validation (mergeControllers), names and labels, the
-// templates and the ControllerRunner state machine (edges with hysteresis,
-// dead zone, toggles, transpose). No I/O, no DOM.
-// ──────────────────────────────────────────────────────────────────────
-
 export type ControllerSource = 'gamepad' | 'keyboard';
 
-/** Which part of a stick axis drives the binding: the whole travel, or one direction. */
 export type AxisHalf = 'full' | 'plus' | 'minus';
 
 export type ControllerInput =
-  /** Gamepad button (W3C standard mapping index; triggers are analog buttons 6 / 7). */
   | { kind: 'button'; index: number }
-  /** Gamepad stick axis (0 left X, 1 left Y, 2 right X, 3 right Y; Y is + down). */
   | { kind: 'axis'; index: number; half: AxisHalf }
-  /** Computer key by physical position (KeyboardEvent.code). */
   | { kind: 'key'; code: string };
 
 export type CcMode = 'hold' | 'toggle' | 'range';
 
 export type ControllerAction =
-  /** Note on while held (velocity 1..127), note off on release. */
   | { kind: 'note'; note: number; velocity: number }
-  /** hold: high while held, low on release · toggle: each press flips · range: follows a stick / trigger / key. */
   | { kind: 'cc'; cc: number; mode: CcMode; low: number; high: number }
-  /** Shift this map's notes by `semitones` per press (D-pad / shoulder octave buttons). */
   | { kind: 'transpose'; semitones: number }
-  /** An app command (src/input/commands.ts ids: transport.togglePlay, transport.toggleRecord …). */
   | { kind: 'command'; command: string };
 
 export interface ControllerBinding {
@@ -52,19 +26,14 @@ export interface ControllerMap {
   name: string;
   enabled: boolean;
   source: ControllerSource;
-  /** Gamepads: a Gamepad.id substring that picks the pad (null = the first connected pad). */
   gamepad: string | null;
-  /** The virtual MIDI input name the engine sees ("Krypt: …"). Set once, so controller links survive a rename. */
   device: string;
-  /** 0-based MIDI channel. */
   channel: number;
-  /** Stick dead zone 0..0.5. */
   deadzone: number;
   bindings: ControllerBinding[];
 }
 
 export interface ControllerSettings {
-  /** Master switch for every map. */
   enabled: boolean;
   maps: ControllerMap[];
 }
@@ -73,17 +42,12 @@ export const DEFAULT_CONTROLLERS: ControllerSettings = { enabled: true, maps: []
 export const MAX_CONTROLLER_MAPS = 16;
 export const MAX_BINDINGS = 64;
 export const VIRTUAL_DEVICE_PREFIX = 'Krypt: ';
-/** Gamepad levels: a press starts at PRESS and ends below RELEASE (no chatter on analog triggers). */
 export const PRESS = 0.5;
 export const RELEASE = 0.35;
-/** Most MIDI bytes one virtualMidiIn command carries. */
 export const MAX_VIRTUAL_MIDI_BYTES = 192;
-
-// ── Names and labels ──────────────────────────────────────────────────
 
 export type PadFamily = 'xbox' | 'playstation' | 'switch' | 'generic';
 
-/** The pad family from a Gamepad.id ("Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e …)"). */
 export function padFamily(id: string): PadFamily {
   const s = id.toLowerCase();
   if (/054c|dualsense|dualshock|playstation|ps[345] controller/.test(s)) return 'playstation';
@@ -105,7 +69,6 @@ export function familyName(f: PadFamily): string {
   return f === 'xbox' ? 'Xbox' : f === 'playstation' ? 'PlayStation' : f === 'switch' ? 'Switch' : 'Gamepad';
 }
 
-/** "Q", "1", "Num 7", "Space" for a KeyboardEvent.code. */
 export function keyLabel(code: string): string {
   if (/^Key[A-Z]$/.test(code)) return code.slice(3);
   if (/^Digit\d$/.test(code)) return code.slice(5);
@@ -115,7 +78,6 @@ export function keyLabel(code: string): string {
   return named[code] ?? code.replace(/^Arrow/, '').replace(/(Left|Right)$/, ' $1');
 }
 
-/** "Cross", "Right stick up", "Num 7" — what the user pressed, in their pad's words. */
 export function inputLabel(input: ControllerInput, family: PadFamily = 'generic'): string {
   if (input.kind === 'key') return keyLabel(input.code);
   if (input.kind === 'button') return BUTTONS[family][input.index] ?? `Button ${input.index + 1}`;
@@ -140,8 +102,6 @@ export function actionLabel(a: ControllerAction): string {
       return a.command;
   }
 }
-
-// ── Validation ────────────────────────────────────────────────────────
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const int = (v: unknown, lo: number, hi: number, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : d);
@@ -174,7 +134,6 @@ function cleanAction(v: unknown): ControllerAction | null {
   return null;
 }
 
-/** "Krypt: <name>", unique among `taken`. */
 export function uniqueDevice(name: string, taken: ReadonlySet<string>): string {
   const base = `${VIRTUAL_DEVICE_PREFIX}${name.trim().slice(0, 48) || 'Controller'}`;
   let d = base;
@@ -218,7 +177,6 @@ export function controllerSettings(s: { controllers?: ControllerSettings } | nul
   return { enabled: c?.enabled ?? DEFAULT_CONTROLLERS.enabled, maps: (c?.maps ?? []).map((m) => ({ ...m, bindings: m.bindings.map((b) => ({ ...b })) })) };
 }
 
-/** Validate an untrusted partial (settings.json / a renderer patch) over a base. `maps`, when given, replaces the list. */
 export function mergeControllers(base: ControllerSettings | undefined, input: unknown): ControllerSettings {
   const b = controllerSettings({ controllers: base });
   if (input === undefined) return b;
@@ -235,9 +193,6 @@ export function mergeControllers(base: ControllerSettings | undefined, input: un
   return { enabled: typeof o.enabled === 'boolean' ? o.enabled : b.enabled, maps };
 }
 
-// ── Templates ─────────────────────────────────────────────────────────
-
-/** Standard-mapping button indices. */
 export const PAD = { south: 0, east: 1, west: 2, north: 3, l1: 4, r1: 5, l2: 6, r2: 7, select: 8, start: 9, l3: 10, r3: 11, up: 12, down: 13, left: 14, right: 15 } as const;
 
 type Spec = Array<[ControllerInput, ControllerAction]>;
@@ -249,10 +204,8 @@ const range = (cc: number): ControllerAction => ({ kind: 'cc', cc, mode: 'range'
 const cmd = (command: string): ControllerAction => ({ kind: 'command', command });
 const shift = (semitones: number): ControllerAction => ({ kind: 'transpose', semitones });
 
-/** Pads in playing order: face, shoulders, triggers, D-pad, stick presses. */
 const PAD_ORDER = [PAD.south, PAD.east, PAD.west, PAD.north, PAD.l1, PAD.r1, PAD.l2, PAD.r2, PAD.down, PAD.left, PAD.up, PAD.right, PAD.l3, PAD.r3];
 
-/** Sticks: left up = mod wheel (CC 1), right stick = filter cutoff (CC 74, left / right) and resonance (CC 71, up). */
 const STICKS: Spec = [
   [axis(1, 'minus'), range(1)],
   [axis(2, 'full'), range(74)],
@@ -264,7 +217,6 @@ function gamepadPads(base: number): Spec {
 }
 
 function scalePlayer(): Spec {
-  // C minor pentatonic from C4: D-pad = the lower four, face buttons = the upper four; shoulders shift an octave.
   const notes = [60, 63, 65, 67, 70, 72, 75, 77];
   const order = [PAD.down, PAD.left, PAD.up, PAD.right, PAD.south, PAD.west, PAD.north, PAD.east];
   return [
@@ -281,7 +233,6 @@ function scalePlayer(): Spec {
 }
 
 function keyboardPads(base: number): Spec {
-  // MPC layout: pad 1 bottom left. Z X C V = pads 1-4, A S D F = 5-8, Q W E R = 9-12, 1 2 3 4 = 13-16.
   const rows = [['KeyZ', 'KeyX', 'KeyC', 'KeyV'], ['KeyA', 'KeyS', 'KeyD', 'KeyF'], ['KeyQ', 'KeyW', 'KeyE', 'KeyR'], ['Digit1', 'Digit2', 'Digit3', 'Digit4']];
   return rows.flat().map((c, i): [ControllerInput, ControllerAction] => [key(c), note(base + i)]);
 }
@@ -307,7 +258,6 @@ export const CONTROLLER_TEMPLATES: ControllerTemplate[] = [
   { id: 'numpad-pads', name: 'Numpad pads', source: 'keyboard', description: 'Numpad 1-9 (bottom row first), 0, . , Enter, ÷ and × play 14 pads from C2; − and + shift an octave.', spec: () => numpadPads(36) },
 ];
 
-/** A new map from a template (or empty when `templateId` is unknown / 'empty-…'). */
 export function mapFromTemplate(templateId: string, opts: { id: string; source?: ControllerSource; name?: string; gamepad?: string | null; taken: Iterable<ControllerMap> }): ControllerMap {
   const t = CONTROLLER_TEMPLATES.find((x) => x.id === templateId);
   const source = t?.source ?? opts.source ?? 'gamepad';
@@ -326,7 +276,6 @@ export function mapFromTemplate(templateId: string, opts: { id: string; source?:
   };
 }
 
-/** A binding id not yet used in `map`. */
 export function nextBindingId(map: ControllerMap): string {
   const used = new Set(map.bindings.map((b) => b.id));
   let i = map.bindings.length + 1;
@@ -334,9 +283,6 @@ export function nextBindingId(map: ControllerMap): string {
   return `b${i}`;
 }
 
-// ── Runner ────────────────────────────────────────────────────────────
-
-/** One gamepad poll: button values 0..1 (triggers analog) and axes -1..1. */
 export interface PadState {
   buttons: readonly number[];
   axes: readonly number[];
@@ -347,7 +293,6 @@ export type ControllerOutput =
   | { kind: 'command'; command: string; bindingId: string }
   | { kind: 'transpose'; total: number; bindingId: string };
 
-/** An axis value with the dead zone removed and the rest rescaled to -1..1. */
 export function applyDeadzone(v: number, dead: number): number {
   if (!Number.isFinite(v)) return 0;
   const a = Math.abs(v);
@@ -355,10 +300,6 @@ export function applyDeadzone(v: number, dead: number): number {
   return Math.sign(v) * Math.min(1, (a - dead) / Math.max(1e-6, 1 - dead));
 }
 
-/**
- * What a gamepad input reads (0..1) in `s`. `forRange`: a full-travel axis reads 0..1 with the rest at 0.5 (a CC
- * that follows the stick); for presses a full axis reads its deflection either way.
- */
 export function inputLevel(input: ControllerInput, s: PadState, deadzone: number, forRange: boolean): number {
   if (input.kind === 'button') {
     const v = s.buttons[input.index] ?? 0;
@@ -371,7 +312,6 @@ export function inputLevel(input: ControllerInput, s: PadState, deadzone: number
   return forRange ? (a + 1) / 2 : Math.abs(a);
 }
 
-/** The first input that moved from rest in `prev` to pressed in `cur` (MIDI-learn for pads). */
 export function detectPadInput(prev: PadState, cur: PadState, deadzone = 0.15): ControllerInput | null {
   for (let i = 0; i < cur.buttons.length; i++) if ((cur.buttons[i] ?? 0) >= PRESS && (prev.buttons[i] ?? 0) < RELEASE) return { kind: 'button', index: i };
   for (let i = 0; i < cur.axes.length; i++) {
@@ -382,11 +322,9 @@ export function detectPadInput(prev: PadState, cur: PadState, deadzone = 0.15): 
   return null;
 }
 
-/** Runs one map: inputs in, MIDI / commands out. Holds the state (held notes, toggles, last CC values, transpose). */
 export class ControllerRunner {
   private map: ControllerMap;
   private pressed = new Map<string, boolean>();
-  /** binding id → the note it sounded (transpose can change before the release). */
   private notes = new Map<string, number>();
   private ccLast = new Map<string, number>();
   private toggles = new Map<string, boolean>();
@@ -404,7 +342,6 @@ export class ControllerRunner {
     return this.transposeBy;
   }
 
-  /** Swap in an edited map. Bindings that changed or went away are released first (their outputs are returned). */
   setMap(map: ControllerMap): ControllerOutput[] {
     const out: ControllerOutput[] = [];
     const next = new Map(map.bindings.map((b) => [b.id, JSON.stringify(b)]));
@@ -420,7 +357,6 @@ export class ControllerRunner {
     return out;
   }
 
-  /** A gamepad poll. */
   frame(s: PadState): ControllerOutput[] {
     const out: ControllerOutput[] = [];
     for (const b of this.map.bindings) {
@@ -431,7 +367,6 @@ export class ControllerRunner {
     return out;
   }
 
-  /** A key went down / up. null = the map doesn't use that key (let the app have it). */
   key(code: string, down: boolean): ControllerOutput[] | null {
     const hits = this.map.bindings.filter((b) => b.input.kind === 'key' && b.input.code === code);
     if (!hits.length) return null;
@@ -440,7 +375,6 @@ export class ControllerRunner {
     return out;
   }
 
-  /** Let go of everything (window blur, pad unplugged, map turned off): note-offs and held CCs back to low. */
   releaseAll(): ControllerOutput[] {
     const out: ControllerOutput[] = [];
     for (const b of this.map.bindings) {
@@ -469,7 +403,6 @@ export class ControllerRunner {
       const v = Math.round(a.low + (a.high - a.low) * Math.max(0, Math.min(1, level)));
       const last = this.ccLast.get(b.id);
       this.ccLast.set(b.id, v);
-      // The first reading only sets the baseline: connecting a pad never sends a burst of CCs.
       if (last !== undefined && last !== v) out.push({ kind: 'midi', bytes: [this.status(0xb0), a.cc, v], bindingId: b.id });
       return;
     }
@@ -477,7 +410,7 @@ export class ControllerRunner {
     const is = was ? level > RELEASE : level >= PRESS;
     if (is === was) return;
     if (!is) {
-      this.release(b, out); // reads `pressed` (a held CC goes back to low)
+      this.release(b, out);
       this.pressed.set(b.id, false);
       return;
     }
@@ -510,7 +443,6 @@ export class ControllerRunner {
   }
 }
 
-/** Is this a byte list the engine's virtual input should accept: whole note / CC messages only? */
 export function isVirtualMidi(bytes: readonly number[]): boolean {
   if (!bytes.length || bytes.length > MAX_VIRTUAL_MIDI_BYTES || bytes.length % 3 !== 0) return false;
   for (let i = 0; i < bytes.length; i += 3) {

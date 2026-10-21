@@ -1,12 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Krypt Voice dialog (research/21): text → a voice clip. The text box
-// (character count, Fish tag chips inserted at the cursor), the voice
-// picker in Local / Cloud / My voice groups with their empty states (no
-// Kokoro → Model Manager, no Fish key → Settings ▸ Voice), speed, Krypt
-// Tune, where the clip goes (the playhead or a bar / track), Preview and
-// Add to song with progress + Cancel. Pure view logic lives in ./logic.
-// ──────────────────────────────────────────────────────────────────────
-
 import { playState } from '../live/playState';
 import { PPQ } from '@shared/schema/time';
 import { useEffect, useRef, useState } from 'react';
@@ -39,14 +30,11 @@ import { CloudBadge, JobProgress, LocalBadge, Note, SectionTitle, VoicePicker, b
 import { openRecordVoice } from './RecordVoiceDialog';
 
 export interface OpenVoice {
-  /** Prefill "Add to song" at this bar ("9" or "9.3") … */
   at?: string;
-  /** … and / or on this track (id). */
   trackId?: string;
   doc?: Document | null;
 }
 
-/** Tools ▸ Krypt Voice…, Home ▸ Audio Tools ▸ Krypt Voice, the playlist "Add a voice here…" items. */
 export function openKryptVoice(opts: OpenVoice = {}): void {
   if (opts.at || opts.trackId) {
     const cur = useVoice.getState().speak.placement;
@@ -77,7 +65,7 @@ function TagChips({ onInsert }: { onInsert: (tag: string) => void }) {
         <button
           key={t}
           type="button"
-          onMouseDown={(e) => e.preventDefault()} // keep the caret in the text box
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => onInsert(t)}
           className="h-6 rounded-full border border-sky-400/25 bg-sky-500/[0.08] px-2 font-mono text-[10.5px] text-sky-100/90 transition hover:border-sky-300/50 hover:bg-sky-500/20"
           title={`Insert ${t} at the cursor: the words after it are said that way`}
@@ -90,7 +78,6 @@ function TagChips({ onInsert }: { onInsert: (tag: string) => void }) {
 }
 
 function PlacementField({ value, onChange }: { value: Placement; onChange: (p: Placement) => void }) {
-  // a primitive key, so the list only re-renders when track names change
   const key = useDocStore((s) => (s.project ? s.project.playlist.trackOrder.map((id, i) => `${id}\u0001${s.project!.playlist.tracks[id]?.name ?? `Track ${i + 1}`}`).join('\u0002') : ''));
   const tracks = key ? key.split('\u0002').map((x) => ({ id: x.split('\u0001')[0], name: x.split('\u0001')[1] })) : [];
   const trackName = tracks.find((t) => t.id === value.trackId)?.name;

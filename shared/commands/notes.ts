@@ -208,7 +208,6 @@ export const notesCopyChannel = defineCommand({
   },
 });
 
-/** Guard used by KPN / MCP writers: patterns longer than this are rejected. */
 export const MAX_PATTERN_TICKS = PPQ * 4 * 1024;
 
 export function assertTickRange(tick: number): void {

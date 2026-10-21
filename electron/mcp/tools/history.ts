@@ -1,7 +1,3 @@
-// History / safety tools: the agent's own undo, revert-all, declared edit
-// groups and a read of the AI history. These manage DocHost history directly
-// (kind 'history'), so callTool doesn't wrap them in a per-call group.
-
 import { z } from 'zod';
 import { actorKey } from '@shared/doc/DocHost';
 import { defineTool, fail } from './types';
@@ -82,7 +78,6 @@ export const commitEdit = defineTool({
   },
 });
 
-/** The automatic originality check after a group (focus set + deep references only). Never blocks or fails the commit. */
 async function focusOriginality(deps: MainDeps, touched: string[]): Promise<string[]> {
   if (!deps.library) return [];
   const p = deps.doc.project;

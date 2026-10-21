@@ -1,9 +1,3 @@
-//! Loading an SFZ instrument from disk (never on the audio thread): parse the
-//! text, decode every referenced range (`offset`..`end`) to i16 on a few
-//! worker threads under a RAM cap, and assemble the immutable
-//! [`MultiSampleSet`] (build.rs). Missing or broken files only silence their
-//! regions; the report says which.
-
 use super::build::{self, JobResult};
 use super::set::{tail_fade_frames, to_i16, MsSample, MultiSampleSet};
 use super::sfz;
@@ -16,14 +10,11 @@ use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error as SymError;
 use symphonia::core::formats::TrackType;
 
-/// Default RAM cap per instrument (decoded i16 audio).
 pub const DEFAULT_RAM_CAP_BYTES: u64 = 600 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct LoadOptions {
-    /// Refuse the instrument when its decoded audio would exceed this.
     pub ram_cap_bytes: u64,
-    /// Decoder threads (0 = automatic, at most 8).
     pub threads: usize,
 }
 
@@ -33,7 +24,6 @@ impl Default for LoadOptions {
     }
 }
 
-/// Is this an SFZ instrument file?
 pub fn is_sfz(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("sfz"))
 }
@@ -46,7 +36,6 @@ fn mb(bytes: u64) -> f64 {
     bytes as f64 / (1024.0 * 1024.0)
 }
 
-/// Load an `.sfz` instrument, or a plain audio file as a one-region set.
 pub fn load_set(path: &Path, opts: &LoadOptions) -> Result<MultiSampleSet, String> {
     if is_sfz(path) {
         return load_sfz(path, opts);
@@ -68,15 +57,12 @@ enum JobErr {
     OverCap,
 }
 
-/// Decode `[offset, end)` of a file to i16. `budget(bytes)` charges the RAM
-/// cap and returns false once it is exceeded.
 fn decode_range(path: &Path, offset: u64, end: Option<u64>, budget: &(dyn Fn(u64) -> bool + Sync)) -> Result<MsSample, JobErr> {
     if !path.is_file() {
         return Err(JobErr::Missing);
     }
     if !is_mf_extension(path) {
         match decode_range_symphonia(path, offset, end, budget) {
-            // e.g. an mp3 symphonia rejects: Media Foundation (whole file).
             Err(JobErr::Failed(e)) => {
                 return decode_range_whole(path, offset, end, budget).map_err(|e2| match e2 {
                     JobErr::Failed(_) => JobErr::Failed(e),
@@ -89,7 +75,6 @@ fn decode_range(path: &Path, offset: u64, end: Option<u64>, budget: &(dyn Fn(u64
     decode_range_whole(path, offset, end, budget)
 }
 
-/// Fallback: decode the whole file (Media Foundation formats), keep the range.
 fn decode_range_whole(path: &Path, offset: u64, end: Option<u64>, budget: &(dyn Fn(u64) -> bool + Sync)) -> Result<MsSample, JobErr> {
     let d = decode_file(path).map_err(JobErr::Failed)?;
     let frames = d.frames() as u64;
@@ -103,8 +88,6 @@ fn decode_range_whole(path: &Path, offset: u64, end: Option<u64>, budget: &(dyn 
     Ok(MsSample::from_planar(&chans, d.sample_rate, d.root_key, (b as u64) < frames))
 }
 
-/// symphonia, decoding only up to `end` (long samples trimmed with `end=` cost
-/// only what they keep).
 fn decode_range_symphonia(path: &Path, offset: u64, end: Option<u64>, budget: &(dyn Fn(u64) -> bool + Sync)) -> Result<MsSample, JobErr> {
     let mut format = open_format(path).map_err(JobErr::Failed)?;
     let track = format.default_track(TrackType::Audio).ok_or_else(|| JobErr::Failed(format!("No audio track in {}", path.display())))?;
@@ -122,7 +105,6 @@ fn decode_range_symphonia(path: &Path, offset: u64, end: Option<u64>, budget: &(
     let mut sample_rate = params.sample_rate.unwrap_or(0);
     let limit = end.unwrap_or(u64::MAX).min(offset.saturating_add(MAX_FRAMES as u64));
     let mut ch: usize = params.channels.as_ref().map(|c| c.count()).unwrap_or(0).min(2);
-    // Charge the RAM budget up front when the length is known.
     let mut charged = 0u64;
     if let (Some(t), true) = (total, ch > 0) {
         charged = limit.min(t).saturating_sub(offset) * ch as u64 * 2;
@@ -132,7 +114,7 @@ fn decode_range_symphonia(path: &Path, offset: u64, end: Option<u64>, budget: &(
     }
     let mut data: Vec<i16> = Vec::with_capacity((charged / 2) as usize);
     let mut scratch: Vec<Vec<f32>> = Vec::new();
-    let mut pos: u64 = 0; // file frame of the next decoded frame
+    let mut pos: u64 = 0;
     let mut truncated = false;
     loop {
         let packet = match format.next_packet() {
@@ -167,7 +149,6 @@ fn decode_range_symphonia(path: &Path, offset: u64, end: Option<u64>, budget: &(
                 let to = limit.saturating_sub(pos).min(n);
                 for i in from..to {
                     for c in 0..ch {
-                        // a mono buffer in a stream declared stereo: duplicate
                         let src = scratch.get(c).unwrap_or(&scratch[0]);
                         data.push(to_i16(src[i as usize]));
                     }
@@ -200,7 +181,6 @@ fn decode_range_symphonia(path: &Path, offset: u64, end: Option<u64>, budget: &(
     Ok(MsSample { data, channels: ch, frames, sample_rate: sample_rate as f32, root_key, tail_fade: tail_fade_frames(frames, sample_rate as f32, truncated) })
 }
 
-/// Parse and load an `.sfz`.
 pub fn load_sfz(path: &Path, opts: &LoadOptions) -> Result<MultiSampleSet, String> {
     let t0 = Instant::now();
     let name = display_name(path);
@@ -224,7 +204,6 @@ pub fn load_sfz(path: &Path, opts: &LoadOptions) -> Result<MultiSampleSet, Strin
         })
         .collect();
 
-    // Decode in parallel under the RAM cap.
     let used = AtomicU64::new(0);
     let over = AtomicBool::new(false);
     let next = AtomicUsize::new(0);

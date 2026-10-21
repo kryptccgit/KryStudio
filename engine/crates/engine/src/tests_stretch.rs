@@ -1,7 +1,3 @@
-//! Audio-clip time-stretch / pitch-shift (variants.rs) through the whole
-//! engine, with the REAL stock `krypt.audioclip` instrument (every other
-//! plugin is the test host's). Child of `tests` for its project builders.
-
 use super::*;
 use crate::variants::{self, VariantJob, VariantOutcome};
 use krypt_studio_dsp::PluginDescriptor;
@@ -10,8 +6,6 @@ use std::f64::consts::PI;
 use std::path::PathBuf;
 
 const SR: f64 = 48000.0;
-
-// ── Host: real audio clip, test plugins elsewhere ─────────────────────────
 
 fn clip_create(id: &str, sr: f32, max: usize) -> Option<Box<dyn Instrument>> {
     if id == "krypt.audioclip" {
@@ -29,8 +23,6 @@ fn clip_descs() -> Vec<PluginDescriptor> {
 fn clip_host() -> PluginHost {
     PluginHost { create_instrument: clip_create, create_effect: test_create_effect, descriptors: clip_descs }
 }
-
-// ── Fixtures ──────────────────────────────────────────────────────────────
 
 fn tmp_dir(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("kse-stretch-{tag}-{}", std::process::id()));
@@ -53,7 +45,6 @@ fn sine(freq: f64, secs: f64, amp: f64) -> Vec<f32> {
     (0..(secs * SR) as usize).map(|i| (amp * (2.0 * PI * freq * i as f64 / SR).sin()) as f32).collect()
 }
 
-/// 1 kHz bursts (1 ms attack, 12 ms decay) at the given times.
 fn bursts(secs: f64, at: &[f64]) -> Vec<f32> {
     let mut x = vec![0f32; (secs * SR) as usize];
     for &t in at {
@@ -69,7 +60,6 @@ fn bursts(secs: f64, at: &[f64]) -> Vec<f32> {
     x
 }
 
-/// 120 Hz pulse train through a resonance at 800 Hz (vowel stand-in).
 fn vowel(secs: f64) -> Vec<f32> {
     let w = 2.0 * PI * 800.0 / SR;
     let (alpha, cw) = (w.sin() / 16.0, w.cos());
@@ -85,7 +75,6 @@ fn vowel(secs: f64) -> Vec<f32> {
         .collect()
 }
 
-/// Song with one audio clip (channel "ca", volume 1) of `clip_ticks` at tick 0.
 fn clip_project(bpm: f64, path: &std::path::Path, params: Value, clip_ticks: f64) -> Value {
     let mut p = base(bpm, "song");
     add_insert(&mut p, "i1", json!({ "m": 1 }));
@@ -98,7 +87,6 @@ fn clip_project(bpm: f64, path: &std::path::Path, params: Value, clip_ticks: f64
     p
 }
 
-/// Offline render of ticks [a, b) (left channel) + logs.
 fn render_range(p: &Value, cache: &Arc<SampleCache>, a: f64, b: f64) -> (Vec<f32>, Vec<String>) {
     let mut w = Warnings::default();
     let model = Model::from_project(p, &mut w);
@@ -148,7 +136,6 @@ fn seg(x: &[f32], a: f64, b: f64) -> &[f32] {
     &x[ia..ib]
 }
 
-/// Energy-weighted centre time (s) of x within [a, b) seconds.
 fn centroid(x: &[f32], a: f64, b: f64) -> f64 {
     let ia = (a * SR) as usize;
     let (mut num, mut den) = (0.0, 0.0);
@@ -160,7 +147,6 @@ fn centroid(x: &[f32], a: f64, b: f64) -> f64 {
     num / den.max(1e-30) / SR
 }
 
-/// Last time (s) the signal exceeds `thr`.
 fn last_sound(x: &[f32], thr: f32) -> f64 {
     x.iter().rposition(|v| v.abs() > thr).map_or(0.0, |i| i as f64 / SR)
 }
@@ -175,8 +161,6 @@ fn peak_hz(x: &[f32], a: f64) -> f64 {
     k as f64 * SR / n as f64
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────
-
 #[test]
 fn identity_params_are_bit_exact_and_never_stretch() {
     let dir = tmp_dir("ident");
@@ -189,13 +173,11 @@ fn identity_params_are_bit_exact_and_never_stretch() {
     let len = ticks(1.5, 120.0);
     let cache = Arc::new(SampleCache::new());
     let (plain, _) = render_range(&clip_project(120.0, &path, json!({}), len), &cache, 0.0, len);
-    // Identity spelled out: stretch 1, 0 st, formants, Follow tempo at the source tempo.
     let ident = json!({ "pitch": 0, "stretch": 1, "formant": 1, "tempo_sync": 1, "src_bpm": 120 });
     let (same, _) = render_range(&clip_project(120.0, &path, ident, len), &cache, 0.0, len);
     assert_eq!(plain.len(), same.len());
     assert!(plain.iter().zip(&same).all(|(a, b)| a.to_bits() == b.to_bits()), "identity params changed the output");
     assert!(cache.variants.is_empty(), "the stretcher must not run at identity");
-    // ...and it is the sample itself: a constant gain (no SRC, no stretch).
     let g = plain[1000] / x[1000];
     for i in (1000..47000).step_by(997) {
         assert!((plain[i] - g * x[i]).abs() <= 1e-6, "frame {i}: {} vs {}", plain[i], g * x[i]);
@@ -223,9 +205,8 @@ fn stretch_2x_doubles_duration_and_onset_times() {
         let cy = centroid(&y, 2.0 * t - 0.1, 2.0 * t + 0.5);
         assert!((cy - 2.0 * co).abs() < 0.005, "burst at {t}: {cy:.4} vs 2 × {co:.4}");
     }
-    // The clip's offset is song time: starting 1 s into the clip plays the variant from 1 s.
     let (mid, _) = render_range(&clip_project(120.0, &path, json!({ "stretch": 2 }), len), &cache, ticks(1.0, 120.0), len);
-    let c = centroid(&mid, 0.1, 0.6); // the 0.6 s burst, stretched to 1.2 s → 0.2 s into this render
+    let c = centroid(&mid, 0.1, 0.6);
     assert!((c - (centroid(&y, 1.1, 1.6) - 1.0)).abs() < 0.002, "mid-clip start: {c}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -268,7 +249,6 @@ fn tempo_sync_follows_the_project_tempo() {
     let cache = Arc::new(SampleCache::new());
     let params = json!({ "tempo_sync": 1, "src_bpm": 120 });
     let (orig, _) = render_range(&clip_project(120.0, &path, json!({}), ticks(2.5, 120.0)), &cache, 0.0, ticks(2.5, 120.0));
-    // A 120 BPM loop in a 60 BPM project lasts twice as long: one beat is still one beat.
     let len = ticks(5.0, 60.0);
     let (y, _) = render_range(&clip_project(60.0, &path, params.clone(), len), &cache, 0.0, len);
     let orig_end = last_sound(&orig, 1e-3);
@@ -280,18 +260,15 @@ fn tempo_sync_follows_the_project_tempo() {
         let c = centroid(&y, (2.0 * t - 0.1).max(0.0), 2.0 * t + 0.5);
         assert!((c - 2.0 * co).abs() < 0.005, "beat {k}: {c:.4} vs 2 × {co:.4}");
     }
-    // Tempo change → a new variant: 90 BPM gives 120/90 of the length.
     let len = ticks(5.0, 90.0);
     let (y, _) = render_range(&clip_project(90.0, &path, params.clone(), len), &cache, 0.0, len);
     let end = last_sound(&y, 1e-3);
     assert!((end - orig_end * 120.0 / 90.0).abs() < 0.06, "90 BPM: ends at {end} (original {orig_end})");
     assert_eq!(cache.variants.len(), 2);
-    // Without a source BPM the tempo factor is ignored, with a warning.
     let (y, logs) = render_range(&clip_project(60.0, &path, json!({ "tempo_sync": 1 }), len), &cache, 0.0, len);
     assert!(last_sound(&y, 1e-3) < 2.0);
     assert!(logs.iter().any(|l| l.contains("Source BPM")), "{logs:?}");
 
-    // Live: the compiler re-derives the variant when the tempo changes and cancels the stale job.
     let mut s = Session::new(clip_host(), 48000.0, Arc::new(SampleCache::new()), ".".into(), SampleMode::Sync);
     let (vtx, vrx) = crossbeam_channel::unbounded::<VariantJob>();
     s.variant_tx = Some(vtx);
@@ -319,7 +296,6 @@ fn reverse_and_gain_work_with_stretch() {
     let cache = Arc::new(SampleCache::new());
     let len = ticks(3.0, 120.0);
     let (y, _) = render_range(&clip_project(120.0, &path, json!({ "stretch": 2, "reverse": 1 }), len), &cache, 0.0, len);
-    // Forward the burst sits at 0.2 s of the 2 s variant; reversed it ends 0.2 s before the end.
     let (fwd, _) = render_range(&clip_project(120.0, &path, json!({ "stretch": 2 }), len), &cache, 0.0, len);
     let cf = centroid(&fwd, 0.0, 2.0);
     let cr = centroid(&y, 0.0, 2.1);
@@ -340,7 +316,6 @@ fn render_right_after_a_param_change_waits_for_the_variant() {
     write_wav(&path, &[sine(220.0, 2.0, 0.5)]);
     let cache = Arc::new(SampleCache::new());
     let len = ticks(5.0, 120.0);
-    // The live session queues the variant on a worker that has not run yet...
     let mut s = Session::new(clip_host(), 48000.0, cache.clone(), ".".into(), SampleMode::Sync);
     let (vtx, _vrx) = crossbeam_channel::unbounded::<VariantJob>();
     s.variant_tx = Some(vtx);
@@ -350,7 +325,6 @@ fn render_right_after_a_param_change_waits_for_the_variant() {
     assert_eq!(s.stretch_pending, vec!["ca".to_string()], "live: still rendering");
     assert!(b.instruments.iter().all(|(_, i)| i.is_some()), "instance exists (silent) while it renders");
     assert!(cache.variants.is_empty());
-    // ...but a render of that same model renders the variant first: stretched, not silent, not original.
     let model = s.model.clone();
     let mut progress = |_p: f64| {};
     let mut log = |_l: &str, _m: String| {};
@@ -387,7 +361,6 @@ fn render_right_after_a_param_change_waits_for_the_variant() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Live core + Session with a (manually driven) variant worker.
 struct LiveClip {
     core: Core,
     tx: rtrb::Producer<Cmd>,
@@ -426,14 +399,12 @@ impl LiveClip {
             ch.generator.params.insert(k.clone(), v.as_f64().unwrap());
         }
     }
-    /// Run the queued variant jobs like the workers do.
     fn finish_jobs(&mut self) {
         while let Ok(job) = self.jobs.try_recv() {
             let _ = variants::run_job(&self.session.cache.variants, &job);
             self.session.variant_done(&job.key);
         }
     }
-    /// Process `frames` (in 480-frame device blocks) on the "audio thread"; left channel.
     fn run(&mut self, frames: usize) -> Vec<f32> {
         let mut buf = vec![0f32; frames * 2];
         let mut done = 0;
@@ -470,7 +441,6 @@ fn live_variant_swaps_in_mid_clip_without_allocating() {
     let a = live.run(24000);
     assert!(rms(&a[2400..]) > 0.2, "identity plays at once");
 
-    // Pitch only (same timing): the original keeps playing while the variant renders.
     live.set_params(json!({ "pitch": 5 }));
     let (insts, _) = live.rebuild(false);
     assert_eq!(insts, 0, "instance kept while only the pitch changes");
@@ -478,14 +448,12 @@ fn live_variant_swaps_in_mid_clip_without_allocating() {
     let b = live.run(4800);
     assert!(rms(&b) > 0.2, "keeps playing the previous pitch");
 
-    // New timing: silence until it is ready (never audio at the wrong tempo).
     live.set_params(json!({ "pitch": 5, "stretch": 1.5 }));
     let (insts, _) = live.rebuild(false);
     assert_eq!(insts, 1, "re-created without audio");
     let c = live.run(4800);
     assert!(rms(&c[480..]) < 1e-4, "silent while the new timing renders: {}", rms(&c[480..]));
 
-    // The worker finishes → rebuild installs the variant and resumes mid-clip at once.
     live.finish_jobs();
     let (insts, rechase) = live.rebuild(false);
     assert_eq!((insts, rechase.len()), (1, 1));
@@ -493,7 +461,6 @@ fn live_variant_swaps_in_mid_clip_without_allocating() {
     let at = live.tick();
     let d = live.run(9600);
     assert!(rms(&d[480..]) > 0.15, "variant resumes mid-clip: {}", rms(&d[480..]));
-    // ...in sync with an offline render of the same song position.
     let p2 = clip_project(120.0, &path, json!({ "pitch": 5, "stretch": 1.5 }), len);
     let (off, _) = render_range(&p2, &cache, at, at + ticks(0.2, 120.0));
     let (u, v) = (&d[960..8640], &off[960..8640]);
@@ -511,7 +478,6 @@ fn live_variant_swaps_in_mid_clip_without_allocating() {
 fn failed_variants_warn_and_stay_silent() {
     let dir = tmp_dir("fail");
     let path = dir.join("long.wav");
-    // 113 s × the 16× maximum ratio is past the 30-minute variant limit: refused, visibly.
     let spec = hound::WavSpec { channels: 1, sample_rate: 8000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
     let mut wr = hound::WavWriter::create(&path, spec).unwrap();
     for i in 0..113 * 8000 {
@@ -527,6 +493,5 @@ fn failed_variants_warn_and_stay_silent() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// Warp markers + warp modes (warp.rs), reusing the fixtures above.
 #[path = "tests_warp.rs"]
 mod warp;

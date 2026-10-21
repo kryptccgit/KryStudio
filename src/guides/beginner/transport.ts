@@ -1,4 +1,3 @@
-// Start here (step by step) · 4: play, stop, tempo, metronome.
 import type { GuideArticle } from '../articles';
 
 export const TRANSPORT: GuideArticle = {

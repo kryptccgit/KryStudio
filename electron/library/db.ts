@@ -1,18 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Reference library database: userData/library/library.sqlite through
-// node:sqlite (DatabaseSync; built into Node 24 / Electron 44, no native
-// module). WAL mode, schema version in PRAGMA user_version, forward-only
-// migrations. Every statement here is small and indexed: bulk work
-// (imports, removals, profile loads) is chunked by the caller with
-// setImmediate so the main process never stalls.
-//
-// What is stored (research/08 §4): collections, one row per source FILE
-// (path + size + mtime, never audio), derived features as JSON, the
-// originality n-gram hashes of deep-analysed lines (indexed by hash) and
-// cached style profiles (invalidated through collections.rev).
-// Node-only (no Electron import): tests open it on a temp dir.
-// ──────────────────────────────────────────────────────────────────────
-
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue } from 'node:sqlite';
 import { parseKey } from '@shared/music/theory';
@@ -20,7 +5,6 @@ import type { Collection, LibraryTrack, TrackQuery, TrackStatus } from '@shared/
 
 export const SCHEMA_VERSION = 2;
 
-/** Forward-only migrations: MIGRATIONS[i] takes the schema from version i to i + 1. */
 const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
   (db) =>
     db.exec(`
@@ -92,7 +76,6 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
         built_at      INTEGER NOT NULL
       );
     `),
-  // 1 → 2: find the same file in other collections (its analysis is reused, never redone).
   (db) => db.exec('CREATE INDEX tracks_path ON tracks(path_key, size, mtime);'),
 ];
 
@@ -143,7 +126,6 @@ export interface NewTrack {
   mtime: number;
 }
 
-/** Summary columns written by the light pass (fast filters / sorts without parsing features). */
 export interface TrackSummary {
   duration: number | null;
   bpm: number | null;
@@ -162,7 +144,6 @@ const MAX_PARAMS = 400;
 
 export const emptyCounts = (): Counts => ({ total: 0, pending: 0, light: 0, deep: 0, failed: 0, missing: 0 });
 
-/** Windows paths compare case-insensitively. */
 export const pathKey = (p: string): string => p.normalize('NFC').toLowerCase();
 
 function parseList(s: string | null | undefined): string[] {
@@ -232,7 +213,6 @@ export class LibraryDb {
   private readonly db: DatabaseSync;
   private readonly stmts = new Map<string, ReturnType<DatabaseSync['prepare']>>();
 
-  /** Opens (creating when missing) and migrates. Throws LibraryDbError with a human message. */
   constructor(readonly file: string) {
     try {
       this.db = new DatabaseSync(file, { enableForeignKeyConstraints: true, timeout: 2000 });
@@ -246,7 +226,6 @@ export class LibraryDb {
       try {
         this.db.close();
       } catch {
-        /* already closed */
       }
       if (err instanceof LibraryDbError) throw err;
       throw new LibraryDbError(`The reference library database is unreadable (${file}): ${(err as Error).message}`);
@@ -258,7 +237,6 @@ export class LibraryDb {
     try {
       if (this.db.isOpen) this.db.close();
     } catch {
-      /* already closed */
     }
   }
 
@@ -283,8 +261,6 @@ export class LibraryDb {
     }
   }
 
-  // ── Generic helpers ────────────────────────────────────────────────
-
   private stmt(sql: string) {
     let s = this.stmts.get(sql);
     if (!s) {
@@ -307,7 +283,6 @@ export class LibraryDb {
     return this.stmt(sql).all(...params) as T[];
   }
 
-  /** Run fn in one transaction (nested calls join the outer one). */
   tx<T>(fn: () => T): T {
     if (this.db.isTransaction) return fn();
     this.db.exec('BEGIN IMMEDIATE');
@@ -319,13 +294,10 @@ export class LibraryDb {
       try {
         this.db.exec('ROLLBACK');
       } catch {
-        /* the failure already ended it */
       }
       throw err;
     }
   }
-
-  // ── Meta ───────────────────────────────────────────────────────────
 
   getMeta(key: string): string | null {
     return this.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', key)?.value ?? null;
@@ -335,8 +307,6 @@ export class LibraryDb {
     if (value === null) this.run('DELETE FROM meta WHERE key = ?', key);
     else this.run('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
   }
-
-  // ── Collections ────────────────────────────────────────────────────
 
   collectionRows(): CollectionRow[] {
     return this.all<CollectionRow>('SELECT * FROM collections ORDER BY created_at, rowid');
@@ -387,14 +357,10 @@ export class LibraryDb {
     this.run('DELETE FROM collections WHERE id = ?', id);
   }
 
-  /** Invalidate cached profiles (a collection's tracks changed). */
   bumpRev(collectionId: string): void {
     this.run('UPDATE collections SET rev = rev + 1 WHERE id = ?', collectionId);
   }
 
-  // ── Tracks ─────────────────────────────────────────────────────────
-
-  /** Insert new files (status pending). Paths already in the collection are skipped. */
   insertTracks(collectionId: string, files: NewTrack[], now: number): { added: number; skipped: number } {
     let added = 0;
     this.tx(() => {
@@ -431,7 +397,6 @@ export class LibraryDb {
     return out;
   }
 
-  /** What rescan compares: one collection's file records. */
   scanRows(collectionId: string): Array<Pick<TrackRow, 'id' | 'path' | 'path_key' | 'size' | 'mtime' | 'status' | 'prev_status'>> {
     return this.all('SELECT id, path, path_key, size, mtime, status, prev_status FROM tracks WHERE collection_id = ?', collectionId);
   }
@@ -440,7 +405,6 @@ export class LibraryDb {
     return this.all<{ id: string }>('SELECT id FROM tracks WHERE collection_id = ? LIMIT ?', collectionId, limit).map((r) => r.id);
   }
 
-  /** Delete track records (features + hashes cascade). Caller chunks large lists. */
   deleteTracks(ids: string[]): number {
     let n = 0;
     this.tx(() => {
@@ -456,13 +420,11 @@ export class LibraryDb {
     return n;
   }
 
-  /** Next tracks for the light pass (oldest first), skipping ids already running. */
   nextPending(limit: number, skip: Set<string>, skipCollections: Set<string>): TrackRow[] {
     const rows = this.all<TrackRow>("SELECT * FROM tracks WHERE status = 'pending' ORDER BY added_at, rowid LIMIT ?", limit + skip.size + 32);
     return rows.filter((r) => !skip.has(r.id) && !skipCollections.has(r.collection_id)).slice(0, limit);
   }
 
-  /** Tracks waiting for the deep pass (collections with deep on, light done, no deep failure). */
   nextDeep(limit: number, skip: Set<string>, skipCollections: Set<string>): TrackRow[] {
     const rows = this.all<TrackRow>(
       `SELECT t.* FROM tracks t JOIN collections c ON c.id = t.collection_id
@@ -476,7 +438,6 @@ export class LibraryDb {
     return this.get<{ n: number }>("SELECT COUNT(*) AS n FROM tracks WHERE status = 'pending'")?.n ?? 0;
   }
 
-  /** Deep work left: tracks and their known audio seconds (optionally one collection, pending tracks included). */
   deepRemaining(collectionId?: string, includePending = false): { tracks: number; knownSec: number; known: number } {
     const statuses = includePending ? "('light','pending')" : "('light')";
     const where = `c.deep = 1 AND t.status IN ${statuses} AND t.deep_failed = 0${collectionId ? ' AND t.collection_id = ?' : ''}`;
@@ -485,7 +446,6 @@ export class LibraryDb {
     return { tracks: r?.n ?? 0, knownSec: r?.sec ?? 0, known: r?.known ?? 0 };
   }
 
-  /** Tracks of a collection that deep analysis would still process (deep on or not). */
   deepCandidates(collectionId: string): { tracks: number; knownSec: number; known: number } {
     const r = this.get<{ n: number; sec: number; known: number }>(
       "SELECT COUNT(*) AS n, COALESCE(SUM(duration), 0) AS sec, COUNT(duration) AS known FROM tracks WHERE collection_id = ? AND status IN ('light','pending') AND deep_failed = 0",
@@ -504,7 +464,6 @@ export class LibraryDb {
     return this.get<{ n: number }>("SELECT COUNT(*) AS n FROM tracks WHERE status = 'deep'")?.n ?? 0;
   }
 
-  /** Reset a track to pending (file changed / retry): features, hashes and errors go. */
   requeue(id: string, file?: { size: number; mtime: number }): void {
     this.tx(() => {
       const row = this.track(id);
@@ -532,7 +491,6 @@ export class LibraryDb {
     });
   }
 
-  /** A missing file came back unchanged: restore what it was. */
   restore(id: string): void {
     this.tx(() => {
       const row = this.track(id);
@@ -543,7 +501,6 @@ export class LibraryDb {
     });
   }
 
-  /** Light pass failed for this file (status failed, message kept). Only if the record is unchanged since the job started. */
   markFailed(id: string, gen: number, message: string): boolean {
     return this.tx(() => {
       const row = this.track(id);
@@ -554,7 +511,6 @@ export class LibraryDb {
     });
   }
 
-  /** The analyzer itself failed (crash / restart) during this file: count an attempt, keep it pending. */
   bumpAttempt(id: string, gen: number): number {
     this.run('UPDATE tracks SET attempts = attempts + 1 WHERE id = ? AND gen = ?', id, gen);
     return this.track(id)?.attempts ?? 0;
@@ -564,7 +520,6 @@ export class LibraryDb {
     return this.run("UPDATE tracks SET deep_failed = 1, error = ? WHERE id = ? AND gen = ? AND status = 'light'", message.slice(0, 500), id, gen).changes > 0;
   }
 
-  /** Light pass result: features + summary columns + status light, in one transaction. False when the record changed meanwhile. */
   saveLight(id: string, gen: number, s: TrackSummary, featuresJson: string, vector: number[], vectorVersion: number, now: number): boolean {
     return this.tx(() => {
       const row = this.track(id);
@@ -599,7 +554,6 @@ export class LibraryDb {
     });
   }
 
-  /** Deep pass result: features (stem drums + lines), vector, n-gram hashes, status deep. */
   saveDeep(id: string, gen: number, featuresJson: string, vector: number[], vectorVersion: number, hashes: Array<{ hash: number; stem: string; pos: number }>, lineCount: number, now: number): boolean {
     return this.tx(() => {
       const row = this.track(id);
@@ -613,7 +567,6 @@ export class LibraryDb {
     });
   }
 
-  /** The same unchanged file in another collection, already analysed (deep first). */
   twinOf(row: Pick<TrackRow, 'id' | 'path_key' | 'size' | 'mtime'>): TrackRow | undefined {
     return this.get<TrackRow>(
       "SELECT * FROM tracks WHERE path_key = ? AND size = ? AND mtime = ? AND id != ? AND status IN ('light','deep') ORDER BY status = 'deep' DESC, analyzed_at DESC LIMIT 1",
@@ -624,7 +577,6 @@ export class LibraryDb {
     );
   }
 
-  /** Reuse a twin's analysis (summary, features, hashes, status) for a pending record. False when either changed meanwhile. */
   copyAnalysis(from: TrackRow, toId: string, gen: number): boolean {
     return this.tx(() => {
       const src = this.track(from.id);
@@ -664,7 +616,6 @@ export class LibraryDb {
     });
   }
 
-  /** Re-queue failed tracks (light failures → pending; deep failures cleared). */
   retryFailed(collectionId?: string): number {
     return this.tx(() => {
       const where = collectionId ? ' AND collection_id = ?' : '';
@@ -677,12 +628,9 @@ export class LibraryDb {
     });
   }
 
-  /** Deep requested for a collection: how many of its tracks will (eventually) get the deep pass. */
   clearDeepFailures(collectionId: string): void {
     this.run('UPDATE tracks SET deep_failed = 0, error = NULL WHERE collection_id = ? AND deep_failed = 1', collectionId);
   }
-
-  // ── Queries ────────────────────────────────────────────────────────
 
   query(q: TrackQuery): { rows: TrackRow[]; total: number } {
     const where: string[] = [];
@@ -718,8 +666,6 @@ export class LibraryDb {
     return { rows, total };
   }
 
-  // ── Features ───────────────────────────────────────────────────────
-
   featuresJson(trackId: string): string | null {
     return this.get<{ json: string }>('SELECT json FROM features WHERE track_id = ?', trackId)?.json ?? null;
   }
@@ -729,7 +675,6 @@ export class LibraryDb {
     return r ? parseVector(r.vector) : null;
   }
 
-  /** One page of a collection's analysed tracks with their features (rowid paging; caller yields between pages). */
   featurePage(collectionId: string, afterRowid: number, limit: number): Array<{ rowid: number; json: string; vector: string } & TrackRow> {
     return this.all(
       `SELECT t.rowid AS rowid, t.*, f.json AS json, f.vector AS vector FROM tracks t JOIN features f ON f.track_id = t.id
@@ -740,7 +685,6 @@ export class LibraryDb {
     );
   }
 
-  /** One page of every analysed track's vector (similarity search). */
   vectorPage(afterRowid: number, limit: number): Array<{ rowid: number; id: string; collection_id: string; vector: string }> {
     return this.all(
       `SELECT t.rowid AS rowid, t.id AS id, t.collection_id AS collection_id, f.vector AS vector FROM tracks t JOIN features f ON f.track_id = t.id
@@ -750,7 +694,6 @@ export class LibraryDb {
     );
   }
 
-  /** Tracks whose stored vector is from another VECTOR_VERSION (recomputed at start-up). */
   staleVectors(version: number, limit: number): Array<{ track_id: string; json: string }> {
     return this.all('SELECT track_id, json FROM features WHERE vector_version != ? LIMIT ?', version, limit);
   }
@@ -759,9 +702,6 @@ export class LibraryDb {
     this.run('UPDATE features SET vector = ?, vector_version = ? WHERE track_id = ?', JSON.stringify(vector), version, trackId);
   }
 
-  // ── Originality hashes ─────────────────────────────────────────────
-
-  /** Reference (track, stem) pairs sharing n-gram hashes with a line, most shared first. */
   hashCandidates(hashes: number[], limit: number): Array<{ track_id: string; stem: string; n: number }> {
     const uniq = [...new Set(hashes.filter((h) => Number.isFinite(h)))];
     const tally = new Map<string, { track_id: string; stem: string; n: number }>();
@@ -783,12 +723,9 @@ export class LibraryDb {
     return this.get<{ n: number }>('SELECT COUNT(*) AS n FROM line_hashes')?.n ?? 0;
   }
 
-  /** Deep tracks with transcribed lines (the originality references). */
   referenceCount(): number {
     return this.get<{ n: number }>("SELECT COUNT(*) AS n FROM tracks t JOIN features f ON f.track_id = t.id WHERE t.status = 'deep' AND f.lines > 0")?.n ?? 0;
   }
-
-  // ── Profiles ───────────────────────────────────────────────────────
 
   profileRow(collectionId: string): { rev: number; json: string } | undefined {
     return this.get('SELECT rev, json FROM profiles WHERE collection_id = ?', collectionId);

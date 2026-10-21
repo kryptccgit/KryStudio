@@ -1,9 +1,3 @@
-//! krypt.phaser — 4 to 12 first-order allpass stages (TPT form, so the
-//! sweep stays stable and click-free at audio rate) swept exponentially
-//! around a centre frequency by a free or tempo-locked sine LFO, with
-//! feedback around the chain. Mixed 50/50 with the dry signal it gives
-//! stages/2 moving notches.
-
 use super::{frames, sane_sr, sanitize_block};
 use crate::blocks::filters::svf_g;
 use crate::blocks::lfo::{shape, TempoPhase};
@@ -46,7 +40,6 @@ pub struct Phaser {
     pb: ParamBank<N_PARAMS>,
     fresh: bool,
     sr: f32,
-    /// TPT one-pole states per channel and stage
     s: [[f32; MAX_STAGES]; 2],
     last: [f32; 2],
     stages: usize,
@@ -153,7 +146,6 @@ impl Effect for Phaser {
                 let mut v = x + 2.0 * tanh_fast(0.5 * fb * self.last[ch]);
                 let st = &mut self.s[ch];
                 for k in 0..stages {
-                    // TPT one-pole lowpass; allpass = 2·lp − input
                     let u = (v - st[k]) * gg;
                     let lp = u + st[k];
                     st[k] = flush(lp + u);

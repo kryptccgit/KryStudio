@@ -1,7 +1,3 @@
-//! Spectral building blocks shared by analysis and transcription: STFT,
-//! log-band spectrogram, spectral-flux onset envelopes, autocorrelation,
-//! peak picking. Krypt-original DSP (textbook methods; no GPL sources).
-
 use std::sync::Arc;
 
 use rustfft::num_complex::Complex32;
@@ -9,8 +5,6 @@ use rustfft::{Fft, FftPlanner};
 
 use crate::{JobCtx, JobError};
 
-/// Power spectrogram, frames × bins (row-major), centred frames:
-/// frame `t` is centred on sample `t·hop`.
 pub struct Spectrogram {
     pub n_fft: usize,
     pub hop: usize,
@@ -39,9 +33,6 @@ pub fn hann(n: usize) -> Vec<f32> {
     (0..n).map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / n as f32).cos()).collect()
 }
 
-/// STFT power spectrogram (Hann). Two real frames share one complex FFT.
-/// `max_bin` limits the stored bins (inclusive upper bound, ≤ n_fft/2).
-/// Checks for cancellation every few hundred frames.
 pub fn power_spectrogram(x: &[f32], sr: f32, n_fft: usize, hop: usize, max_bin: usize, ctx: &JobCtx) -> Result<Spectrogram, JobError> {
     let bins = max_bin.min(n_fft / 2) + 1;
     let frames = if x.is_empty() { 0 } else { x.len() / hop + 1 };
@@ -74,7 +65,6 @@ pub fn power_spectrogram(x: &[f32], sr: f32, n_fft: usize, hop: usize, max_bin: 
         for k in 0..bins {
             let z = buf[k];
             let zc = buf[(n_fft - k) % n_fft].conj();
-            // X1 = (Z + conj(Z[N-k]))/2, X2 = (Z - conj(Z[N-k]))/(2i)
             let x1 = (z + zc) * 0.5;
             power[t * bins + k] = x1.norm_sqr();
             if pair {
@@ -88,8 +78,6 @@ pub fn power_spectrogram(x: &[f32], sr: f32, n_fft: usize, hop: usize, max_bin: 
     Ok(Spectrogram { n_fft, hop, sr, frames, bins, power })
 }
 
-/// Log-spaced band filterbank over a spectrogram (rectangular bands, at least
-/// one bin wide). Returns band edges as bin ranges and centre frequencies.
 pub struct Bands {
     pub ranges: Vec<(usize, usize)>,
     pub centers_hz: Vec<f32>,
@@ -117,11 +105,8 @@ pub fn log_bands(spec: &Spectrogram, lo_hz: f32, hi_hz: f32, n: usize) -> Bands 
     Bands { ranges, centers_hz: centers }
 }
 
-/// Dynamic range kept in the band spectrogram. Bins near the floor would
-/// otherwise turn noise-floor flicker into large dB "rises".
 pub const BAND_DB_RANGE: f32 = 55.0;
 
-/// Band energies in dB (frames × bands), floored at (global max − [`BAND_DB_RANGE`]).
 pub fn band_db(spec: &Spectrogram, bands: &Bands) -> Vec<Vec<f32>> {
     let mut out = vec![vec![0f32; bands.ranges.len()]; spec.frames];
     let mut gmax = f32::MIN;
@@ -143,8 +128,6 @@ pub fn band_db(spec: &Spectrogram, bands: &Bands) -> Vec<Vec<f32>> {
     out
 }
 
-/// Half-wave-rectified spectral flux over the bands whose centres lie in
-/// [lo_hz, hi_hz), averaged over those bands (one value per frame).
 pub fn flux(db: &[Vec<f32>], bands: &Bands, lo_hz: f32, hi_hz: f32) -> Vec<f32> {
     let sel: Vec<usize> = (0..bands.ranges.len()).filter(|&b| bands.centers_hz[b] >= lo_hz && bands.centers_hz[b] < hi_hz).collect();
     let mut out = vec![0f32; db.len()];
@@ -161,7 +144,6 @@ pub fn flux(db: &[Vec<f32>], bands: &Bands, lo_hz: f32, hi_hz: f32) -> Vec<f32> 
     out
 }
 
-/// Moving average (centred, window `w` frames).
 pub fn moving_average(x: &[f32], w: usize) -> Vec<f32> {
     let n = x.len();
     if n == 0 {
@@ -223,7 +205,6 @@ pub fn percentile(x: &[f32], p: f32) -> f32 {
     v[k]
 }
 
-/// Linear-interpolated sample of `x` at fractional index `i`.
 pub fn lerp_at(x: &[f32], i: f32) -> f32 {
     if x.is_empty() || !i.is_finite() || i < 0.0 {
         return 0.0;
@@ -236,7 +217,6 @@ pub fn lerp_at(x: &[f32], i: f32) -> f32 {
     x[i0] * (1.0 - f) + x[i0 + 1] * f
 }
 
-/// Autocorrelation of `x` (mean removed) for lags 0..=max_lag, via FFT.
 pub fn autocorr(x: &[f32], max_lag: usize) -> Vec<f32> {
     let n = x.len();
     if n == 0 {
@@ -255,8 +235,6 @@ pub fn autocorr(x: &[f32], max_lag: usize) -> Vec<f32> {
     (0..=max_lag).map(|l| if l < n { buf[l].re * scale } else { 0.0 }).collect()
 }
 
-/// Indices of local maxima of `x` that exceed `thresh[i]` and are at least
-/// `min_dist` apart (stronger peaks win).
 pub fn pick_peaks(x: &[f32], thresh: &[f32], min_dist: usize) -> Vec<usize> {
     let n = x.len();
     let mut cand: Vec<usize> = (1..n.saturating_sub(1)).filter(|&i| x[i] > thresh[i] && x[i] >= x[i - 1] && x[i] > x[i + 1]).collect();
@@ -279,7 +257,6 @@ pub fn pick_peaks(x: &[f32], thresh: &[f32], min_dist: usize) -> Vec<usize> {
     keep
 }
 
-/// Parabolic interpolation of a peak at `i`: returns the fractional offset (-0.5..0.5).
 pub fn parabolic(y0: f32, y1: f32, y2: f32) -> f32 {
     let d = y0 - 2.0 * y1 + y2;
     if d.abs() < 1e-12 {
@@ -289,25 +266,14 @@ pub fn parabolic(y0: f32, y1: f32, y2: f32) -> f32 {
     }
 }
 
-/// Onset envelopes from centred Hann frames peak about a quarter window
-/// before the true attack (the window's steepest slope crosses it first).
-/// Add this to frame times derived from onset peaks.
 pub fn onset_latency(n_fft: usize, sr: f32) -> f32 {
     0.25 * n_fft as f32 / sr
 }
 
-/// Frequency regions for region onsets: low (kick, bass), mid (body, snare,
-/// most notes), high (hats, cymbals).
 pub const REGIONS: [(f32, f32); 3] = [(30.0, 150.0), (150.0, 5000.0), (5000.0, 11_025.0)];
 
-/// Rise threshold (dB within ~12 ms) for a region onset. Steady noise and
-/// sustained tones stay well under it; drum hits rise 20–40 dB.
 pub const REGION_RISE_DB: f32 = 8.0;
 
-/// Per-region summed power in dB (floored at the loudest region's max −
-/// [`BAND_DB_RANGE`], so an almost empty region can't flicker), then the rise
-/// over `lag` frames: one envelope per region. Summing the region's bins
-/// keeps the variance low where log bands are only one bin wide.
 pub fn region_rise(spec: &Spectrogram, regions: &[(f32, f32)], lag: usize) -> Vec<Vec<f32>> {
     let bin_hz = spec.bin_hz();
     let mut dbs: Vec<Vec<f32>> = regions
@@ -327,8 +293,6 @@ pub fn region_rise(spec: &Spectrogram, regions: &[(f32, f32)], lag: usize) -> Ve
     dbs.iter().map(|db| (0..spec.frames).map(|t| if t >= lag { (db[t] - db[t - lag]).max(0.0) } else { 0.0 }).collect()).collect()
 }
 
-/// Onset frames from several envelopes, each with its own absolute floor,
-/// merged: onsets closer than `merge_sec` collapse to the earliest.
 pub fn merged_onsets(envs: &[(&[f32], f32)], fps: f32, delta: f32, merge_sec: f32) -> Vec<usize> {
     let mut all: Vec<usize> = Vec::new();
     for &(env, floor) in envs {
@@ -351,25 +315,17 @@ pub fn merged_onsets(envs: &[(&[f32], f32)], fps: f32, delta: f32, merge_sec: f3
     out
 }
 
-/// Onset analysis of a mono signal at the analysis rate.
 pub struct Onsets {
     pub fps: f32,
-    /// Broadband spectral flux (log bands).
     pub env: Vec<f32>,
-    /// Low-band (< 150 Hz) flux: kick drums / bass.
     pub low: Vec<f32>,
-    /// High-band (> 5 kHz) flux: hats.
     pub high: Vec<f32>,
-    /// Log band energies per frame (dB), for timbre features.
     pub band_db: Vec<Vec<f32>>,
     pub bands: Bands,
-    /// Detected onsets (frames): broadband flux and per-region rises, merged.
     pub onsets: Vec<usize>,
-    /// Summed-power rise per [`REGIONS`] entry (low, mid, high).
     pub rise: Vec<Vec<f32>>,
 }
 
-/// STFT 1024 / hop 256 at 22 050 Hz (≈ 86 frames per second).
 pub fn onsets(x: &[f32], sr: f32, ctx: &JobCtx) -> Result<Onsets, JobError> {
     let spec = power_spectrogram(x, sr, 1024, 256, 512, ctx)?;
     let bands = log_bands(&spec, 30.0, sr * 0.5 * 0.98, 48);
@@ -385,15 +341,8 @@ pub fn onsets(x: &[f32], sr: f32, ctx: &JobCtx) -> Result<Onsets, JobError> {
     Ok(Onsets { fps, env, low, high, band_db: db, bands, onsets, rise })
 }
 
-/// Absolute floor for an onset in the log-band flux envelope (mean dB rise
-/// per frame across bands). Drum hits peak around 15–30, note/chord onsets
-/// at 3–10; amplitude beating in sustained tones and steady noise stay
-/// below ~3 (scale-invariant: the envelope is in dB).
 pub const ONSET_FLOOR: f32 = 3.0;
 
-/// Onset times (frames) from an onset envelope: peaks above a local
-/// threshold (moving mean + `delta` × global std) and [`ONSET_FLOOR`],
-/// ≥ 30 ms apart.
 pub fn onset_frames(env: &[f32], fps: f32, delta: f32) -> Vec<usize> {
     if env.len() < 3 {
         return Vec::new();

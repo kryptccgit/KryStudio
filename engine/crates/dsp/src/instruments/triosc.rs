@@ -1,15 +1,3 @@
-//! krypt.triosc — three band-limited oscillators (PolyBLEP/PolyBLAMP), each
-//! doubled into a detuned stereo pair by "Detune spread", analog drift,
-//! AHDSR amp envelope, a TPT SVF with its own ADSR + key tracking, and two
-//! LFOs with one destination each (pitch, cutoff, amp, pan, detune, osc mix).
-//!
-//! LFO clocking: "Retrigger" restarts an LFO at every note. Otherwise it is
-//! free-running and, while the transport plays, locked to the song position
-//! (synced rates: phase = beats / division; Hz rates: re-anchored to the song
-//! time whenever playback starts or jumps), so renders are deterministic.
-//! Random shapes hash the cycle index (no RNG state). With both LFO amounts at
-//! zero a voice runs exactly the pre-LFO code path (bit-identical output).
-
 use super::sampler::{reso_to_k, sanitize_sr, svf_typed};
 use super::{NoteStart, OutStage, Voice, VoiceManager, CHOKE_MS};
 use crate::blocks::env::{Ahdsr, EnvParams};
@@ -22,16 +10,12 @@ use crate::{Instrument, NoteExtras, PluginDescriptor, PluginKind, ProcessContext
 
 const SHAPES: [&str; 6] = ["Sine", "Triangle", "Saw", "Square", "Pulse 25%", "Noise"];
 
-/// LFO shapes (the first five are `blocks::lfo::shape`).
 pub const LFO_SHAPES: [&str; 7] = ["Sine", "Triangle", "Saw up", "Saw down", "Square", "Sample & hold", "Smooth random"];
-/// One destination per LFO. Depth at amount ±100 %: see `PITCH_ST` etc.
 pub const LFO_DESTS: [&str; 6] = ["Pitch", "Filter cutoff", "Amp (tremolo)", "Pan", "Detune spread", "Osc 1/2 mix"];
-/// Tempo-synced LFO cycle lengths (T = triplet, D = dotted; bars follow the time signature).
 pub const LFO_DIVISIONS: [&str; 19] = [
     "1/32T", "1/32", "1/32D", "1/16T", "1/16", "1/16D", "1/8T", "1/8", "1/8D", "1/4T", "1/4", "1/4D", "1/2T", "1/2", "1/2D", "1 bar",
     "2 bars", "4 bars", "8 bars",
 ];
-/// Length of each `LFO_DIVISIONS` entry in beats (quarter notes).
 pub const LFO_DIV_BEATS: [f64; 19] = [
     0.125 * 2.0 / 3.0,
     0.125,
@@ -54,13 +38,9 @@ pub const LFO_DIV_BEATS: [f64; 19] = [
     32.0,
 ];
 
-/// Pitch depth at amount 100 %, semitones.
 pub const PITCH_ST: f32 = 12.0;
-/// Cutoff depth at amount 100 %, octaves.
 pub const CUTOFF_OCT: f32 = 4.0;
-/// Extra detune of each unison pair at amount 100 %, cents.
 pub const DETUNE_CT: f32 = 30.0;
-/// LFO control period in samples (values are slewed / ramped in between).
 const CTRL: u32 = 8;
 
 param_table! {
@@ -99,8 +79,6 @@ param_table! {
     FilterEnvSustain => lin("filterEnvSustain", "Sustain", 0.0, 1.0, 0.2, "%", "Filter envelope"),
     FilterEnvRelease => logp("filterEnvRelease", "Release", 1.0, 10000.0, 250.0, "ms", "Filter envelope"),
     FilterKeyTrack => lin("filterKeyTrack", "Key tracking", 0.0, 1.0, 0.5, "%", "Filter envelope"),
-    // Wave 12.2b: two LFOs (appended; amounts default to 0 = off). Each block
-    // is shape, destination, amount, sync, rate, division, retrigger, fade.
     Lfo1Shape => choice("lfo1Shape", "Shape", &LFO_SHAPES, 0, "LFO 1"),
     Lfo1Dest => choice("lfo1Dest", "Destination", &LFO_DESTS, 0, "LFO 1"),
     Lfo1Amount => lin("lfo1Amount", "Amount", -1.0, 1.0, 0.0, "%", "LFO 1"),
@@ -140,28 +118,21 @@ pub fn descriptor() -> PluginDescriptor {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct OscCfg {
     shape: Shape,
-    /// frequency ratios of the two unison copies
     ratio: [f64; 2],
     level: f32,
-    /// (l, r) gains for the two copies (pan + unison gain folded in)
     gl: [f32; 2],
     gr: [f32; 2],
     phase: [f64; 2],
 }
 
-/// One LFO as the voices see it (rates are resolved per block).
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct LfoCfg {
     shape: usize,
     dest: usize,
-    /// -1..1 (0 = off)
     amount: f32,
     retrig: bool,
-    /// fade-in length in samples (0 = none)
     fade: f32,
-    /// cycles per sample in this block
     inc: f64,
-    /// free mode: LFO position in cycles at frame 0 of the chunk being rendered
     c0: f64,
     seed: u32,
 }
@@ -179,7 +150,6 @@ pub(crate) struct TriShared {
     lfo: [LfoCfg; 2],
 }
 
-/// Linear per-sample ramp toward a control-rate target.
 #[derive(Clone, Copy, Debug)]
 struct Ramp {
     cur: f32,
@@ -206,7 +176,6 @@ impl Ramp {
     }
 }
 
-/// Deterministic bipolar (-1..1) value for (seed, cycle index): splitmix64.
 #[inline]
 fn hash_bipolar(seed: u32, n: i64) -> f32 {
     let mut z = (n as u64).wrapping_add(((seed as u64) << 32) | seed as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
@@ -216,7 +185,6 @@ fn hash_bipolar(seed: u32, n: i64) -> f32 {
     (z >> 40) as f32 * (2.0 / 16_777_216.0) - 1.0
 }
 
-/// Bipolar LFO value at position `c` (cycles; the integer part counts cycles).
 #[inline]
 pub(crate) fn lfo_value(shape: usize, c: f64, seed: u32) -> f32 {
     let n = c.floor();
@@ -263,14 +231,9 @@ pub(crate) struct TriVoice {
     coef_count: u32,
     base_inc: f64,
     sr: f32,
-    // ── LFO state (untouched by the audio path while both amounts are 0) ──
-    /// frame within the chunk being rendered (song-locked LFOs)
     span: usize,
-    /// samples since note start (fade in)
     age: u32,
-    /// retrigger-mode LFO positions, cycles since note start
     lfo_c: [f64; 2],
-    /// slewed raw LFO values
     lfo_y: [f32; 2],
     amt_s: [Smooth; 2],
     id_seed: u32,
@@ -349,7 +312,6 @@ impl TriVoice {
 
     fn update_drift(&mut self, amount: f32) {
         for o in 0..3 {
-            // called every 32 samples: new target every ~0.5 s, ~0.3 s glide
             if self.rng.unit() < 0.0015 {
                 self.drift_tgt[o] = self.rng.bipolar();
             }
@@ -359,13 +321,11 @@ impl TriVoice {
         }
     }
 
-    /// True while any LFO amount (target or smoothed) is non-zero.
     #[inline]
     fn lfo_live(&self, sh: &TriShared) -> bool {
         sh.lfo[0].amount != 0.0 || sh.lfo[1].amount != 0.0 || self.amt_s[0].cur != 0.0 || self.amt_s[1].cur != 0.0
     }
 
-    /// Control-rate LFO step: evaluate both LFOs and set the modulation targets.
     fn lfo_control(&mut self, sh: &TriShared) {
         let snap = std::mem::replace(&mut self.lfo_snap, false);
         let (mut pitch, mut cut, mut amp, mut pan, mut det, mut mix) = (0.0f32, 0.0f32, 1.0f32, 0.0f32, 0.0f32, 0.0f32);
@@ -444,7 +404,6 @@ impl Voice for TriVoice {
         self.fade = 1.0;
         self.choking = false;
         self.active = true;
-        // LFOs: retrigger positions restart, fade restarts, values snap on the first control step
         self.note_pan = if n.extras.pan.is_finite() { n.extras.pan } else { 0.0 };
         self.age = 0;
         self.lfo_c = [0.0; 2];
@@ -556,7 +515,6 @@ impl Voice for TriVoice {
                     sr += v * cfg.gr[u];
                 }
             }
-            // filter
             let fe = self.fenv.next(&sh.fenv);
             if self.coef_count == 0 {
                 let base = self.cut_s.advance(8);
@@ -599,7 +557,6 @@ impl Voice for TriVoice {
             }
             l[i] += fl * g * pl;
             r[i] += fr * g * pr;
-            // LFO clocks run whether or not an LFO is in use (cheap; keeps phases right)
             self.lfo_c[0] += lfo_inc[0];
             self.lfo_c[1] += lfo_inc[1];
             self.span += 1;
@@ -612,17 +569,14 @@ impl Voice for TriVoice {
     }
 }
 
-/// Per-LFO rate settings (resolved into `LfoCfg::inc` every block).
 #[derive(Clone, Copy, Debug)]
 struct LfoRate {
     sync: bool,
     hz: f32,
-    /// Quarter notes per cycle (bar entries for 4/4; `bars` rescales them to the time signature).
     div: f64,
     bars: bool,
 }
 
-/// Instrument-level clock of a free-running LFO.
 #[derive(Clone, Copy, Debug, Default)]
 struct LfoClock {
     cycles: f64,
@@ -683,7 +637,6 @@ impl TriOsc {
         let pan_off = spread * 0.8;
         let base = [P::Osc1Shape as usize, P::Osc2Shape as usize, P::Osc3Shape as usize];
         for (o, &b) in base.iter().enumerate() {
-            // per-osc block: shape, coarse, fine, level, pan, phase
             let shape = Shape::from_index(p.idx(b));
             let semis = p.get(b + 1) as f64 + p.get(b + 2) as f64 / 100.0;
             let level = p.get(b + 3);
@@ -702,7 +655,6 @@ impl TriOsc {
         }
         let lfo_base = [P::Lfo1Shape as usize, P::Lfo2Shape as usize];
         for (k, &b) in lfo_base.iter().enumerate() {
-            // per-LFO block: shape, dest, amount, sync, rate, division, retrig, fade
             let cfg = &mut self.shared.lfo[k];
             cfg.shape = p.idx(b).min(LFO_SHAPES.len() - 1);
             cfg.dest = p.idx(b + 1).min(LFO_DESTS.len() - 1);
@@ -736,8 +688,6 @@ impl TriOsc {
         self.out.gain.set(db_to_gain(p.get(P::Gain as usize)));
     }
 
-    /// Resolve each LFO's rate for this block and its free-running position
-    /// at the block start (song-locked while the transport plays).
     fn clock_lfos(&mut self, ctx: &ProcessContext, frames: usize) {
         let sr = self.sr as f64;
         let bpm = sane_bpm(ctx.bpm);
@@ -746,7 +696,7 @@ impl TriOsc {
         for k in 0..2 {
             let mut rt = self.lfo_rate[k];
             if rt.bars && ctx.beats_per_bar.is_finite() && ctx.beats_per_bar > 0.0 {
-                rt.div = rt.div / 4.0 * ctx.beats_per_bar; // "1 bar" = the time signature's bar
+                rt.div = rt.div / 4.0 * ctx.beats_per_bar;
             }
             let clk = &mut self.clocks[k];
             let cfg = &mut self.shared.lfo[k];
@@ -756,7 +706,6 @@ impl TriOsc {
                 if rt.sync {
                     c = ctx.beat_pos / rt.div;
                 } else if !clk.was_playing || (ctx.beat_pos - clk.expect_beat).abs() > 1e-3 {
-                    // playback started or jumped: re-anchor to the song time
                     c = ctx.beat_pos * 60.0 / bpm * rt.hz as f64;
                 }
                 clk.expect_beat = ctx.beat_pos + frames as f64 * beats_per_sample;
@@ -810,7 +759,6 @@ impl Instrument for TriOsc {
         if self.pb.take_dirty() {
             self.update();
         }
-        // `instrument_process!`, plus advancing the free LFO position per chunk
         let frames = ctx.frames.min(out[0].len()).min(out[1].len());
         self.clock_lfos(ctx, frames);
         if self.out.fresh {

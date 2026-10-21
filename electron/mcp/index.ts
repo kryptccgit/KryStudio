@@ -1,18 +1,3 @@
-// Krypt Studio MCP server (research/04 §1-2, §7).
-//
-//   agent client ──stdio──▶ krypt-studio-mcp.exe (Rust shim) ──named pipe──▶ here
-//
-// - Pipe: \\.\pipe\krypt-studio-mcp-<user> on Windows, a Unix socket
-//   <tmp>/krypt-studio-mcp-<user>.sock on macOS / Linux (./endpoint.ts). Each connection is one MCP
-//   session speaking newline-delimited JSON-RPC (PipeTransport) served by
-//   the SDK's serveStdio(), which picks the 2026-07-28 or 2025 era.
-// - Auth: the first line must be {"krypt":"hello","token":…} with the token
-//   from userData/mcp.json (rewritten at every start), or the first JSON-RPC
-//   message must carry params._meta["cc.krypt/token"].
-// - userData/mcp-manifest.json holds the exact discovery answers so the shim
-//   can list tools while the app is closed.
-// - Kill switch: setEnabled(false) drops every connection and refuses calls.
-
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -78,17 +63,14 @@ interface Conn {
   calls: number;
   authed: boolean;
   close: (() => Promise<void>) | null;
-  /** File-access questions handed to the client (protocol 2026-07-28 input_required), awaiting its retry. */
   pendingConsent: Map<string, number>;
 }
 
 function appVersion(): string {
   try {
-    // dist-electron/main.js sits next to package.json in dev; packaged apps embed it.
     const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')) as { version?: string; name?: string };
     if (pkg.name === 'krypt-studio' && pkg.version) return pkg.version;
   } catch {
-    /* fall through */
   }
   return process.env.npm_package_version ?? '0.1.0';
 }
@@ -107,7 +89,6 @@ export function startMcp(deps: MainDeps): McpController {
   const gate = (): string | null =>
     enabled ? null : 'Krypt Studio has AI agent access turned off (the user flipped the kill switch in Settings → Agents). Ask them to turn it back on, then retry.';
 
-  // ── Files the shim reads ────────────────────────────────────────────
   const cfgFile = path.join(deps.userDataDir, 'mcp.json');
   const manifestFile = path.join(deps.userDataDir, 'mcp-manifest.json');
   const appArgs = process.defaultApp && process.argv[1] ? [path.resolve(process.argv[1])] : [];
@@ -124,7 +105,6 @@ export function startMcp(deps: MainDeps): McpController {
     .then((m) => writeAtomic(manifestFile, `${JSON.stringify(m, null, 1)}\n`))
     .catch((e) => deps.log('warn', `MCP: couldn't write the offline manifest: ${(e as Error).message}`));
 
-  // ── Status ──────────────────────────────────────────────────────────
   const status = (): McpStatus => ({
     enabled,
     pipeName: listening ? pipe : null,
@@ -138,11 +118,9 @@ export function startMcp(deps: MainDeps): McpController {
     try {
       deps.broadcast(MCP_CHANNELS.status, status());
     } catch {
-      /* best effort */
     }
   };
 
-  // ── Identity ────────────────────────────────────────────────────────
   const resolveActor = (c: Conn): AgentActor => {
     if (c.actor) return c.actor;
     const raw = c.rawName ?? c.hint ?? 'mcp-client';
@@ -177,7 +155,6 @@ export function startMcp(deps: MainDeps): McpController {
     }
   };
 
-  // ── Connections ─────────────────────────────────────────────────────
   const serveConnection = (c: Conn, initial: Buffer) => {
     c.authed = true;
     const transport = new PipeTransport(c.socket, initial, (m) => observe(c, m));
@@ -246,7 +223,6 @@ export function startMcp(deps: MainDeps): McpController {
     };
     socket.on('data', onHello);
     socket.on('error', () => {
-      /* closed below */
     });
     socket.on('close', () => {
       clearTimeout(timer);
@@ -286,7 +262,7 @@ export function startMcp(deps: MainDeps): McpController {
   server.listen(pipe, () => {
     if (process.platform !== 'win32') {
       try {
-        fs.chmodSync(pipe, 0o600); // only this user may connect (the token is the second lock)
+        fs.chmodSync(pipe, 0o600);
       } catch (e) {
         deps.log('warn', `MCP socket permissions: ${(e as Error).message}`);
       }
@@ -313,7 +289,6 @@ export function startMcp(deps: MainDeps): McpController {
       try {
         await c.close?.();
       } catch {
-        /* closing */
       }
       c.socket.destroy();
       conns.delete(c.id);

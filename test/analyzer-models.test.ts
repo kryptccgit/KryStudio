@@ -1,7 +1,3 @@
-// ModelManager against a local HTTP server: statuses, streaming progress,
-// SHA-256 verification (a mismatch installs nothing), atomic install,
-// cancel, stale .partial cleanup, the verification cache, install from
-// folder, remove, and the HTTPS-only rule.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -18,7 +14,6 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'kstudio-models-'));
 const sha = (b: Buffer | string) => crypto.createHash('sha256').update(b).digest('hex');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// ── Server ──────────────────────────────────────────────────────────────
 const FILES: Record<string, Buffer> = {
   'good/a.onnx': crypto.randomBytes(200_000),
   'good/b.json': Buffer.from('{"layers":4}'),
@@ -46,14 +41,12 @@ const server = http.createServer((req, res) => {
     };
     return tick();
   }
-  // Two chunks so progress fires more than once.
   res.write(body.subarray(0, Math.floor(body.length / 2)));
   setTimeout(() => res.end(body.subarray(Math.floor(body.length / 2))), 10);
 });
 await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
 const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-// ── Catalog ─────────────────────────────────────────────────────────────
 const lic = { name: 'MIT', url: 'https://example.com/LICENSE' };
 const file = (key: string, name: string, over: Partial<{ url: string; mirrors: string[]; sha256: string; bytes: number }> = {}) => ({
   name,
@@ -70,7 +63,6 @@ const CATALOG: ModelDef[] = [
   { id: 'slow', name: 'Slow Model', task: 'stems', description: 'd', license: lic, bundled: false, files: [file('slow/big.onnx', 'big.onnx')] },
   { id: 'local', name: 'Local Model', task: 'transcribe', description: 'd', license: lic, bundled: false, files: [{ name: 'local.onnx', url: '', sha256: sha(LOCAL), bytes: LOCAL.length }] },
   { id: 'nosha', name: 'Unfinished Model', task: 'beats', description: 'd', license: lic, bundled: false, files: [{ name: 'x.onnx', url: `${BASE}/x`, sha256: '', bytes: 0 }] },
-  // Primary 404s, first mirror serves different bytes (hash mismatch), second mirror is right.
   { id: 'mirrored', name: 'Mirrored Model', task: 'stems', description: 'd', license: lic, bundled: false, files: [file('good/a.onnx', 'a.onnx', { url: `${BASE}/gone/a.onnx`, mirrors: [`${BASE}/bad/w.onnx`, `${BASE}/good/a.onnx`] })] },
   { id: 'nowhere', name: 'Unreachable Model', task: 'stems', description: 'd', license: lic, bundled: false, files: [file('good/a.onnx', 'a.onnx', { url: `${BASE}/gone/1.onnx`, mirrors: [`${BASE}/gone/2.onnx`] })] },
   { id: 'bund', name: 'Bundled Model', task: 'transcribe', description: 'd', license: lic, bundled: true, default: true, files: [{ name: 'nmp.onnx', url: '', sha256: sha(BUNDLED), bytes: BUNDLED.length }] },
@@ -136,16 +128,13 @@ test('download: streaming progress, SHA-256 verified, atomic rename, manifest + 
   assert.ok(seen.length >= 1, 'downloading state with progress was visible');
   assert.ok(fs.existsSync(path.join(userDir, 'verified.json')));
 
-  // Already installed → no download.
   const before = hits;
   assert.equal((await m.install('good')).message, 'Good Model is already installed');
   assert.equal(hits, before);
 
-  // A fresh manager: installed straight from the size+mtime cache.
   const { m: m2 } = manager(userDir);
   await m2.refresh();
   assert.equal(statusOf(m2, 'good'), 'installed');
-  // Tampering (new size) is caught on the next refresh.
   fs.appendFileSync(path.join(dir, 'b.json'), ' ');
   const { m: m3, logs } = manager(userDir);
   await m3.refresh();
@@ -212,7 +201,6 @@ test('install from folder: hashes checked, copied atomically; wrong / missing fi
   r = await m.importModel('local', path.join(TMP, 'empty-dir-that-does-not-exist'));
   assert.match(r.message!, /The folder has no local\.onnx/);
 
-  // The picked folder may contain a sub-folder named after the model.
   const good = path.join(TMP, 'downloads');
   fs.mkdirSync(path.join(good, 'local'), { recursive: true });
   fs.writeFileSync(path.join(good, 'local', 'local.onnx'), LOCAL);
@@ -222,14 +210,13 @@ test('install from folder: hashes checked, copied atomically; wrong / missing fi
   assert.deepEqual(fs.readFileSync(path.join(userDir, 'local', 'local.onnx')), LOCAL);
   assert.ok(fs.existsSync(path.join(good, 'local', 'local.onnx')), 'the source is copied, not moved');
 
-  // Picker cancelled.
   const m2 = new ModelManager({ catalog: CATALOG, bundledDirs: [], userModelsDir: path.join(TMP, 'u6b'), log: () => {}, pickFolder: async () => null });
   assert.deepEqual(await m2.importModel('local'), { ok: false, message: 'No folder chosen' });
   assert.match((await m2.importModel('nosha', good)).message!, /isn't available in this version yet/);
 });
 
 test('remove: user-installed models go away; bundled ones refuse', async () => {
-  const userDir = path.join(TMP, 'u2'); // installed by the download test
+  const userDir = path.join(TMP, 'u2');
   const { m } = manager(userDir);
   await m.refresh();
   fs.rmSync(path.join(userDir, 'good'), { recursive: true, force: true });

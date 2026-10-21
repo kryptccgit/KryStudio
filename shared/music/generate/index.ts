@@ -1,8 +1,3 @@
-// MIDI generators (research/13-roadmap.md §12.1): rhythm, chords, arpeggio,
-// melody and bassline. Pure and seeded: the same inputs and seed always give
-// the same notes. shared/commands/generate.ts (notes.generate) is the only
-// path that writes their notes into a pattern.
-
 import type { GenContext, GenOutput } from './context';
 import type { GeneratorKind, GeneratorOptions } from './options';
 import { generateRhythm } from './rhythm';

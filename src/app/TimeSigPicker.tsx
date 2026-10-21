@@ -1,8 +1,3 @@
-// Transport time signature (Wave 12.2b): the "4/4" box next to the tempo.
-// Click → the common meters + a custom top / bottom number. One undo step
-// through transport.set; clips keep their positions in ticks (beats), so
-// bars re-count around them.
-
 import { useRef, useState } from 'react';
 import { formatTimeSig, sameTimeSig, timeSigProblem, TIME_SIG_DENOMINATORS, TIME_SIG_MAX_NUM, TIME_SIG_PRESETS } from '@shared/schema/meter';
 import type { TimeSig } from '@shared/schema/time';

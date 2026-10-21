@@ -1,7 +1,3 @@
-// Status-bar indicator for analyzer work: running jobs (analyze / separate
-// / transcribe) and model downloads. Compact: spinner + label + progress;
-// click → a popover listing every job with its own Cancel button.
-
 import { useMemo, useRef } from 'react';
 import { AudioWaveform, BrainCircuit, Download, Layers, Loader2, MicVocal, Piano, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -48,7 +44,6 @@ function JobRow({ a }: { a: Activity }) {
   );
 }
 
-/** The popover body (lives in the menu portal and follows the store). */
 function JobsPopover({ close }: { close: () => void }) {
   const list = useActivity();
   return (

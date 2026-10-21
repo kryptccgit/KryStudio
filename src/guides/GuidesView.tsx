@@ -1,13 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Guides on Home: a full-screen sidebar of articles (groups collapsible,
-// searchable) and a reading pane. Reached from the Home card, the corner
-// pill, and Help ▸ Guides / F1 while Home is up (with the Studio showing
-// they open the docked panel, ./GuidesPanel.tsx, instead). The article view
-// itself is shared with the panel (./GuideBody.tsx). Buttons in an article
-// run the same actions as the Home cards; generated blocks (shortcuts,
-// plugin tables, genre cards, sound kinds) are built from live data.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { ArrowLeft, BookOpen, ChevronRight, Clapperboard, PanelRightOpen, Search, X } from 'lucide-react';
 import { toast } from '../app/notify';
@@ -24,7 +14,6 @@ import { VIDEOS_ARTICLE } from './videos';
 
 export { ICONS } from './icons';
 
-/** Search box shared by both hosts: Esc clears first (the next Esc goes back), Enter opens the top hit. */
 export function GuideSearch({ query, setQuery, onEnter, className }: { query: string; setQuery: (q: string) => void; onEnter: () => void; className?: string }) {
   return (
     <label className={cls('relative', className)}>
@@ -53,7 +42,6 @@ export function GuideSearch({ query, setQuery, onEnter, className }: { query: st
   );
 }
 
-/** The narrow picker: every article, grouped. */
 export function GuidePicker({ value, onPick, className }: { value: string; onPick: (id: string) => void; className?: string }) {
   return (
     <select
@@ -78,10 +66,6 @@ export function GuidePicker({ value, onPick, className }: { value: string; onPic
   );
 }
 
-/**
- * Article changes and heading jumps in a scroll pane: a pending [[guide:id#heading]] scrolls to its heading (a
- * missing one toasts), otherwise the pane goes to `restore(id)` (the top, or the panel's remembered position).
- */
 export function useArticleScroll(variant: GuidesVariant, article: GuideArticle, paneRef: RefObject<HTMLDivElement>, searching: boolean, restore: (id: string) => number): void {
   const heading = useGuides((s) => s.heading);
   useEffect(() => {
@@ -176,7 +160,6 @@ export function GuidesView() {
               </button>
             )}
           </div>
-          {/* Narrow windows: a picker instead of the sidebar */}
           <GuidePicker value={article.id} onPick={(id) => pick(id)} className="md:hidden" />
         </div>
 

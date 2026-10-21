@@ -1,5 +1,3 @@
-// Factory ARP presets: short, tight notes built for fast 1/16 sequences.
-
 import type { InstrumentPreset } from '../../types';
 import { ALG, DIV, FM, HALL, PLATE, POS, ROOM, SH, T, TRI, WAVE, chorus, delay, eq, fm, preset, reverb, tri, wave } from './kit';
 

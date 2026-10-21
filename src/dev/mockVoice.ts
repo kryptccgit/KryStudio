@@ -1,9 +1,3 @@
-// Browser-preview Krypt Voice (window.krypt.voice without the desktop app), for `npm run dev:web` screenshots:
-// Kokoro "installed" with a few local voices, no Fish key until one is saved (any 16+ character key works, then
-// three Fish voices appear), Speak / Sing walk the stages with progress and honour Cancel, and Add to song places a
-// real audio clip in the in-page DocHost as ONE user undo step. Sing returns a believable syllable → note mapping
-// from the pattern's notes (shared/voice/singplan.ts via src/voice/sing.ts). Cloning needs the key + consent and returns a "mine" voice.
-
 import { USER, type DocHost } from '@shared/doc/DocHost';
 import type { ActionResult, KryptApi } from '@shared/types';
 import type { SingOutcome, SpeakOutcome, VoiceInfo, VoiceProgress, VoiceStage, VoiceState } from '@shared/voice/types';
@@ -58,7 +52,6 @@ export function createMockVoice(host: DocHost): KryptApi['voice'] {
     return null;
   }
 
-  /** Place the rendered "file" as one audio clip (one undo step). */
   function place(label: string, path: string, seconds: number, start: number, trackId?: string): { clipId: string; channelId: string } | string {
     const p = host.project;
     const g = host.beginGroup(USER, label);

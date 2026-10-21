@@ -1,6 +1,3 @@
-// edit_rack (electron/mcp/tools/racks.ts): change a rack in place through callTool against a real strict DocHost —
-// chains, pads, instruments, samples, devices, macro maps — as one undo step that rolls back when any op fails, a
-// "No change" when nothing moves, and the no-ops listing (chains, devices and macro maps with ids).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -146,7 +143,6 @@ test('drum rack: pads, samples, chokes, devices and macro maps in one undo step'
   assert.match(r.text!, /Hat \[[^\]]+\] · pad G#2 · Sampler \(Hat\) · -6\.0 dB · choke 1/);
   sound();
 
-  // Removing a device / chain takes its macro maps with it; unmap by target; undo puts everything back.
   const r2 = await call('edit_rack', {
     channel: 'Kit',
     ops: [
@@ -197,7 +193,6 @@ test('instrument rack: swap an instrument, set params, zones, move a device to a
   assert.equal(c1.deviceOrder.length, 0);
   sound();
 
-  // Effect rack on an insert: devices only.
   const fx = await call('build_rack', { kind: 'effect', insert: 'master', chains: [{ name: 'Dry' }, { name: 'Wet', devices: [{ effect: 'reverb' }] }] });
   assert.equal(fx.ok, true, fx.message);
   const e = await call('edit_rack', { insert: 'master', ops: [{ op: 'add_device', chain: 'Dry', effect: 'eq' }, { op: 'set_chain', chain: 'Wet', volume_db: -3 }] });

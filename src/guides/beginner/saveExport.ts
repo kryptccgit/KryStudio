@@ -1,4 +1,3 @@
-// Start here (step by step) · 5: save, open, export.
 import type { GuideArticle } from '../articles';
 
 export const SAVE_EXPORT: GuideArticle = {

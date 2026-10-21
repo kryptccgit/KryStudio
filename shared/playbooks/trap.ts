@@ -1,4 +1,3 @@
-// Trap: half-time hip-hop with a long distorted 808, rolling hats and sparse dark melodies.
 import type { Playbook } from './types';
 
 export const TRAP: Playbook = {

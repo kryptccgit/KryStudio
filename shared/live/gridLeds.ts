@@ -1,26 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Grid-controller LED feedback for the clip launcher (Wave 12.2b,
-// docs/ENGINE_PROTOCOL.md §14). Pure: main feeds it the project, the grid
-// settings and the engine's `launcherState`, and sends what changed with
-// `midiSend` to the output paired with the grid's input.
-//
-//   gridView()      → what every control of the 8×8 window shows (states)
-//   ledMap()        → the MIDI messages that set each control (per layout)
-//   ledChanges()    → only the controls that differ from what was sent
-//   pairLedOutput() → the output port of the grid's input device (by name)
-//
-// Launchpad (X / Mini MK3 / Pro MK3, programmer mode): note-on velocity =
-// palette index on channel 1 (static), channel 2 (flash between the ch-1
-// colour and this one), channel 3 (pulse). Pads are notes 11..88; the scene
-// column (19..89) and the top row (91..98) are Control Changes with the
-// same numbers. Programmer mode is entered with the SysEx in
-// `launchpadProgrammerMode` and left (Live mode) when the port closes.
-// APC mini (mk1): note-on velocity 0 off, 1 green, 2 green blink, 3 red,
-// 4 red blink, 5 yellow, 6 yellow blink on pads 0..63; scene (82..89) and
-// track (64..71) buttons are single LEDs (1 on, 2 blink).
-// Generic: note-on velocity 127 (lit) / 0, on the grid's channel.
-// ──────────────────────────────────────────────────────────────────────
-
 import type { LaunchGridSettings } from '../types';
 import type { LauncherLedState, MidiOutputInfo } from '../engine/protocol';
 import type { Project } from '../schema/project';
@@ -39,7 +16,6 @@ export interface GridView {
 
 export const EMPTY_LAUNCHER_STATE: LauncherLedState = { playing: {}, queued: {}, overridden: [], recording: false };
 
-/** What each control of the grid window shows, from the project and the launcher state. */
 export function gridView(p: Project, settings: LaunchGridSettings, st: LauncherLedState = EMPTY_LAUNCHER_STATE): GridView {
   const L = gridLayout(settings.layout, settings.baseNote);
   const tracks = p.playlist.trackOrder.slice(settings.trackOffset, settings.trackOffset + GRID_SIZE);
@@ -69,7 +45,6 @@ export function gridView(p: Project, settings: LaunchGridSettings, st: LauncherL
       if (c) rowClips.push({ trackId, clipId: c.id });
       view.pads.push({ row, col, note, state: c ? padState(trackId, c.id) : 'empty', color: c ? clipColor(c) : null });
     });
-    // The whole row (every track, not only the visible ones) decides the scene button.
     for (const c of Object.values(s?.clips ?? {})) if (c.sceneId === sceneId && !tracks.includes(c.trackId)) rowClips.push({ trackId: c.trackId, clipId: c.id });
     let state: SceneState = 'empty';
     if (rowClips.length) {
@@ -90,9 +65,6 @@ export function gridView(p: Project, settings: LaunchGridSettings, st: LauncherL
   return view;
 }
 
-// ── Launchpad palette ─────────────────────────────────────────────────
-
-/** Launchpad default palette, the saturated entries used to approximate clip colours (index → RGB). */
 export const LAUNCHPAD_PALETTE: ReadonlyArray<readonly [number, number, number, number]> = [
   [3, 255, 255, 255],
   [5, 255, 0, 0],
@@ -116,7 +88,6 @@ export const LP_RED = 5;
 export const LP_DIM_RED = 7;
 export const LP_GREEN = 21;
 
-/** Nearest palette index for a CSS hex colour (#rgb / #rrggbb); greys → white; null / invalid → white. */
 export function launchpadColor(hex: string | null | undefined): number {
   const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((hex ?? '').trim());
   if (!m) return LP_WHITE;
@@ -126,8 +97,7 @@ export function launchpadColor(hex: string | null | undefined): number {
   const b = parseInt(x.slice(4, 6), 16);
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
-  if (max < 24 || (max - min) / max < 0.2) return LP_WHITE; // too dark or grey: show it, in white
-  // Nearest hue (the pads are LEDs: a dim clip colour still lights up in its hue).
+  if (max < 24 || (max - min) / max < 0.2) return LP_WHITE;
   const h = hue(r, g, b);
   let best = LP_WHITE;
   let bestD = Infinity;
@@ -142,7 +112,6 @@ export function launchpadColor(hex: string | null | undefined): number {
   return best;
 }
 
-/** Hue in degrees (0..360) of an RGB colour. */
 function hue(r: number, g: number, b: number): number {
   const max = Math.max(r, g, b);
   const d = max - Math.min(r, g, b);
@@ -151,45 +120,35 @@ function hue(r: number, g: number, b: number): number {
   return (h * 60 + 360) % 360;
 }
 
-// ── Launchpad models (SysEx) ──────────────────────────────────────────
-
 export interface LaunchpadModel {
   id: 'lpx' | 'lpminimk3' | 'lppromk3';
   label: string;
-  /** SysEx device byte after the Novation header F0 00 20 29 02. */
   device: number;
   match: RegExp;
 }
 
-/** Models whose programmer-mode SysEx we send (Novation programmer's reference manuals). */
 export const LAUNCHPAD_MODELS: readonly LaunchpadModel[] = [
   { id: 'lpx', label: 'Launchpad X', device: 0x0c, match: /\bLPX\b|launchpad\s*x\b/i },
   { id: 'lpminimk3', label: 'Launchpad Mini MK3', device: 0x0d, match: /LPMiniMK3|launchpad\s*mini\s*mk3/i },
   { id: 'lppromk3', label: 'Launchpad Pro MK3', device: 0x0e, match: /LPProMK3|launchpad\s*pro\s*mk3/i },
 ];
 
-/** The model a port name belongs to (null = unknown: every model's SysEx is sent, the others ignore it). */
 export function launchpadModel(portName: string | null | undefined): LaunchpadModel | null {
   return LAUNCHPAD_MODELS.find((m) => m.match.test(portName ?? '')) ?? null;
 }
 
-/** F0 00 20 29 02 <device> 0E <1 = programmer | 0 = live> F7 for the port's model (all models when unknown). */
 export function launchpadProgrammerMode(portName: string | null | undefined, on: boolean): number[][] {
   const m = launchpadModel(portName);
   const models = m ? [m] : LAUNCHPAD_MODELS;
   return models.map((x) => [0xf0, 0x00, 0x20, 0x29, 0x02, x.device, 0x0e, on ? 1 : 0, 0xf7]);
 }
 
-// ── LED messages per layout ───────────────────────────────────────────
-
-/** Control key (`n36` = note 36, `c89` = CC 89) → the messages that set it. Covers every control the view has. */
 export type LedMap = Record<string, number[][]>;
 
 function launchpadMap(v: GridView): LedMap {
   const out: LedMap = {};
   const note = (n: number, look: number[][]) => (out[`n${n}`] = look.map(([st, vel]) => [0x90 | st, n, vel]));
   const cc = (n: number, look: number[][]) => (out[`c${n}`] = look.map(([st, vel]) => [0xb0 | st, n, vel]));
-  // [channel offset, velocity]: ch1 static, ch2 flash (to this colour from the ch-1 one), ch3 pulse.
   const still = (c: number) => [[0, c]];
   const flash = (from: number, to: number) => [[0, from], [1, to]];
   const pulse = (c: number) => [[2, c]];
@@ -201,7 +160,7 @@ function launchpadMap(v: GridView): LedMap {
       : p.state === 'queued' ? flash(c, LP_GREEN)
       : p.state === 'playing' ? pulse(LP_GREEN)
       : p.state === 'recording' ? pulse(LP_RED)
-      : flash(LP_OFF, c); // stopping
+      : flash(LP_OFF, c);
     note(p.note, look);
   }
   for (const s of v.scenes) {
@@ -222,7 +181,7 @@ function apcMap(v: GridView): LedMap {
   }
   for (const s of v.scenes) set(s.note, s.state === 'queued' ? 2 : s.state === 'playing' ? 1 : 0);
   for (const t of v.trackStops) set(t.note, t.state === 'stopping' ? 2 : t.state === 'playing' ? 1 : 0);
-  return out; // stop all is Shift: no LED
+  return out;
 }
 
 function genericMap(v: GridView, channel: number): LedMap {
@@ -235,7 +194,6 @@ function genericMap(v: GridView, channel: number): LedMap {
   return out;
 }
 
-/** Every control's LED messages for this layout. */
 export function ledMap(settings: LaunchGridSettings, v: GridView): LedMap {
   switch (settings.layout) {
     case 'launchpad':
@@ -247,7 +205,6 @@ export function ledMap(settings: LaunchGridSettings, v: GridView): LedMap {
   }
 }
 
-/** An all-off map for the same controls (clearing the grid when LEDs stop). */
 export function ledOff(map: LedMap): LedMap {
   const out: LedMap = {};
   for (const [k, msgs] of Object.entries(map)) {
@@ -257,7 +214,6 @@ export function ledOff(map: LedMap): LedMap {
   return out;
 }
 
-/** Messages for the controls whose look changed (`prev` null = send everything). Controls gone from `next` are switched off. */
 export function ledChanges(prev: LedMap | null, next: LedMap): number[][] {
   const out: number[][] = [];
   for (const [k, msgs] of Object.entries(next)) {
@@ -272,9 +228,6 @@ export function ledChanges(prev: LedMap | null, next: LedMap): number[][] {
   return out;
 }
 
-// ── Pairing the grid's input with an output port ──────────────────────
-
-/** Port name → comparison key: case, "MIDIIN2 (x)" / "MIDIOUT2 (x)", and in / out words don't matter. */
 export function portKey(name: string): string {
   return name
     .toLowerCase()
@@ -290,10 +243,6 @@ const LAYOUT_HINT: Record<LaunchGridSettings['layout'], RegExp | null> = {
   generic: null,
 };
 
-/**
- * The output to send LEDs to for a grid on input `inputId` (null = any input): the output with the same name,
- * else the same name key, else (any input) the only output that looks like the layout's device. Null = none found.
- */
 export function pairLedOutput(inputId: string | null, layout: LaunchGridSettings['layout'], outputs: readonly Pick<MidiOutputInfo, 'id' | 'name'>[]): string | null {
   const usable = outputs.filter((o) => !/wavetable|microsoft gs/i.test(o.name));
   if (inputId) {
@@ -310,7 +259,6 @@ export function pairLedOutput(inputId: string | null, layout: LaunchGridSettings
   return hits.length === 1 ? hits[0].id : null;
 }
 
-/** The LED port for these settings: explicit, none (null), or paired. */
 export function resolveLedOutput(settings: LaunchGridSettings, outputs: readonly Pick<MidiOutputInfo, 'id' | 'name'>[]): string | null {
   if (!settings.enabled || settings.ledOutput === null) return null;
   if (typeof settings.ledOutput === 'string' && settings.ledOutput) return settings.ledOutput;

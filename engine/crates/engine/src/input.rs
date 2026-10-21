@@ -1,12 +1,3 @@
-//! Audio input for recording and monitoring: a cpal input stream (WASAPI
-//! shared) owned by its own thread. The input callback:
-//!   - meters the selected channels (telemetry `inputPeak`),
-//!   - feeds the monitor ring (the core mixes it into the master bus),
-//!   - copies frames that fall inside the take's capture window (heard-time
-//!     range published by the audio thread, see record.rs) into a chunk ring.
-//! A writer thread drains the chunks into `<dir>/<name> take N.wav` (32-bit
-//! float, written as `.part` and renamed when complete) and reports the take.
-
 use crate::midi::now_ns;
 use crate::protocol::DeviceInfo;
 use crate::record::{CapWin, LiveShared};
@@ -21,7 +12,6 @@ use std::time::{Duration, Instant};
 
 pub const CHUNK_FLOATS: usize = 1024;
 const CHUNK_RING: usize = 512;
-/// Never pad more than this much leading silence (stream opened late).
 const MAX_PAD_SEC: f64 = 10.0;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -31,7 +21,6 @@ pub struct InputStatus {
     pub device_id: Option<String>,
     pub name: Option<String>,
     pub sample_rate: u32,
-    /// Selected device channels (0-based) recorded / monitored.
     pub channels: Vec<u16>,
     pub device_channels: u16,
     pub latency_ms: f64,
@@ -45,7 +34,6 @@ impl InputStatus {
     }
 }
 
-/// A finished (or failed) audio take.
 #[derive(Debug, Clone)]
 pub struct AudioDone {
     pub take: u32,
@@ -71,8 +59,6 @@ impl Chunk {
     }
 }
 
-/// Frames `[a, b)` of a buffer whose frame 0 was captured at `t0_ns` that lie
-/// inside the heard-time window `[from_ns, until_ns)` (`u64::MAX` = open).
 pub fn capture_range(t0_ns: u64, ns_per_frame: f64, frames: usize, from_ns: u64, until_ns: u64) -> (usize, usize) {
     let idx = |t: u64| -> usize {
         if t <= t0_ns {
@@ -85,8 +71,6 @@ pub fn capture_range(t0_ns: u64, ns_per_frame: f64, frames: usize, from_ns: u64,
     let b = if until_ns == u64::MAX { frames } else { idx(until_ns) };
     (a, b.max(a))
 }
-
-// ── Device listing ───────────────────────────────────────────────────────
 
 fn device_id(d: &cpal::Device) -> Option<String> {
     d.id().ok().map(|i| i.to_string())
@@ -112,8 +96,6 @@ pub fn list_input_devices() -> Result<Vec<DeviceInfo>, String> {
     Ok(out)
 }
 
-// ── Manager (control side) ───────────────────────────────────────────────
-
 enum InCmd {
     List(Sender<Result<Vec<DeviceInfo>, String>>),
     Open { id: Option<String>, channels: Vec<u16>, reply: Sender<InputStatus> },
@@ -126,9 +108,7 @@ enum InCmd {
 pub struct InputManager {
     tx: Sender<InCmd>,
     status: Arc<Mutex<InputStatus>>,
-    /// Finished takes (writer thread → control thread).
     pub done_rx: Receiver<AudioDone>,
-    /// Stream errors / losses (input thread → control thread).
     pub err_rx: Receiver<String>,
 }
 
@@ -295,9 +275,9 @@ impl InState {
     }
 
     fn close(&mut self) {
-        self.stream = None; // stops the callback first
+        self.stream = None;
         if let Some(w) = self.writer.take() {
-            w.close(); // finalizes a take that was still open
+            w.close();
         }
         self.live.input_open.store(false, Relaxed);
     }
@@ -419,8 +399,6 @@ fn latency_ns(info: &cpal::InputCallbackInfo) -> u64 {
     ts.callback.duration_since(ts.capture).as_nanos().min(u64::MAX as u128) as u64
 }
 
-// ── Input callback ───────────────────────────────────────────────────────
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Window {
     take: u32,
@@ -438,7 +416,6 @@ struct CapState {
     nsel: usize,
     dev_ch: usize,
     ns_per_frame: f64,
-    /// Capture windows in order: [0] is current.
     wins: [Option<Window>; 8],
     chunk: Chunk,
     lat_us: Arc<AtomicU32>,
@@ -532,7 +509,6 @@ impl CapState {
         self.lat_us.store((lat_ns / 1000).min(u32::MAX as u64) as u32, Relaxed);
         let t0 = now_ns().saturating_sub(lat_ns);
         let (s0, s1) = (self.sel[0], self.sel[1]);
-        // Meter.
         let (mut pl, mut pr) = (0f32, 0f32);
         for f in 0..frames {
             pl = pl.max(data[f * dch + s0].abs());
@@ -542,7 +518,6 @@ impl CapState {
             self.live.input_peak[0].fetch_max(pl.min(4.0).to_bits(), Relaxed);
             self.live.input_peak[1].fetch_max(pr.min(4.0).to_bits(), Relaxed);
         }
-        // Monitor (stereo: a mono selection is duplicated).
         if self.live.monitor.load(Relaxed) {
             if let Ok(mut tx) = self.mon_tx.try_lock() {
                 if tx.slots() >= frames * 2 {
@@ -553,7 +528,6 @@ impl CapState {
                 }
             }
         }
-        // Capture.
         self.pull_windows();
         let npf = self.ns_per_frame;
         let end_t = t0 + (frames as f64 * npf) as u64;
@@ -563,7 +537,6 @@ impl CapState {
             let a = a.max(i);
             if !w.started && b > a {
                 w.started = true;
-                // The stream started after the take did: pad so frame 0 stays at the take start.
                 if a == 0 && t0 > w.from {
                     let pad = (((t0 - w.from) as f64 / npf).round()).min(MAX_PAD_SEC * 1e9 / npf) as usize;
                     for _ in 0..pad * self.nsel {
@@ -587,14 +560,11 @@ impl CapState {
             }
             break;
         }
-        // Keep latency low: hand partial chunks over at the end of every callback.
         if self.chunk.len > 0 {
             self.flush(false);
         }
     }
 }
-
-// ── Writer thread ────────────────────────────────────────────────────────
 
 struct Active {
     take: u32,
@@ -677,7 +647,6 @@ fn writer_loop(mut rx: rtrb::Consumer<Chunk>, cmd: Receiver<WCmd>, done: Sender<
                     continue;
                 }
                 None => {
-                    // The control thread names the file when it sees the take start.
                     let since = *waiting_since.get_or_insert_with(Instant::now);
                     if since.elapsed() < Duration::from_secs(3) {
                         match cmd.recv_timeout(Duration::from_millis(20)) {
@@ -722,7 +691,6 @@ fn writer_loop(mut rx: rtrb::Consumer<Chunk>, cmd: Receiver<WCmd>, done: Sender<
     }
 }
 
-/// `<dir>/<name> take <n>.wav`, made unique with " (2)", " (3)"...
 pub fn take_path(dir: &Path, name: &str, take: u32) -> PathBuf {
     let clean: String = name.chars().map(|c| if r#"<>:"/\|?*"#.contains(c) || c.is_control() { '_' } else { c }).collect();
     let base = if clean.trim().is_empty() { "Recording".to_string() } else { clean.trim().to_string() };
@@ -741,19 +709,14 @@ mod tests {
 
     #[test]
     fn capture_range_selects_the_heard_window() {
-        let npf = 1e9 / 48000.0; // ≈ 20833 ns per frame
+        let npf = 1e9 / 48000.0;
         let t0 = 1_000_000_000u64;
-        // Window opens 10 frames into the buffer, still open.
         let from = t0 + (10.0 * npf) as u64;
         assert_eq!(capture_range(t0, npf, 480, from, u64::MAX), (10, 480));
-        // Window opened earlier: everything.
         assert_eq!(capture_range(t0, npf, 480, t0 - 5, u64::MAX), (0, 480));
-        // Window not open yet.
         assert_eq!(capture_range(t0, npf, 480, t0 + (1000.0 * npf) as u64, u64::MAX), (480, 480));
-        // Window closes at frame 100.
         let until = t0 + (100.0 * npf) as u64;
         assert_eq!(capture_range(t0, npf, 480, t0 - 5, until), (0, 100));
-        // Already closed.
         assert_eq!(capture_range(t0, npf, 480, t0 - 1000, t0 - 10), (0, 0));
     }
 
@@ -781,31 +744,25 @@ mod tests {
     #[test]
     fn input_callback_captures_only_inside_the_window() {
         crate::midi::init_clock();
-        // Stereo device, record channel 2 only (mono take).
         let (mut cap, mut wtx, mut crx, live) = cap_for_test(&[1], 2);
-        let data: Vec<f32> = (0..960).map(|i| if i % 2 == 1 { 0.5 } else { -0.25 }).collect(); // 480 frames
-        // No window: nothing captured, but the meter moves.
+        let data: Vec<f32> = (0..960).map(|i| if i % 2 == 1 { 0.5 } else { -0.25 }).collect();
         cap.on_data(&data, 0);
         assert_eq!(drain(&mut crx).0.len(), 0);
         assert!(f32::from_bits(live.input_peak[0].load(Relaxed)) > 0.49);
-        // A window that started long ago and ends long ago → empty take with an end marker.
         let now = now_ns();
         wtx.push(CapWin::Begin { take: 1, from_ns: now.saturating_sub(10_000_000_000) }).unwrap();
         wtx.push(CapWin::End { take: 1, until_ns: now.saturating_sub(9_000_000_000) }).unwrap();
         cap.on_data(&data, 0);
         let (_, ends) = drain(&mut crx);
         assert_eq!(ends, 1);
-        // An open window from "now - 1 s": the whole buffer is captured, channel 2 only.
         let now = now_ns();
         wtx.push(CapWin::Begin { take: 2, from_ns: now.saturating_sub(1_000) }).unwrap();
         cap.on_data(&data, 0);
         let (v, ends) = drain(&mut crx);
         assert_eq!(ends, 0);
-        // The whole buffer (channel 2 only), after at most a few frames of alignment padding.
         assert!(v.len() >= 480, "{}", v.len());
         let pad = v.len() - 480;
         assert!(v[..pad].iter().all(|x| *x == 0.0) && v[pad..].iter().all(|x| *x == 0.5));
-        // End it in the past → the next callback only emits the end marker.
         wtx.push(CapWin::End { take: 2, until_ns: now }).unwrap();
         cap.on_data(&data, 0);
         let (v, ends) = drain(&mut crx);
@@ -816,13 +773,12 @@ mod tests {
     fn late_stream_pads_leading_silence() {
         crate::midi::init_clock();
         while now_ns() < 50_000_000 {
-            std::thread::sleep(Duration::from_millis(5)); // the clock must be past the window start
+            std::thread::sleep(Duration::from_millis(5));
         }
         let (mut cap, mut wtx, mut crx, _live) = cap_for_test(&[0, 1], 2);
         let now = now_ns();
-        // The take began 10 ms before this buffer was captured → 480 frames of padding.
         wtx.push(CapWin::Begin { take: 7, from_ns: now - 10_000_000 }).unwrap();
-        let data = vec![1.0f32; 96]; // 48 stereo frames
+        let data = vec![1.0f32; 96];
         cap.on_data(&data, 0);
         let (v, _) = drain(&mut crx);
         let frames = v.len() / 2;

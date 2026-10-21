@@ -1,15 +1,3 @@
-//! krypt-studio-pluginhost — runs third-party VST3 and CLAP plugins OUT OF
-//! the audio engine's process, so a crashing or hanging plugin can never
-//! take down the engine or the app (research/03 §2.3, §2.5).
-//!
-//!   krypt-studio-pluginhost --serve [--parent-pid <pid>]
-//!       Host plugins for the engine: NDJSON control on stdin/stdout, audio
-//!       through per-instance shared memory (see krypt-studio-pluginclient).
-//!   krypt-studio-pluginhost --scan <file.vst3|file.clap>
-//!       Describe the plugins in one file as JSON lines on stdout.
-//!
-//! VST2 is not supported (no licence is obtainable; research/03 §2.1).
-
 #![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 
 #[cfg(windows)]

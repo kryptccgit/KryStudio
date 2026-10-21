@@ -1,15 +1,8 @@
-//! LFO shapes and a tempo-aware phase source shared by the modulation
-//! effects and synths. A synced phase is derived from the song position
-//! while the transport plays, so it lands on the same point of the bar on
-//! every pass; otherwise it free-runs.
-
 use super::TAU;
 use crate::ProcessContext;
 
-/// LFO shape names (index = shape id).
 pub const LFO_SHAPES: [&str; 5] = ["Sine", "Triangle", "Saw up", "Saw down", "Square"];
 
-/// Bipolar (-1..1) LFO value for a phase in cycles (0..1).
 #[inline]
 pub fn shape(kind: usize, phase: f64) -> f32 {
     let t = phase as f32;
@@ -28,7 +21,6 @@ pub fn shape(kind: usize, phase: f64) -> f32 {
     }
 }
 
-/// Tempo guard: non-finite or absurd tempos fall back to 120 bpm.
 #[inline]
 pub fn sane_bpm(bpm: f64) -> f64 {
     if bpm.is_finite() && bpm >= 1.0 {
@@ -38,8 +30,6 @@ pub fn sane_bpm(bpm: f64) -> f64 {
     }
 }
 
-/// Phase accumulator in cycles. Call `begin` once per block, then `next`
-/// once per sample.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TempoPhase {
     pub phase: f64,
@@ -51,7 +41,6 @@ pub struct TempoPhase {
 }
 
 impl TempoPhase {
-    /// `div_beats`: cycle length in beats when synced; `rate_hz` otherwise.
     pub fn begin(&mut self, ctx: &ProcessContext, sr: f32, sync: bool, div_beats: f64, rate_hz: f32) {
         let bps = sane_bpm(ctx.bpm) / 60.0 / sr as f64;
         self.div = if div_beats.is_finite() { div_beats.max(1e-6) } else { 1.0 };
@@ -91,7 +80,6 @@ mod tests {
         let mut p = TempoPhase::default();
         p.begin(&ctx, 48000.0, true, 1.0, 1.0);
         assert!((p.next() - 0.5).abs() < 1e-9);
-        // free-running when stopped
         let ctx = ProcessContext { playing: false, ..ctx };
         let mut p = TempoPhase::default();
         p.begin(&ctx, 48000.0, false, 1.0, 480.0);

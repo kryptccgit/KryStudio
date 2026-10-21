@@ -1,10 +1,3 @@
-// The JavaScript evaluated inside the QuickJS sandbox before a script: it
-// builds run(ctx)'s argument from the JSON main passes in (rand, helpers,
-// log) and serialises what run() returns. It runs INSIDE the sandbox, so it
-// has no host access either; nothing here is a security boundary (that is
-// QuickJS + the limits in sandbox.ts). Deterministic: rand is seeded and
-// Math.random is replaced by it; Date is not in the sandbox at all.
-
 export const PRELUDE_FILE = 'krypt-prelude.js';
 export const SCRIPT_FILE = 'script.js';
 export const RUNNER_FILE = 'krypt-run.js';

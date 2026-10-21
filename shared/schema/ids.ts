@@ -1,7 +1,3 @@
-// Short, sortable, collision-resistant ids: `<prefix>_<time36><rand>`.
-// Prefixes make ids self-describing in patches, logs and MCP tool output
-// (ch_, pat_, n_, clip_, trk_, ins_, fx_, smp_, aut_, pt_).
-
 let lastMs = 0;
 let seq = 0;
 

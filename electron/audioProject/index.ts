@@ -1,8 +1,3 @@
-// One AudioProjectService per document: the IPC handlers (File ▸ Open audio
-// as project) and the MCP tools (audio_to_project, build_from_reference)
-// share it, so one conversion runs at a time and Cancel reaches it from
-// either side. Tests register their own (fake cores) with setAudioProject.
-
 import type { DocHost } from '@shared/doc/DocHost';
 import type { MainDeps } from '../mcp/types';
 import { matchSounds, presetLookup } from '../sounds/fingerprints';
@@ -15,7 +10,6 @@ export type { Prepared, PrepareOptions, PipelineRun } from './service';
 
 const SERVICES = new WeakMap<DocHost, AudioProjectService>();
 
-/** match-core over the factory fingerprint index (+ installed pack samples). */
 export function defaultMatcher(deps: MainDeps): SoundMatcher {
   return async (fps, target) => {
     const r = await matchSounds(deps, fps, target, { limit: 5, preset: presetLookup(deps) });
@@ -23,7 +17,6 @@ export function defaultMatcher(deps: MainDeps): SoundMatcher {
   };
 }
 
-/** The service for this document (made on first use with the shipped cores). */
 export function audioProjectFor(deps: MainDeps): AudioProjectService {
   let s = SERVICES.get(deps.doc);
   if (!s) {
@@ -33,12 +26,10 @@ export function audioProjectFor(deps: MainDeps): AudioProjectService {
   return s;
 }
 
-/** The document's service if one was made (the project tabs read its busy label), without making one. */
 export function peekAudioProject(doc: DocHost): AudioProjectService | null {
   return SERVICES.get(doc) ?? null;
 }
 
-/** Tests: use this service for the document. */
 export function setAudioProject(doc: DocHost, s: AudioProjectService): void {
   SERVICES.set(doc, s);
 }

@@ -1,10 +1,7 @@
-// Factory KEYS and PIANO presets: e-pianos, organs, clavs, poly keys and FM piano approximations.
-
 import type { InstrumentPreset } from '../../types';
 import { ALG, DIV, FM, HALL, PLATE, ROOM, SH, T, TAPE, TRI, TUBE, WAVE, chorus, comp, delay, drive, eq, fm, phaser, preset, reverb, tri, wave } from './kit';
 import type { Op } from './kit';
 
-/** The tine e-piano: op1 body carrier ← op2 (1:1), op3 tine carrier ← op4 (14:1). */
 function ep(o: { gain: number; body: number; tine: number; tineDecay?: number; bodyDecay?: number; cutoff?: number }): ReturnType<typeof fm> {
   const ops: [Op, Op, Op, Op] = [
     { ratio: 1, level: 0.85, vel: 0.7, a: 1, d: o.bodyDecay ?? 4500, s: 0, r: 500 },
@@ -168,7 +165,6 @@ export const KEYS_PRESETS: InstrumentPreset[] = [
     range: [40, 88],
   }),
 
-  // ── Piano (FM approximations: honest, playable, not sampled) ──
   preset({
     id: 'factory:piano/fm-grand',
     name: 'FM Grand',

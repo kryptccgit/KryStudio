@@ -1,28 +1,17 @@
-// Which of Krypt Studio's genres a reference song is closest to: tempo (any
-// half / double reading), the drum pattern against each playbook's own KPN
-// drums (kick and snare placement, hat density) and swing. An estimate with
-// reasons, for the agent to weigh with the user's words and its own ears
-// (render_preview); within a family (house / deep house / tech house) it is
-// a hint at best. Pure.
-
 import type { DrumGrid } from '../library/types';
 import type { Playbook } from '../playbooks/types';
 import { genreInfo, type GenreId } from '../sounds/genres';
 import { cosine, gridSteps16, hitsPerBar, playbookDrums } from './drums';
 import type { GenreGuess } from './types';
 
-/** Readings within this share outside a playbook's range still count as its tempo. */
 const RANGE_SLACK = 0.06;
 
 export interface TempoReading {
   bpm: number;
-  /** bpm / detected: 1, 2 or 0.5. */
   factor: number;
-  /** Inside the playbook's range (with a little slack). */
   inRange: boolean;
 }
 
-/** The reading of a detected tempo (as is, double or half) that suits a playbook best. */
 export function readingFor(pb: Pick<Playbook, 'bpm'>, detected: number): TempoReading {
   const cands = [1, 2, 0.5].map((f) => ({ f, bpm: detected * f })).filter((c) => c.bpm >= 40 && c.bpm <= 250);
   const lo = pb.bpm.min * (1 - RANGE_SLACK);
@@ -40,12 +29,10 @@ function tempoFit(pb: Playbook, r: TempoReading): number {
 
 export interface GenreInput {
   detectedBpm: number | null;
-  /** 0..1 on the transport scale, measured at the detected tempo's 16ths. */
   swing: number | null;
   grid: DrumGrid | null;
 }
 
-/** Playbooks ranked by how well the reference fits them (score 0..1 with reasons), best first. */
 export function guessGenres(input: GenreInput, playbooks: readonly Playbook[], limit = 3): GenreGuess[] {
   const bpm = input.detectedBpm;
   if (!bpm || !Number.isFinite(bpm) || bpm <= 0) return [];
@@ -69,12 +56,10 @@ export function guessGenres(input: GenreInput, playbooks: readonly Playbook[], l
       if (kick >= 0.8) why.push('kick pattern matches');
       if (snare >= 0.8) why.push('snare / clap placement matches');
       else if (snare < 0.4) why.push('snare / clap placement differs');
-      // Swing is measured on the detected tempo's 16ths: it only compares at that reading.
       const sw = r.factor === 1 && input.swing !== null ? 1 - Math.min(1, Math.abs(input.swing * 100 - pb.swing) / 40) : 0.6;
       score = 0.42 * t + 0.48 * drums + 0.1 * sw;
     } else {
       const sw = r.factor === 1 && input.swing !== null ? 1 - Math.min(1, Math.abs(input.swing * 100 - pb.swing) / 40) : 0.6;
-      // Without drums the tempo alone can't tell much apart: keep the scores modest.
       score = 0.6 * (0.8 * t + 0.2 * sw);
     }
     out.push({ id: pb.id, score: Math.round(score * 100) / 100, bpm: r.bpm, why });
@@ -82,7 +67,6 @@ export function guessGenres(input: GenreInput, playbooks: readonly Playbook[], l
   return out.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : 1)).slice(0, Math.max(1, limit));
 }
 
-/** "trap 0.82 (tempo 140 in 130-170, kick pattern matches)". */
 export function guessLine(g: GenreGuess): string {
   return `${genreInfo(g.id).name} ${g.score.toFixed(2)} (${g.why.join(', ')})`;
 }

@@ -1,5 +1,3 @@
-// Piano roll note tools (shared/commands/noteTools.ts) + the wave-2 schema
-// additions (Note.mute / Note.color / Channel.group).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { DocHost, USER } from '@shared/doc/DocHost';
@@ -15,7 +13,7 @@ function fresh() {
   const p = createDefaultProject('Tools');
   const host = new DocHost(p, CATALOG, { strict: true });
   const pat = p.transport.activePatternId!;
-  const ch = p.channelOrder[5]; // a melodic channel
+  const ch = p.channelOrder[5];
   return { host, pat, ch };
 }
 
@@ -33,8 +31,6 @@ function setup(notes: In[]) {
 
 const brief = (ns: Note[]) => ns.map((n) => [n.tick, n.key, n.dur]);
 
-// ── quantize ──────────────────────────────────────────────────────────
-
 test('quantize starts keeps length; strength pulls part way; ends snaps lengths', () => {
   const s = setup([
     { tick: 250, key: 60, dur: 200 },
@@ -51,7 +47,6 @@ test('quantize starts keeps length; strength pulls part way; ends snaps lengths'
   const e = setup([{ tick: 0, key: 60, dur: 200 }]);
   e.exec('notes.quantize', { grid: 240, starts: false, ends: true });
   assert.deepEqual(brief(e.list()), [[0, 60, 240]]);
-  // a tiny note never collapses to zero: at least one grid cell
   const z = setup([{ tick: 0, key: 60, dur: 30 }]);
   z.exec('notes.quantize', { grid: 240, ends: true });
   assert.deepEqual(brief(z.list()), [[0, 60, 240]]);
@@ -59,15 +54,13 @@ test('quantize starts keeps length; strength pulls part way; ends snaps lengths'
 });
 
 test('quantize with swing targets delayed odd grid lines', () => {
-  assert.equal(swungGridLine(250, 240, 0.5), 300); // line 1 at 240 + 60
-  assert.equal(swungGridLine(470, 240, 0.5), 480); // even line unaffected
+  assert.equal(swungGridLine(250, 240, 0.5), 300);
+  assert.equal(swungGridLine(470, 240, 0.5), 480);
   const s = setup([{ tick: 230, key: 60, dur: 100 }]);
   s.exec('notes.quantize', { grid: 240, swing: 1 });
   assert.equal(s.list()[0].tick, 360);
   assert.equal(s.host.getHistory().length, 2, 'one undo step per tool');
 });
-
-// ── chop / glue / legato ──────────────────────────────────────────────
 
 test('chop into pieces and by grid keeps properties and returns every piece', () => {
   const s = setup([{ tick: 0, key: 60, dur: 960, vel: 0.5 }]);
@@ -128,8 +121,6 @@ test('glue merges touching same-pitch notes; legato fills gaps to the next posit
   assert.equal(setup([{ tick: 0, key: 60 }]).exec('notes.legato', {}).ok, false);
 });
 
-// ── strum / arpeggiate ────────────────────────────────────────────────
-
 test('strum spreads chords up / down / alternate, keeping ends by default', () => {
   const chord = [
     { tick: 0, key: 60, dur: 960 },
@@ -187,8 +178,6 @@ test('arpeggiate: patterns, rate, gate, octaves, chord expansion, seeded random'
   assert.equal(o.exec('notes.arpeggiate', { chord: 'nope' }).ok, false);
 });
 
-// ── randomize / flip / scale snap / limit / levels ────────────────────
-
 test('randomize is reproducible, bounded and stays in the scale', () => {
   const notes = Array.from({ length: 16 }, (_, i) => ({ tick: i * 240, key: 60 + (i % 7), dur: 200, vel: 0.5 }));
   const a = setup(notes);
@@ -222,19 +211,19 @@ test('flip horizontal / vertical (also by scale degree)', () => {
   s.exec('notes.flip', { axis: 'vertical' });
   assert.deepEqual(s.list().map((n) => n.key), [60, 67]);
   const sc = setup([
-    { tick: 0, key: 60, dur: 240 }, // C (deg 0)
-    { tick: 240, key: 62, dur: 240 }, // D (deg 1)
-    { tick: 480, key: 67, dur: 240 }, // G (deg 4)
+    { tick: 0, key: 60, dur: 240 },
+    { tick: 240, key: 62, dur: 240 },
+    { tick: 480, key: 67, dur: 240 },
   ]);
   sc.exec('notes.flip', { axis: 'vertical', scale: { root: 0, scale: 'major' } });
-  assert.deepEqual(sc.list().map((n) => n.key), [67, 65, 60]); // G, F, C
+  assert.deepEqual(sc.list().map((n) => n.key), [67, 65, 60]);
 });
 
 test('scale snap, limit range and level shapes', () => {
   const s = setup([
-    { tick: 0, key: 61, dur: 240 }, // C#
-    { tick: 240, key: 63, dur: 240 }, // D#
-    { tick: 480, key: 64, dur: 240 }, // E (in key)
+    { tick: 0, key: 61, dur: 240 },
+    { tick: 240, key: 63, dur: 240 },
+    { tick: 480, key: 64, dur: 240 },
   ]);
   const r = s.exec<{ changed: number }>('notes.scaleSnap', { root: 0, scale: 'major' });
   assert.equal(r.data!.changed, 2);
@@ -266,8 +255,6 @@ test('scale snap, limit range and level shapes', () => {
   assert.equal(lfoWave('saw', 0), -1);
 });
 
-// ── mute / colour / slide flags ───────────────────────────────────────
-
 test('setProps toggles mute and slide, sets colour groups, and the engine sees mute', () => {
   const s = setup([
     { tick: 0, key: 60, dur: 240 },
@@ -277,7 +264,6 @@ test('setProps toggles mute and slide, sets colour groups, and the engine sees m
   const r = s.exec<{ mute: boolean }>('notes.setProps', { ids: [s.ids[0]], mute: 'toggle' });
   assert.equal(r.data!.mute, true);
   assert.equal(s.host.project.patterns[s.pat].notes[s.ch][s.ids[0]].mute, true);
-  // toggling a mixed selection mutes all; toggling again unmutes (and drops the key)
   s.exec('notes.setProps', { mute: 'toggle' });
   assert.ok(s.list().every((n) => n.mute === true));
   s.exec('notes.setProps', { mute: 'toggle' });
@@ -288,9 +274,7 @@ test('setProps toggles mute and slide, sets colour groups, and the engine sees m
   assert.ok(s.list().every((n) => !('color' in n)));
   assert.equal(s.exec('notes.setProps', { color: 16 }).ok, false);
   assert.equal(s.exec('notes.setProps', {}).ok, false);
-  // notes.update also accepts the new fields
   assert.equal(s.exec('notes.update', { updates: [{ id: s.ids[1], mute: true, color: 2 }] }).ok, true);
-  // the engine projection resends the whole pattern including the flag
   const diff = projectPatches(s.host.project, [{ op: 'replace', path: ['patterns', s.pat, 'notes', s.ch, s.ids[1], 'mute'], value: true }]);
   const sent = diff.upserts[0].value as { notes: Record<string, Record<string, Note>> };
   assert.equal(sent.notes[s.ch][s.ids[1]].mute, true);
@@ -325,12 +309,9 @@ test('every tool rejects a bad note id and an empty channel cleanly', () => {
   assert.match(r.message!, /No notes to quantize/);
 });
 
-// ── schema additions + load-time migration ────────────────────────────
-
 test('schema: v1 files without mute/color/group still load; new fields round-trip and are validated', () => {
   const p = createDefaultProject('Mig');
   assert.equal(p.schemaVersion, SCHEMA_VERSION);
-  // An older v1 file has none of the optional wave-2 fields.
   const old = JSON.parse(JSON.stringify(p));
   const loaded = validateProject(old);
   assert.equal(Object.values(loaded.channels).some((c) => 'group' in c), false);

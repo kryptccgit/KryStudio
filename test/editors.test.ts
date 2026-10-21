@@ -1,5 +1,3 @@
-// Pure editor logic: viewport math, snapping, culling / hit-testing,
-// clipboard and agent-glow diffing (src/editors/*).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { PPQ, TICKS_PER_STEP } from '@shared/schema/time';
@@ -29,8 +27,6 @@ const TS44 = { num: 4, den: 4 };
 const BAR = PPQ * 4;
 const near = (a: number, b: number, eps = 1e-6) => assert.ok(Math.abs(a - b) <= eps, `${a} ≉ ${b}`);
 
-// ── viewport ──────────────────────────────────────────────────────────
-
 test('tick ↔ x round-trips', () => {
   const v = { scrollTick: 1000, pxPerTick: 0.1 };
   assert.equal(tickToX(v, 1000), 0);
@@ -45,11 +41,9 @@ test('zoomAt keeps the tick under the cursor fixed and clamps', () => {
   const z = zoomAt(v, anchorX, 2, 0.001, 1);
   near(z.pxPerTick, 0.1);
   near(xToTick(z, anchorX), before);
-  // clamped at max zoom
   const big = zoomAt(v, anchorX, 1000, 0.001, 0.2);
   assert.equal(big.pxPerTick, 0.2);
   near(xToTick(big, anchorX), before);
-  // zooming out near the start never scrolls negative
   const out = zoomAt({ scrollTick: 10, pxPerTick: 0.1 }, 500, 0.1, 0.001, 1);
   assert.ok(out.scrollTick >= 0);
 });
@@ -63,7 +57,7 @@ test('wheel zoom factor is symmetric and bounded', () => {
 test('clampScroll', () => {
   assert.equal(clampScroll(-5, 100, 50), 0);
   assert.equal(clampScroll(80, 100, 50), 50);
-  assert.equal(clampScroll(20, 10, 50), 0); // content smaller than view
+  assert.equal(clampScroll(20, 10, 50), 0);
 });
 
 test('key rows: key ↔ y and visible range', () => {
@@ -106,10 +100,8 @@ test('edge auto-scroll step', () => {
   assert.equal(edgeScrollStep(100, 0, 200), 0);
   assert.ok(edgeScrollStep(2, 0, 200) < 0);
   assert.ok(edgeScrollStep(199, 0, 200) > 0);
-  assert.ok(edgeScrollStep(-500, 0, 200) >= -22); // capped
+  assert.ok(edgeScrollStep(-500, 0, 200) >= -22);
 });
-
-// ── snapping ──────────────────────────────────────────────────────────
 
 test('snap grid sizes (4/4 and 6/8)', () => {
   assert.equal(snapTicks('bar', TS44), BAR);
@@ -129,7 +121,7 @@ test('snapTo modes', () => {
   assert.equal(snapTo(361, 240), 480);
   assert.equal(snapTo(479, 240, 'floor'), 240);
   assert.equal(snapTo(241, 240, 'ceil'), 480);
-  assert.equal(snapTo(959.99999999, 960, 'floor'), 960); // float noise
+  assert.equal(snapTo(959.99999999, 960, 'floor'), 960);
   assert.equal(snapTo(12.6, 1), 13);
 });
 
@@ -140,24 +132,19 @@ test('cellStart places notes at the start of the clicked cell; Alt = free', () =
 });
 
 test('snapMoveDelta snaps the grabbed item, keeps all starts >= 0', () => {
-  // note at 250 dragged by +200 → start lands on 480 (round of 450)
   assert.equal(snapMoveDelta(250, 200, 240, 250), 230);
-  // bypass (Alt) moves freely
   assert.equal(snapMoveDelta(250, 200, 240, 250, true), 200);
-  // dragging left past 0: the earliest selected item stops at 0
   assert.equal(snapMoveDelta(960, -5000, 240, 480), -480);
 });
 
 test('resize edges snap with a one-cell minimum', () => {
   assert.equal(snapResizeEnd(0, 500, 240), 480);
-  assert.equal(snapResizeEnd(480, 300, 240), 240); // can't go below one cell
+  assert.equal(snapResizeEnd(480, 300, 240), 240);
   assert.equal(snapResizeEnd(0, 7, 240, true), 7);
   assert.deepEqual(snapResizeStart(960, 230, 240), { start: 240, len: 720 });
   assert.deepEqual(snapResizeStart(960, 950, 240), { start: 720, len: 240 });
   assert.deepEqual(snapResizeStart(100, -50, 240), { start: 0, len: 100 });
 });
-
-// ── span index / hit-testing ──────────────────────────────────────────
 
 function note(id: string, tick: number, dur: number, key: number): Note {
   return defaultNote({ id, tick, dur, key });
@@ -187,22 +174,20 @@ test('edgeZone: edges are ±px, capped at a third of the width', () => {
   assert.equal(edgeZone(102, 100, 200, 5), 'left');
   assert.equal(edgeZone(150, 100, 200, 5), 'body');
   assert.equal(edgeZone(197, 100, 200, 5), 'right');
-  // tiny note: 9 px wide → 3 px zones, middle is body
   assert.equal(edgeZone(104.5, 100, 109, 5), 'body');
 });
 
 test('hitNote finds the note under (tick, key) with zones; later notes win', () => {
   const ns = [note('a', 0, 960, 60), note('b', 960, 480, 60), note('c', 480, 960, 62)];
   const idx = new SpanIndex(ns, (n) => n.tick, (n) => n.dur);
-  const px = 0.1; // 96 px per beat
+  const px = 0.1;
   assert.equal(hitNote(idx, 300, 60, px)?.note.id, 'a');
   assert.equal(hitNote(idx, 300, 60, px)?.zone, 'body');
-  assert.equal(hitNote(idx, 950, 60, px)?.zone, 'right'); // 1 px before a's end
+  assert.equal(hitNote(idx, 950, 60, px)?.zone, 'right');
   assert.equal(hitNote(idx, 1000, 60, px)?.note.id, 'b');
   assert.equal(hitNote(idx, 300, 61, px), null);
   assert.equal(hitNote(idx, 600, 62, px)?.note.id, 'c');
-  assert.equal(hitNote(idx, 300, 60, px, 5, new Set(['a'])), null); // skip set
-  // overlapping same-key notes: the later one (on top) wins
+  assert.equal(hitNote(idx, 300, 60, px, 5, new Set(['a'])), null);
   const ov = new SpanIndex([note('x', 0, 960, 60), note('y', 480, 960, 60)], (n) => n.tick, (n) => n.dur);
   assert.equal(hitNote(ov, 600, 60, px)?.note.id, 'y');
 });
@@ -220,7 +205,7 @@ test('hitClip with edge zones', () => {
     { id: 'q', start: 3840, length: 3840 },
   ];
   const idx = new SpanIndex(clips, (c) => c.start, (c) => c.length);
-  const px = 0.02; // 76.8 px / bar
+  const px = 0.02;
   assert.equal(hitClip(idx, 100, px)?.clip.id, 'p');
   assert.equal(hitClip(idx, 100, px)?.zone, 'left');
   assert.equal(hitClip(idx, 2000, px)?.zone, 'body');
@@ -249,8 +234,6 @@ test('gridLevels: lines are never denser than ~7px', () => {
   assert.equal(gridLevels(0.01, TS44).unit, PPQ);
 });
 
-// ── clipboard ─────────────────────────────────────────────────────────
-
 test('note clipboard is relative and pastes at any tick', () => {
   const cb = makeNoteClipboard([note('a', 960, 240, 60), note('b', 1440, 480, 64)])!;
   assert.equal(cb.span, 960);
@@ -269,8 +252,6 @@ test('duplicateShift rounds the span up to the grid', () => {
   assert.equal(duplicateShift(240, 3900, 3840), 3840);
   assert.equal(duplicateShift(0, 700, 1), 700);
 });
-
-// ── agent glow ────────────────────────────────────────────────────────
 
 test('changedIds finds added + replaced entries only', () => {
   const a = { id: 'a' };

@@ -1,19 +1,3 @@
-//! The NDJSON job runner (docs/ANALYZER_PROTOCOL.md "Semantics"):
-//!
-//! * `hello` and `cancel` are answered at once, even while jobs run.
-//! * `separate` runs one at a time; `analyze` / `transcribe` / `fingerprint`
-//!   / `tts` / `sing` / `syllables` up to 2 at once.
-//!   Jobs beyond that wait (cancellable while waiting).
-//! * Cancel flips the job's flag; the job stops at its next checkpoint and
-//!   answers `{ok:false, cancelled:true}`. Unknown / finished ids:
-//!   "No such job".
-//! * Every job runs under `catch_unwind`: a panic becomes
-//!   `{ok:false, message:"Internal error in <job>: …"}`.
-//! * `shutdown` cancels running jobs, waits briefly for their answers,
-//!   answers, and returns (main exits). EOF on stdin does the same silently.
-//! * Every stdout line goes through one sink (one lock), so lines never
-//!   interleave.
-
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -26,14 +10,10 @@ use serde_json::Value;
 use crate::protocol::{AnalyzeArgs, Event, FingerprintArgs, HelloResult, Request, Response, SeparateArgs, SingArgs, SyllablesArgs, TranscribeArgs, TtsArgs, ExtractArgs};
 use crate::{JobCtx, JobError};
 
-/// Max concurrent analyze/transcribe/fingerprint jobs.
 pub const LIGHT_SLOTS: usize = 2;
-/// Max concurrent separate jobs.
 pub const HEAVY_SLOTS: usize = 1;
-/// How long shutdown/EOF waits for cancelled jobs to answer.
 pub const SHUTDOWN_GRACE: Duration = Duration::from_millis(1500);
 
-/// One complete protocol line (without the newline) goes to the sink.
 pub type Sink = Arc<dyn Fn(String) + Send + Sync>;
 
 pub enum Job {
@@ -66,7 +46,6 @@ impl Job {
     }
 }
 
-/// What the runner executes. `Real` in the binary; tests inject fakes.
 pub trait Handler: Send + Sync + 'static {
     fn devices(&self) -> Vec<String>;
     fn run(&self, job: &Job, ctx: &JobCtx) -> Result<Value, JobError>;
@@ -109,7 +88,6 @@ impl Slots {
         Self { cap, used: Mutex::new(0), cv: Condvar::new() }
     }
 
-    /// Wait for a slot; false if `cancel` was set while waiting.
     fn acquire(&self, cancel: &AtomicBool) -> bool {
         let mut u = self.used.lock().unwrap_or_else(|p| p.into_inner());
         while *u >= self.cap {
@@ -148,7 +126,6 @@ struct Shared {
     jobs: Mutex<HashMap<u64, Arc<AtomicBool>>>,
     light: Slots,
     heavy: Slots,
-    /// `hello`s still being answered (device probing runs off the reader thread).
     hellos: AtomicUsize,
 }
 
@@ -210,7 +187,6 @@ fn start_job(sh: &Arc<Shared>, id: u64, job: Job) {
             slots.release();
             response_from(id, name, r)
         };
-        // Unregister before answering: a cancel after the answer is "No such job".
         sh.jobs().remove(&id);
         sh.send(&resp);
     });
@@ -220,14 +196,12 @@ fn start_job(sh: &Arc<Shared>, id: u64, job: Job) {
     }
 }
 
-/// How `serve` ended.
 #[derive(Debug, PartialEq, Eq)]
 pub enum End {
     Shutdown,
     Eof,
 }
 
-/// Serve requests from `lines` until `shutdown` or end of input.
 pub fn serve(lines: impl Iterator<Item = String>, sink: Sink, handler: Arc<dyn Handler>) -> End {
     let sh = Arc::new(Shared { sink, handler, jobs: Mutex::new(HashMap::new()), light: Slots::new(LIGHT_SLOTS), heavy: Slots::new(HEAVY_SLOTS), hellos: AtomicUsize::new(0) });
     for line in lines {
@@ -245,8 +219,6 @@ pub fn serve(lines: impl Iterator<Item = String>, sink: Sink, handler: Arc<dyn H
         };
         match req {
             Request::Hello { id } => {
-                // Device probing may be slow: answer from a helper thread so
-                // cancels keep flowing.
                 let sh2 = sh.clone();
                 sh.hellos.fetch_add(1, Ordering::SeqCst);
                 let spawned = thread::Builder::new().name("hello".into()).spawn(move || {
@@ -294,7 +266,6 @@ pub fn serve(lines: impl Iterator<Item = String>, sink: Sink, handler: Arc<dyn H
     End::Eof
 }
 
-/// The binary's sink: stdout behind one lock, one flushed line per message.
 pub fn stdout_sink() -> Sink {
     use std::io::Write;
     let lock = Arc::new(Mutex::new(()));
@@ -304,7 +275,6 @@ pub fn stdout_sink() -> Sink {
         let mut buf = line.into_bytes();
         buf.push(b'\n');
         if out.write_all(&buf).and_then(|_| out.flush()).is_err() {
-            // Parent went away; nothing left to report to.
         }
     })
 }

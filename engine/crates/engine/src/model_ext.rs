@@ -1,21 +1,11 @@
-//! Wave 12.2 additions to the Project mirror (research/16-ableton-parity.md):
-//! the clip launcher (shared/schema/launcher.ts), warp maps
-//! (shared/schema/warp.ts) and racks (shared/schema/rack.ts).
-//!
-//! Same liberal parsing as model.rs: `#[serde(default)]` everywhere, so a
-//! malformed field falls back to its default instead of dropping the entity.
-
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use crate::model::{FxSlot, Generator};
 
-// ── Clip launcher ────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct FollowRule {
-    /// 'none' | 'stop' | 'again' | 'next' | 'previous' | 'first' | 'last' | 'any' | 'other'
     pub action: String,
     pub chance: f64,
     pub other_action: String,
@@ -34,7 +24,6 @@ pub struct LaunchClip {
     pub id: String,
     pub track_id: String,
     pub scene_id: String,
-    /// 'pattern' | 'audio'
     pub kind: String,
     pub pattern_id: Option<String>,
     pub channel_id: Option<String>,
@@ -42,9 +31,7 @@ pub struct LaunchClip {
     pub offset: f64,
     #[serde(rename = "loop")]
     pub looping: bool,
-    /// 'trigger' | 'gate' | 'toggle' | 'repeat'
     pub launch_mode: String,
-    /// None = the session's global quantize. '1/16' … '8bars', 'none'.
     pub quantize: Option<String>,
     pub follow: Option<FollowRule>,
     pub gain: Option<f64>,
@@ -78,13 +65,11 @@ pub struct Scene {
     pub tempo: Option<f64>,
 }
 
-/// The 'session' singleton entity: `{ quantize, sceneOrder, clipIds }`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SessionCfg {
     pub quantize: String,
     pub scene_order: Vec<String>,
-    /// Launch clips that exist; any other launch clip in the mirror is dropped.
     pub clip_ids: Option<Vec<String>>,
 }
 
@@ -93,8 +78,6 @@ impl Default for SessionCfg {
         Self { quantize: "1bar".into(), scene_order: Vec::new(), clip_ids: None }
     }
 }
-
-// ── Warp ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -107,10 +90,8 @@ pub struct WarpMarker {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct WarpMap {
-    /// 'complex' | 'tones' | 'beats' | 'texture' | 'repitch'
     pub mode: String,
     pub markers: Vec<WarpMarker>,
-    /// 'transients' | '1/16' | '1/8' | '1/4'
     pub beats_slice: Option<String>,
     pub beats_fade_ms: Option<f64>,
     pub grain_ms: Option<f64>,
@@ -123,22 +104,15 @@ impl Default for WarpMap {
     }
 }
 
-// ── Slicer (shared/schema/slicer.ts) ──────────────────────────────────────
-
-/// One slice of a 'krypt.slicer' channel: where it starts in the sample and how it plays.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SliceMarker {
     pub id: String,
     pub sec: f64,
-    /// Semitones (absent = 0).
     pub pitch: Option<f64>,
     pub reverse: Option<bool>,
-    /// Linear gain (absent = 1).
     pub gain: Option<f64>,
 }
-
-// ── Racks ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -155,7 +129,6 @@ impl Default for RackZone {
     }
 }
 
-/// `{ chainId, kind: 'instrument' | 'device' | 'chain', deviceId?, param }`.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct MacroTarget {
@@ -222,11 +195,9 @@ impl Default for RackChain {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RackDef {
-    /// 'instrument' | 'drum' | 'effect'
     pub kind: String,
     pub chains: BTreeMap<String, RackChain>,
     pub chain_order: Vec<String>,
-    /// MACRO_COUNT (8) entries; fewer = the rest unmapped.
     pub macros: Vec<RackMacro>,
 }
 
@@ -237,7 +208,6 @@ impl Default for RackDef {
 }
 
 impl RackDef {
-    /// Chains in chain_order, then any missing from it by id (deterministic).
     pub fn ordered_chains(&self) -> Vec<&RackChain> {
         let mut out: Vec<&RackChain> = self.chain_order.iter().filter_map(|id| self.chains.get(id)).collect();
         for (id, c) in &self.chains {

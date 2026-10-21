@@ -1,7 +1,3 @@
-//! Telemetry: a token-checked WebSocket server on 127.0.0.1:0 pushing a
-//! `TelemetryFrame` JSON text message to every client about every 16 ms.
-//! Reads only atomics and an rtrb ring published by the audio thread.
-
 use crate::compile::Names;
 use crate::core::Shared;
 use crate::program::NONE;
@@ -45,7 +41,6 @@ struct Frame<'a> {
     cpu: f32,
     xruns: u32,
     applied_version: u64,
-    // live input (record.rs): MIDI activity, record state, input meter.
     midi_in: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     rec: Option<&'static str>,
@@ -53,24 +48,18 @@ struct Frame<'a> {
     count_in: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     input_peak: Option<[f32; 2]>,
-    /// Input monitoring on: the peak of the input that reached the output since the last frame.
     #[serde(skip_serializing_if = "Option::is_none")]
     monitor_peak: Option<f32>,
-    /// launcher: present when the project has launch clips.
     #[serde(skip_serializing_if = "Option::is_none")]
     launcher: Option<crate::launcher::LauncherTel>,
-    /// hardware (§14): external MIDI clock sync state (present while a sync input is selected).
     #[serde(skip_serializing_if = "Option::is_none")]
     sync: Option<crate::clock::SyncTel>,
-    /// meters (§15): gain reduction (dB) per "insertId/slotId", only slots reducing since the last frame.
     #[serde(skip_serializing_if = "Option::is_none")]
     gr: Option<BTreeMap<&'a str, f32>>,
-    /// meters (§15): watched slots (requested up the socket) → loudness, correlation, spectrum, scope.
     #[serde(skip_serializing_if = "Option::is_none")]
     scopes: Option<BTreeMap<String, krypt_studio_dsp::scope::ScopeData>>,
 }
 
-/// Log-binned magnitude spectrum of the master output.
 pub struct Spectrum {
     fft: Arc<dyn Fft<f32>>,
     hist: Vec<f32>,
@@ -97,14 +86,13 @@ impl Spectrum {
         self.pos = (self.pos + 1) % FFT_SIZE;
     }
 
-    /// 64 log-spaced bins, 20 Hz – 20 kHz, dBFS (a full-scale sine reads ≈ 0 dB).
     pub fn compute(&mut self, sr: f32) -> Vec<f32> {
         for i in 0..FFT_SIZE {
             let s = self.hist[(self.pos + i) % FFT_SIZE];
             self.buf[i] = Complex::new(s * self.window[i], 0.0);
         }
         self.fft.process(&mut self.buf);
-        let norm = 2.0 / (FFT_SIZE as f32 * 0.5); // Hann coherent gain 0.5
+        let norm = 2.0 / (FFT_SIZE as f32 * 0.5);
         let half = FFT_SIZE / 2;
         let mags: Vec<f32> = self.buf[..=half].iter().map(|c| c.norm() * norm).collect();
         let bin_hz = sr / FFT_SIZE as f32;
@@ -119,7 +107,6 @@ impl Spectrum {
             let mag = if k0 <= k1 && k0 <= half {
                 mags[k0..=k1].iter().fold(0f32, |a, &m| a.max(m))
             } else {
-                // Narrower than one FFT bin: interpolate at the band centre.
                 let k = ((lo * hi).sqrt() / bin_hz).min(half as f32);
                 let i = k.floor() as usize;
                 let j = (i + 1).min(half);
@@ -138,7 +125,6 @@ type Clients = Arc<Mutex<Vec<WebSocket<TcpStream>>>>;
 fn random_token() -> String {
     let mut b = [0u8; 16];
     if getrandom::fill(&mut b).is_err() {
-        // Extremely unlikely; fall back to time + pid entropy.
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
         let x = t ^ ((std::process::id() as u128) << 64);
         b.copy_from_slice(&x.to_le_bytes());
@@ -158,7 +144,6 @@ fn constant_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Start the server + frame threads.
 pub fn start(shared: Arc<Shared>, names: Arc<Mutex<Names>>, spec_rx: rtrb::Consumer<f32>, out: Arc<Out>) -> std::io::Result<TelemetryInfo> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
@@ -214,7 +199,6 @@ fn frame_loop(shared: Arc<Shared>, names: Arc<Mutex<Names>>, mut spec_rx: rtrb::
     let mut spectrum = Spectrum::new();
     let mut frame_no: u64 = 0;
     let mut next = Instant::now();
-    // meters (§15): each client's watched slots; integrated loudness restarts when playback starts
     let mut watcher = crate::meters::Watcher::default();
     let mut was_playing = false;
     loop {
@@ -281,7 +265,7 @@ fn frame_loop(shared: Arc<Shared>, names: Arc<Mutex<Names>>, mut spec_rx: rtrb::
             },
             count_in: Some(shared.live.count_in_beats.load(Relaxed)).filter(|_| shared.live.state.load(Relaxed) == crate::record::STATE_COUNT_IN),
             launcher: crate::launcher::telemetry(&shared.launch, &n.launch),
-            sync: crate::clock::sync_telemetry(&shared.clock), // hardware
+            sync: crate::clock::sync_telemetry(&shared.clock),
             input_peak: if shared.live.input_open.load(Relaxed) {
                 Some([finite(f32::from_bits(shared.live.input_peak[0].swap(0, Relaxed))), finite(f32::from_bits(shared.live.input_peak[1].swap(0, Relaxed)))])
             } else {
@@ -294,7 +278,6 @@ fn frame_loop(shared: Arc<Shared>, names: Arc<Mutex<Names>>, mut spec_rx: rtrb::
         let Ok(text) = serde_json::to_string(&frame) else { continue };
         cl.retain_mut(|ws| {
             let peer = ws.get_ref().peer_addr().map(|a| a.to_string()).unwrap_or_default();
-            // Drain incoming (close / ping; meters: watch requests) without blocking.
             loop {
                 match ws.read() {
                     Ok(Message::Text(t)) => {
@@ -358,7 +341,6 @@ mod tests {
         let bins = s.compute(sr);
         assert_eq!(bins.len(), SPECTRUM_BINS);
         let (imax, vmax) = bins.iter().enumerate().fold((0, -999f32), |a, (i, &v)| if v > a.1 { (i, v) } else { a });
-        // 1 kHz sits at log(1000/20)/log(1000) * 64 ≈ 36.2
         assert!((35..=37).contains(&imax), "peak bin {imax}");
         assert!(vmax > -3.0 && vmax < 1.0, "peak level {vmax}");
         assert!(bins[5] < -40.0);

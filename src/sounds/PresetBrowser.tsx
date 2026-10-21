@@ -1,11 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// The preset browser: search, genre chips, tag filters, presets grouped by
-// role, your own presets marked. One component for instrument presets (the
-// preset bar's popover; footer: "With effects") and effect chains (the
-// Mixer's chain picker; footer: Replace / Append). ↑ ↓ move, Enter loads.
-// Hosted in a Menu 'custom' item (popover) or a Dialog.
-// ──────────────────────────────────────────────────────────────────────
-
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Download, Layers, Search, SwatchBook, UserRound, X } from 'lucide-react';
 import { pluginById } from '@shared/plugins/catalog';
@@ -25,16 +17,11 @@ export interface PresetPickOptions {
 
 export interface PresetBrowserProps {
   kind: 'instrument' | 'chain';
-  /** The preset loaded now (highlighted, list starts there). */
   currentId?: string | null;
-  /** Chains on the master: master chains first. */
   isMaster?: boolean;
-  /** Load the pick. Resolve false to keep the browser open. */
   onPick: (p: PresetSummary, opts: PresetPickOptions) => Promise<boolean> | boolean;
   close: () => void;
-  /** Width in px (the popover passes what fits its window). */
   width?: number;
-  /** CSS max-height of the list. */
   listMaxHeight?: string;
 }
 
@@ -77,7 +64,6 @@ export function PresetBrowser({ kind, currentId, isMaster, onPick, close, width 
     setActive((a) => Math.min(Math.max(0, a), Math.max(0, flat.length - 1)));
   }, [flat.length]);
 
-  // The list host (Menu / Dialog) focuses itself first; take focus for the search box right after.
   useEffect(() => {
     const t = setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 40);
     return () => clearTimeout(t);

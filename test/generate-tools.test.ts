@@ -1,6 +1,3 @@
-// generate_notes (electron/mcp/tools/generate.ts) through the shared tool
-// registry, against a real DocHost: args, the result summary, re-rolls,
-// one undo step and plain-words errors.
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';

@@ -1,56 +1,3 @@
-//! Racks and macros (Wave 12.2, research/16-ableton-parity.md §2.3; the
-//! contract is shared/schema/rack.ts, the Rust mirror `RackDef` is in
-//! model_ext.rs). Spec as built: docs/ENGINE_PROTOCOL.md §12.
-//!
-//! Three composites, built by the compiler (compile.rs → rack_compile.rs)
-//! from `Generator.rack` / `FxSlot.rack` through the SAME plugin factories
-//! channels and FX slots use:
-//! - `krypt.rack` / `krypt.drumrack` → [`RackInstrument`] (an `Instrument`):
-//!   notes go to every chain whose zone holds the key and velocity, each
-//!   chain runs its stock instrument then its stock effects, chains are summed
-//!   with volume / pan / mute / solo; drum racks add choke groups;
-//! - `krypt.fxrack` → [`RackEffect`] (an `Effect`): the input is split into
-//!   every chain, each runs its effects, the chains are summed (the slot's
-//!   `mix` stays the outer wet/dry, applied by the core).
-//!
-//! PARAM-ONLY EDITS NEVER RE-INSTANTIATE. Everything a doc edit can change
-//! without changing the rack's STRUCTURE (chains, their instrument types and
-//! samples, their device types, all in order) lives in one flat param vector
-//! that the compiler diffs like any plugin's params and the core delivers
-//! with `set_param(index, value)`:
-//!
-//! ```text
-//! [0, 8)                         macro1..macro8 (0..1) = the descriptor params
-//! [8, 8 + 7·C)                   per chain: mute, solo, keyLo, keyHi, velLo, velHi, choke
-//! [.., + D)                      per device (chain-major): enabled
-//! [.., + 4·T)                    per mappable target: base (plain), macro (0 = none, 1..8), min, max
-//! ```
-//!
-//! Targets, chain-major: chain volume, chain pan, the instrument's params
-//! (descriptor order), then per device its `mix` and its params. The
-//! compiler resolves macro maps ("last map in macro order wins") into the
-//! per-target (macro, min, max) fields, so every target has at most one map:
-//! effective = macro ? from_normalized(spec, min + v·(max − min)) : base.
-//!
-//! AUTOMATION OF INNER PARAMS (Wave 12.2b, ParamRef `<host>/rack/<chain>/…`):
-//! `set_param(AUTO_BASE + t, plain)` sets target t's automation override and
-//! `set_param(AUTO_BASE + t, NaN)` releases it. These indices sit outside the
-//! flat vector, so the compiler never diffs them; only the core's automation
-//! (TargetKind::RackInst / RackFx) writes them. The rule: AUTOMATION WINS.
-//! effective = override ?? (macro ? macro value : base). While an automation
-//! clip holds a value for the param, a macro mapped onto it moves nothing
-//! (like an automated knob ignoring the hand); when the automation goes away
-//! (clip deleted / retargeted) the core releases it and the macro takes over.
-//!
-//! Changes are applied EAGERLY inside `set_param` (O(1) per target field,
-//! O(targets) per macro move), so `latency()` is right the moment the core
-//! asks after a batch, and automation of a macro costs one pass per change.
-//!
-//! [RT] Everything after construction (`set_param`, `note_*`, `process`,
-//! `reset`, `latency`) is allocation-free, lock-free and I/O-free: chain
-//! scratch, PDC rings and dry buffers are preallocated in `new` / `prepare`.
-
-// Per-sample index loops over parallel buffers are the clearest DSP style.
 #![allow(clippy::needless_range_loop)]
 
 use crate::fxmix::{LatencyAligned, MAX_ALIGN};
@@ -62,11 +9,8 @@ use std::sync::Arc;
 pub use krypt_studio_dsp::catalog::{rack_descriptors, DRUM_RACK_PLUGIN, FX_RACK_PLUGIN, MACRO_PARAM_IDS, RACK_PLUGIN};
 
 pub const MACRO_COUNT: usize = 8;
-/// = MAX_RACK_CHAINS in shared/schema/rack.ts.
 pub const MAX_RACK_CHAINS: usize = 128;
-/// = MAX_FX_SLOTS in shared/schema/project.ts.
 pub const MAX_CHAIN_DEVICES: usize = 10;
-/// Flat settings per chain: mute, solo, keyLo, keyHi, velLo, velHi, choke.
 pub const CHAIN_SETTINGS: usize = 7;
 pub const S_MUTE: usize = 0;
 pub const S_SOLO: usize = 1;
@@ -75,21 +19,13 @@ pub const S_KEY_HI: usize = 3;
 pub const S_VEL_LO: usize = 4;
 pub const S_VEL_HI: usize = 5;
 pub const S_CHOKE: usize = 6;
-/// Fields per mappable target.
 pub const TARGET_FIELDS: usize = 4;
-/// `set_param(AUTO_BASE + t, v)`: automation override of target t (NaN releases it). Outside the flat vector.
 pub const AUTO_BASE: usize = 1 << 24;
 
-/// Key of a mappable target: (chain id, "chain" | "instrument" | "device", device id or "", param id).
 pub type TargetKey = (String, &'static str, String, String);
 
-/// Stock devices whose output can come back after a silent gap (echoes,
-/// grain buffers): a chain holding one never sleeps, and an FX rack holding
-/// one keeps its insert awake (same rule as compile.rs `can_sleep`).
 const ECHO_DEVICES: [&str; 3] = ["krypt.delay", "krypt.tapeecho", "krypt.grain"];
 
-/// The stock catalog as the engine serves it (`--dump-catalog`, `catalog`):
-/// every dsp plugin, then the three rack devices.
 pub fn stock_descriptors() -> Vec<PluginDescriptor> {
     let mut v = krypt_studio_dsp::descriptors();
     v.extend(rack_descriptors());
@@ -100,7 +36,6 @@ pub fn is_rack(type_id: &str) -> bool {
     type_id == RACK_PLUGIN || type_id == DRUM_RACK_PLUGIN || type_id == FX_RACK_PLUGIN
 }
 
-/// Sample ids a generator uses: its own plus those of a rack's inner instruments.
 pub fn generator_sample_ids(g: &crate::model::Generator) -> Vec<&String> {
     let mut v: Vec<&String> = g.sample_id.iter().collect();
     if let Some(r) = g.rack.as_deref() {
@@ -113,8 +48,6 @@ pub fn generator_sample_ids(g: &crate::model::Generator) -> Vec<&String> {
     v
 }
 
-/// Can an FX slot holding this rack sleep through silence (compile.rs
-/// `can_sleep`)? Only when no inner device is third-party or an echo.
 pub fn devices_may_sleep(def: &crate::model_ext::RackDef) -> bool {
     def.chains.values().flat_map(|c| c.devices.values()).filter(|d| d.enabled).all(|d| d.type_id.starts_with("krypt.") && !ECHO_DEVICES.contains(&d.type_id.as_str()))
 }
@@ -127,7 +60,6 @@ pub enum RackKind {
 }
 
 impl RackKind {
-    /// The rack kind of a channel generator type (None = not a rack instrument).
     pub fn of_instrument(type_id: &str) -> Option<Self> {
         match type_id {
             RACK_PLUGIN => Some(Self::Instrument),
@@ -144,18 +76,12 @@ impl RackKind {
     }
 }
 
-// ── Plan (control thread) ────────────────────────────────────────────────
-
-/// What a mappable target drives inside its chain.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TargetWhat {
     Volume,
     Pan,
-    /// Instrument param index.
     Inst(usize),
-    /// Device (index within the chain) wet/dry.
     DevMix(usize),
-    /// Device (index within the chain), param index.
     Dev(usize, usize),
 }
 
@@ -170,13 +96,11 @@ pub struct InstPlan {
     pub type_id: String,
     pub sample: Option<Arc<SampleData>>,
     pub multi: Option<Arc<MultiSampleSet>>,
-    /// Sample instruments (not the multisampler): the sample's root key (WAV smpl, else 60).
     pub sample_root: Option<f32>,
 }
 
 pub struct DevPlan {
     pub type_id: String,
-    /// Plays its echo after silence (never let the chain sleep).
     pub echo: bool,
 }
 
@@ -187,16 +111,12 @@ pub struct ChainPlan {
     pub devices: Vec<DevPlan>,
 }
 
-/// A rack resolved against the catalog and the sample cache: what to build,
-/// its flat param vector (see the module docs) and its structure key.
 pub struct RackPlan {
     pub kind: RackKind,
     pub chains: Vec<ChainPlan>,
     pub targets: Vec<TargetPlan>,
     pub values: Vec<f32>,
-    /// Equal keys ⇔ same layout and same inner instances: a param-only edit.
     pub key: String,
-    /// Target key → target index (macro maps and automation of inner params resolve through it).
     pub index: std::collections::BTreeMap<TargetKey, usize>,
 }
 
@@ -224,8 +144,6 @@ impl RackPlan {
     }
 }
 
-// ── Runtime (audio thread after construction) ───────────────────────────
-
 struct DevRt {
     fx: Box<dyn Effect>,
     enabled: bool,
@@ -245,16 +163,13 @@ struct ChainRt {
     vel_hi: f32,
     choke: i32,
     sample_root: Option<f32>,
-    /// Smoothed output gains (ramped per block), `fresh` = jump on first use.
     gl: f32,
     gr: f32,
     fresh: bool,
     l: Vec<f32>,
     r: Vec<f32>,
-    /// PDC ring (MAX_ALIGN frames, power of two) and write position.
     pdc: [Vec<f32>; 2],
     pdc_w: usize,
-    /// Frames the chain's output has been silent (instrument racks: sleep).
     quiet: u32,
     never_sleep: bool,
     kick: bool,
@@ -266,7 +181,6 @@ impl ChainRt {
         !self.mute && (!solo_any || self.solo)
     }
 
-    /// Latency of the devices that run (enabled, mix > 0).
     #[inline]
     fn latency(&self) -> usize {
         self.devs.iter().filter(|d| d.enabled && d.mix > 0.0).map(|d| d.fx.latency()).sum::<usize>().min(MAX_ALIGN - 1)
@@ -283,26 +197,20 @@ struct Target {
     what: TargetWhat,
     spec: ParamSpec,
     base: f32,
-    /// 0 = unmapped, 1..=8 = macro.
     mac: u8,
     min: f32,
     max: f32,
-    /// Value last written to the target (NaN = never).
     cur: f32,
-    /// Automation override (NaN = none): wins over the macro and the base.
     auto: f32,
 }
 
-/// The parts shared by the instrument and the effect rack.
 struct RackCore {
     chains: Vec<ChainRt>,
     targets: Vec<Target>,
     macros: [f32; MACRO_COUNT],
-    /// Global device index → (chain, device).
     dev_index: Vec<(usize, usize)>,
     enabled_base: usize,
     targets_base: usize,
-    /// Scratch frames per call (chain buffers' length).
     cap: usize,
     dry: [Vec<f32>; 2],
     sr: f32,
@@ -314,7 +222,6 @@ fn quiet_need(sr: f32) -> u32 {
 }
 
 impl RackCore {
-    /// Instantiate every inner plugin of `plan` through `host` (control thread).
     fn new(plan: &RackPlan, host: &PluginHost, sr: f32, max_frames: usize) -> Self {
         let cap = max_frames.max(1);
         let mut chains = Vec::with_capacity(plan.chains.len());
@@ -332,7 +239,6 @@ impl RackCore {
             });
             let mut devs = Vec::with_capacity(cp.devices.len());
             for dp in &cp.devices {
-                // A device the factory can't make passes audio through (keeps the flat layout).
                 let fx = (host.create_effect)(&dp.type_id, sr, max_frames).unwrap_or_else(|| Box::new(Thru));
                 dev_index.push((ci, devs.len()));
                 devs.push(DevRt { fx: Box::new(LatencyAligned::new(fx)), enabled: true, mix: 1.0 });
@@ -409,7 +315,6 @@ impl RackCore {
         self.reset();
     }
 
-    /// [RT] Clear tails, PDC and gain ramps (devices only; instruments keep voices).
     fn reset(&mut self) {
         let need = self.quiet_need;
         for c in self.chains.iter_mut() {
@@ -425,10 +330,8 @@ impl RackCore {
         }
     }
 
-    /// [RT] One flat param (see the module docs).
     fn set_param(&mut self, index: usize, value: f32) {
         if index >= AUTO_BASE {
-            // Automation override of an inner param (NaN = release).
             let t = index - AUTO_BASE;
             let Some(tg) = self.targets.get_mut(t) else { return };
             let v = if value.is_finite() { value } else { f32::NAN };
@@ -488,7 +391,6 @@ impl RackCore {
         self.apply_target(t);
     }
 
-    /// [RT] Write target `t`'s effective value into its chain / plugin.
     fn apply_target(&mut self, t: usize) {
         let tg = &mut self.targets[t];
         if tg.chain == usize::MAX {
@@ -533,13 +435,10 @@ impl RackCore {
         self.chains.iter().any(|c| c.solo)
     }
 
-    /// Max latency over the chains (what the rack reports; shorter chains are delayed to it).
     fn latency(&self) -> usize {
         self.chains.iter().map(|c| c.latency()).max().unwrap_or(0)
     }
 
-    /// [RT] Run chain `ci`'s devices, PDC to `max_lat`, NaN guard; the chain's
-    /// buffers hold its signal on entry and its aligned output on exit.
     fn run_chain(chain: &mut ChainRt, dry: &mut [Vec<f32>; 2], ctx: &ProcessContext, n: usize, max_lat: usize) {
         let mut lat = 0usize;
         for d in chain.devs.iter_mut() {
@@ -563,7 +462,6 @@ impl RackCore {
             }
             lat += d.fx.latency();
         }
-        // NaN / Inf guard: silence the bad samples and clear the devices' state.
         let mut bad = false;
         for i in 0..n {
             if !chain.l[i].is_finite() {
@@ -580,7 +478,6 @@ impl RackCore {
                 d.fx.reset();
             }
         }
-        // PDC: delay this chain by (max − own) latency so parallel chains line up.
         let delay = max_lat.saturating_sub(lat.min(MAX_ALIGN - 1));
         if delay > 0 {
             let mask = MAX_ALIGN - 1;
@@ -596,7 +493,6 @@ impl RackCore {
             }
             chain.pdc_w = w;
         } else {
-            // Keep the ring current, so a later latency change doesn't replay stale audio.
             let mask = MAX_ALIGN - 1;
             let mut w = chain.pdc_w;
             for i in 0..n {
@@ -608,7 +504,6 @@ impl RackCore {
         }
     }
 
-    /// [RT] Add chain output × its (ramped) gain into `out`.
     fn mix_into(chain: &mut ChainRt, solo_any: bool, n: usize, out_l: &mut [f32], out_r: &mut [f32]) {
         let (tl, tr) = if chain.audible(solo_any) {
             let p = chain.pan.clamp(-1.0, 1.0);
@@ -636,7 +531,6 @@ impl RackCore {
     }
 }
 
-/// Stand-in for a device the factory refused: passes audio through.
 struct Thru;
 
 impl Effect for Thru {
@@ -660,23 +554,17 @@ fn flush_bad(x: &mut [f32]) {
     }
 }
 
-// ── Instrument / drum rack ───────────────────────────────────────────────
-
 pub struct RackInstrument {
     core: RackCore,
     drum: bool,
     peak: f32,
 }
 
-/// Build an instrument or drum rack from its plan (control thread).
 pub fn build_instrument(plan: &RackPlan, host: &PluginHost, sr: f32, max_frames: usize) -> Box<dyn Instrument> {
     Box::new(RackInstrument { core: RackCore::new(plan, host, sr, max_frames), drum: plan.kind == RackKind::Drum, peak: 0.0 })
 }
 
 impl RackInstrument {
-    /// Pitch offset of chain `c`: instrument racks play like a channel with
-    /// rootKey 60; drum pads play their instrument at its root (sample root,
-    /// else C4 = 60) on the zone's lowest key, so a pad sounds the same on any note.
     #[inline]
     fn shift(&self, c: &ChainRt) -> f32 {
         let base = if self.drum { c.key_lo as f32 } else { 60.0 };
@@ -734,7 +622,6 @@ impl Instrument for RackInstrument {
     }
 
     fn note_off(&mut self, offset: usize, key: u8) {
-        // Every chain: a zone edit between on and off must not leave notes hanging.
         for c in self.core.chains.iter_mut() {
             if let Some(i) = c.inst.as_mut() {
                 i.note_off(offset, key);
@@ -773,10 +660,8 @@ impl Instrument for RackInstrument {
             let RackCore { chains, dry, .. } = &mut self.core;
             for c in chains.iter_mut() {
                 let inst_active = c.inst.as_ref().is_some_and(|i| i.is_active());
-                // Devices (tails) or a PDC delay (audio still in the ring): sleep only after 0.5 s of silence.
                 let tail = (!c.devs.is_empty() || max_lat > 0) && (c.never_sleep || c.quiet < need);
                 if !(c.kick || inst_active || tail) {
-                    // Asleep: no work; the gains jump when it wakes.
                     c.fresh = true;
                     continue;
                 }
@@ -804,8 +689,6 @@ impl Instrument for RackInstrument {
         self.peak
     }
 
-    /// The longest chain's device latency: chains are aligned to it inside the
-    /// rack, and the engine compensates it against other channels (channel PDC).
     fn latency(&self) -> usize {
         self.core.latency()
     }
@@ -820,16 +703,12 @@ impl Instrument for RackInstrument {
     }
 }
 
-// ── Effect rack ──────────────────────────────────────────────────────────
-
 pub struct RackEffect {
     core: RackCore,
     inp: [Vec<f32>; 2],
     acc: [Vec<f32>; 2],
 }
 
-/// Build an FX rack from its plan (control thread). The compiler wraps it in
-/// `fxmix::LatencyAligned` like every slot effect.
 pub fn build_effect(plan: &RackPlan, host: &PluginHost, sr: f32, max_frames: usize) -> Box<dyn Effect> {
     let core = RackCore::new(plan, host, sr, max_frames);
     let cap = core.cap;
@@ -855,7 +734,6 @@ impl Effect for RackEffect {
         let [bl, br] = buf;
         let total = ctx.frames.min(bl.len()).min(br.len());
         if self.core.chains.is_empty() {
-            // An empty rack passes audio through (like an empty insert).
             flush_bad(&mut bl[..total]);
             flush_bad(&mut br[..total]);
             return;

@@ -1,4 +1,3 @@
-// Synthwave: 80s-style drum machine, pulsing 8th bass, big pads, arps and a singable lead.
 import type { Playbook } from './types';
 
 export const SYNTHWAVE: Playbook = {

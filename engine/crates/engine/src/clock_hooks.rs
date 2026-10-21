@@ -1,19 +1,8 @@
-//! MIDI clock out + external sync hooks into the real-time core (clock.rs).
-//! Declared as a child module of `core` (like record_hooks.rs) so it can
-//! drive the transport; core.rs only carries the call sites, each marked
-//! `// midi clock:`.
-//!
-//! [RT] Everything here runs on the audio thread: no allocation, no locks.
-//! Offline renders never attach the clock rings, so every hook is a no-op
-//! there (`self.clock.attached()` is false).
-
 use super::*;
 use crate::clock::{phase_ratio, SyncAction, SyncState, MIDI_CONTINUE, PHASE_JUMP_TICKS};
 use crate::midi::now_ns;
 
 impl Core {
-    /// [RT] Hook: start of every device block (after `live_block`, before the
-    /// command ring): stamp the block, follow the sync input.
     pub(super) fn clock_block(&mut self, frames: usize) {
         if !self.clock.attached() {
             return;
@@ -25,7 +14,6 @@ impl Core {
         self.clock.ns_per_frame = 1e9 / sr.max(1.0);
         self.clock.sub_base = 0;
         if self.clock.sync_on() {
-            // The user stopped locally: wait for the master's next Start / Continue.
             if self.clock.follow.state == SyncState::Running && !self.playing {
                 self.clock.follow.state = SyncState::Stopped;
             }
@@ -36,7 +24,6 @@ impl Core {
                     break;
                 }
                 if ev.status == MIDI_CONTINUE && self.clock.follow.state != SyncState::Running {
-                    // Continue resumes from where the transport is (an SPP before it already located there).
                     let p = self.pos;
                     self.clock.follow.set_pending_pos(p);
                 }
@@ -65,20 +52,17 @@ impl Core {
             SyncAction::Locate(p) => self.locate(p),
             SyncAction::Pause => self.pause(),
             SyncAction::Run { pos } => {
-                // Where the master is by the time this block is heard (the anchor pulse arrived earlier).
                 let lead = self.clock.follow.expected_ticks(self.clock.block_t).unwrap_or(0.0).clamp(0.0, PPQ * 4.0);
                 self.locate(pos + lead);
                 self.clock.slave_ticks = lead;
                 if !self.playing {
-                    self.live.bypass_intercept = self.live.attached(); // a synced start never counts in
+                    self.live.bypass_intercept = self.live.attached();
                     self.play();
                 }
             }
         }
     }
 
-    /// Sync running: play at the external tempo, bent (±4 %) to close the phase
-    /// error; a large error jumps. Otherwise restore the program's own tempo.
     fn clock_apply_tempo(&mut self) {
         let ext = if self.clock.sync_on() && self.clock.follow.state == SyncState::Running { self.clock.follow.bpm() } else { None };
         match ext {
@@ -97,7 +81,7 @@ impl Core {
                 }
                 let cur = self.program.transport.bpm;
                 if !self.clock.overriding || (cur - self.clock.last_override).abs() > 1e-9 {
-                    self.clock.saved_bpm = cur; // a new program / tempo automation value
+                    self.clock.saved_bpm = cur;
                 }
                 let b = (ext * ratio).clamp(10.0, 999.0);
                 self.program.transport.bpm = b;
@@ -115,7 +99,6 @@ impl Core {
         }
     }
 
-    /// [RT] Hook (`run_sub`, playing, after automation, before `advance`).
     pub(super) fn clock_pre_advance(&mut self) {
         if !self.clock.attached() {
             return;
@@ -125,7 +108,6 @@ impl Core {
         self.clock.advanced = true;
     }
 
-    /// [RT] Hook (`run_sub`, after the sequencer advanced): pulses of this sub-block.
     pub(super) fn clock_sub(&mut self, n: usize) {
         if !self.clock.attached() {
             return;
@@ -145,7 +127,6 @@ impl Core {
             }
         }
         self.clock.sub_base += n;
-        // Clock out switched on / off mid-play: join at the next 16th, or stop the slaves.
         let t = self.clock.heard_at(self.clock.sub_base) as u64;
         if out_on && self.playing && !self.clock.out.running {
             let mut out = self.clock.out;
@@ -153,11 +134,10 @@ impl Core {
             out.start(p, t, &mut |e| self.clock.push(e));
             self.clock.out = out;
         } else if !out_on && self.clock.out.running {
-            self.clock.out.running = false; // the control thread sent Stop to the ports it removed
+            self.clock.out.running = false;
         }
     }
 
-    /// [RT] Hook (end of `play`).
     pub(super) fn clock_started(&mut self) {
         if !self.clock.attached() || !self.clock.out_on() || !self.playing {
             return;
@@ -169,7 +149,6 @@ impl Core {
         self.clock.out = out;
     }
 
-    /// [RT] Hook (`stop`, and `pause` while playing).
     pub(super) fn clock_stopped(&mut self) {
         if !self.clock.attached() || !self.clock.out.running {
             return;
@@ -180,7 +159,6 @@ impl Core {
         self.clock.out = out;
     }
 
-    /// [RT] Hook (end of `locate`): Song Position Pointer.
     pub(super) fn clock_located(&mut self) {
         if !self.clock.attached() || !self.clock.out_on() {
             return;

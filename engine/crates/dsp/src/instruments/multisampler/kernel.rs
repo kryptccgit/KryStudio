@@ -1,28 +1,14 @@
-//! Polyphase kernels for playback FASTER than the source rate (pitching up).
-//!
-//! At or below the source rate the multisampler uses the sampler's
-//! `SincTable` fast path. Above it, `SincTable` evaluates the stretched
-//! kernel tap by tap for every output sample, which is 4–5× the cost; a
-//! multisampled piano pitches half its notes up by a semitone or two, so this
-//! bank precomputes the same Kaiser-windowed sinc (β 8, 12 zero crossings,
-//! 0.96 of the new Nyquist) per semitone band up to two octaves. A step in
-//! band b, `2^((b-1)/12) < step <= 2^(b/12)`, uses band b's cutoff: at most
-//! one semitone lower than ideal, so it never aliases. Built once per process
-//! (`bank()`, forced in `Multisampler::new`, never on the audio thread).
-
 use crate::blocks::oversample::bessel_i0;
 use crate::blocks::sinc::{BANDWIDTH, HALF_WIDTH, MAX_TAPS, MIN_CUTOFF};
 use std::sync::OnceLock;
 
 const PHASES: usize = 512;
 const BETA: f64 = 8.0;
-/// Semitone bands from just above 1× up to 1 / MIN_CUTOFF (two octaves).
 pub(crate) const BANDS: usize = 24;
 
 pub(crate) struct Band {
     taps: usize,
     hw: usize,
-    /// (PHASES + 1) normalized rows of `taps`.
     rows: Vec<f32>,
 }
 
@@ -46,7 +32,6 @@ impl KernelBank {
         let bands = (1..=BANDS)
             .map(|b| {
                 let step = 2f64.powf(b as f64 / 12.0);
-                // same (f32) arithmetic as SincTable::weights, so the tap counts agree
                 let cf = ((1.0 / step) as f32).clamp(MIN_CUTOFF, 1.0) * BANDWIDTH;
                 let hw = ((HALF_WIDTH as f32 / cf).ceil() as usize).min(MAX_TAPS / 2);
                 let c = cf as f64;
@@ -70,7 +55,6 @@ impl KernelBank {
         Self { bands }
     }
 
-    /// [RT] The band for a playback step > 1.
     #[inline]
     pub fn band(&self, step: f64) -> &Band {
         let b = (12.0 * step.max(1.0).log2() - 1e-9).ceil().clamp(1.0, BANDS as f64) as usize;
@@ -79,7 +63,6 @@ impl KernelBank {
 }
 
 impl Band {
-    /// [RT] Weights for reading at `pos`; returns (first source index, taps).
     #[inline]
     pub fn weights(&self, pos: f64, w: &mut [f32; MAX_TAPS]) -> (i64, usize) {
         let i0 = pos.floor();
@@ -98,7 +81,6 @@ impl Band {
 
 static BANK: OnceLock<KernelBank> = OnceLock::new();
 
-/// The process-wide bank (built on first use: call it off the audio thread first).
 pub(crate) fn bank() -> &'static KernelBank {
     BANK.get_or_init(KernelBank::build)
 }
@@ -114,7 +96,6 @@ mod tests {
         let bank = bank();
         let mut a = [0.0f32; MAX_TAPS];
         let mut b = [0.0f32; MAX_TAPS];
-        // exactly on a band edge the cutoffs agree: same weights as SincTable
         for semis in [1, 2, 7, 12, 24] {
             let step = 2f64.powf(semis as f64 / 12.0);
             for pos in [10.0, 10.25, 10.5, 10.731] {
@@ -125,7 +106,6 @@ mod tests {
                 assert!(err < 2e-3, "{semis} st @ {pos}: {err}");
             }
         }
-        // band choice rounds the step UP (lower cutoff: no aliasing)
         assert_eq!(bank.band(1.0001).taps, bank.bands[0].taps);
         assert!(std::ptr::eq(bank.band(2f64.powf(1.5 / 12.0)), &bank.bands[1]));
         assert!(std::ptr::eq(bank.band(100.0), &bank.bands[BANDS - 1]));

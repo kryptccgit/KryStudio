@@ -1,7 +1,3 @@
-// Main-window bounds persistence (userData/window-state.json). Restored
-// bounds are validated against the CURRENT displays: a monitor may be gone,
-// and negative coordinates are valid (monitors left of/above the primary).
-
 import { app, screen, type BrowserWindow, type Rectangle } from 'electron';
 import path from 'node:path';
 import { readTextSync, writeFileAtomicSync } from './files';
@@ -45,7 +41,6 @@ export function loadWindowState(): WindowState {
     if (placed && !visibleOnSomeDisplay({ x: st.x, y: st.y, width: st.width, height: st.height })) {
       return { ...st, x: UNPLACED, y: UNPLACED };
     }
-    // Clamp oversized windows to the primary work area.
     const wa = screen.getPrimaryDisplay().workAreaSize;
     st.width = Math.min(st.width, Math.max(960, wa.width));
     st.height = Math.min(st.height, Math.max(600, wa.height));
@@ -55,12 +50,10 @@ export function loadWindowState(): WindowState {
   }
 }
 
-/** Options to spread into the BrowserWindow constructor. */
 export function boundsOptions(s: WindowState): { x?: number; y?: number; width: number; height: number } {
   return s.x === UNPLACED && s.y === UNPLACED ? { width: s.width, height: s.height } : { x: s.x, y: s.y, width: s.width, height: s.height };
 }
 
-/** Track a window and persist its bounds (debounced, and on close). */
 export function trackWindowState(win: BrowserWindow): void {
   let timer: NodeJS.Timeout | null = null;
   const save = (): void => {
@@ -70,7 +63,6 @@ export function trackWindowState(win: BrowserWindow): void {
       const b = maximized || win.isMinimized() ? win.getNormalBounds() : win.getBounds();
       writeFileAtomicSync(file(), JSON.stringify({ x: b.x, y: b.y, width: b.width, height: b.height, maximized }));
     } catch {
-      /* best effort */
     }
   };
   const debounced = (): void => {

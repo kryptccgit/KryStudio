@@ -1,4 +1,3 @@
-// Pop: verse – pre – chorus songwriting, a big singable hook, polished and bright.
 import type { Playbook } from './types';
 
 export const POP: Playbook = {

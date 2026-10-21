@@ -10,7 +10,6 @@ import { removeLaunchClipsWhere } from './session';
 import { dropTakeRefs } from '../schema/takes';
 import { SLICER_PLUGIN } from '../schema/slicer';
 
-/** Validate + clamp sparse plugin params against the catalog (unknown param = CommandError naming it; unknown plugin = passed through). */
 export function sanitizeParams(catalog: PluginCatalog, type: string, params: Record<string, number>): Record<string, number> {
   const desc = findPlugin(catalog, type);
   if (!desc) return { ...params };
@@ -23,7 +22,6 @@ export function sanitizeParams(catalog: PluginCatalog, type: string, params: Rec
   return out;
 }
 
-/** Create an insert for a channel and return its id. */
 function newInsertFor(d: Project, name: string, color: string, ctx: CommandContext): string {
   const id = ctx.newId(ID_PREFIX.insert);
   d.mixer.inserts[id] = {
@@ -81,7 +79,7 @@ export const channelsAdd = defineCommand({
       pitch: 0,
       mute: false,
       insertId,
-      rootKey: a.type === 'krypt.kick808' ? 36 : 60, // 808s play true pitch; steps land on C2
+      rootKey: a.type === 'krypt.kick808' ? 36 : 60,
       swing: 1,
       poly: { mono: a.type === 'krypt.kick808', glideMs: a.type === 'krypt.kick808' ? 60 : 0, cutGroup: 0, cutBy: 0 },
     };
@@ -104,7 +102,7 @@ export const channelsRemove = defineCommand({
       for (const p of Object.values(d.patterns)) delete p.notes[id];
       for (const c of Object.values(d.playlist.clips)) if (c.kind === 'audio' && c.channelId === id) delete d.playlist.clips[c.id];
       removeLaunchClipsWhere(d, (c) => c.kind === 'audio' && c.channelId === id);
-      dropTakeRefs(d, { channelIds: [id] }); // takes: a take that played this channel goes
+      dropTakeRefs(d, { channelIds: [id] });
     }
     d.channelOrder = d.channelOrder.filter((c) => !a.ids.includes(c));
     return {};
@@ -138,7 +136,7 @@ export const channelsSet = defineCommand({
     if (insertId !== undefined) ch.insertId = must(d.mixer.inserts[insertId], `Insert ${insertId} not found`).id;
     if (group !== undefined) {
       if (group) ch.group = group;
-      else delete ch.group; // null / '' = back to automatic
+      else delete ch.group;
     }
     for (const [k, v] of Object.entries(rest)) if (v !== undefined) (ch as any)[k] = v;
     if (poly) ch.poly = { ...ch.poly, ...Object.fromEntries(Object.entries(poly).filter(([, v]) => v !== undefined)) };
@@ -196,7 +194,7 @@ export const channelsResetGenParams = defineCommand({
     keepAudioInPlace(d, ctx.catalog, a.id, () => {
       if (!a.params) {
         ch.generator.params = {};
-        delete ch.generator.preset; // defaults are no longer that preset's sound
+        delete ch.generator.preset;
       } else for (const p of a.params) delete ch.generator.params[p];
     });
     return {};
@@ -213,7 +211,6 @@ export const channelsSetSample = defineCommand({
     const desc = findPlugin(ctx.catalog, ch.generator.type);
     if (desc && !desc.usesSample) throw new CommandError(`${desc.name} does not play samples`);
     if (a.sampleId) must(d.samples[a.sampleId], `Sample ${a.sampleId} not found`);
-    // slice markers point into the old audio: a new sample starts as one slice
     if (ch.generator.type === SLICER_PLUGIN && ch.generator.sampleId !== a.sampleId) delete ch.generator.slices;
     ch.generator.sampleId = a.sampleId;
     if (a.rename && a.sampleId) ch.name = d.samples[a.sampleId].name;
@@ -243,7 +240,6 @@ export const channelsClone = defineCommand({
   run(d, a, ctx) {
     const src = must(d.channels[a.id], `Channel ${a.id} not found`);
     const id = ctx.newId(ID_PREFIX.channel);
-    // JSON copy: structuredClone throws on Immer drafts (proxies).
     d.channels[id] = { ...(JSON.parse(JSON.stringify(src)) as Channel), id, name: `${src.name} #2` };
     d.channelOrder.splice(d.channelOrder.indexOf(a.id) + 1, 0, id);
     if (a.withNotes) {

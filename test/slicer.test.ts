@@ -1,6 +1,3 @@
-// The loop slicer (shared/commands/slicer.ts, shared/schema/slicer.ts, research/13 §8.5): every slicer.* command
-// through a strict DocHost, the ordering rule (refused, never clamped), undo, integrity, the replay pattern on the
-// slices' keys, and the edges (a new sample resets the markers, racks refuse the Slicer, the schema rejects bad maps).
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import { installRackFixtures } from './rack-fixtures';
@@ -92,7 +89,6 @@ test('slicer.slice onto channels: a sampler becomes the Slicer, a Slicer keeps i
   assert.deepEqual(secs(first.channelId), [0, 0.25, 0.5]);
   assert.equal(ch(first.channelId).generator.params.cut, 0, 'settings kept');
   assert.equal(ch(first.channelId).rootKey, 48);
-  // A sampler channel turns into the Slicer (automation on its old params is unassigned).
   const kick = Object.values(doc.project.channels).find((c) => c.generator.type === 'krypt.sampler')!;
   const aut = ok<{ automationId: string }>('automation.create', { target: `channel/${kick.id}/gen/cutoff` });
   const onto = ok<Sliced>('slicer.slice', { channelId: kick.id, samplePath: 'C:/loops/b.wav', slices: [0], lengthSec: 1, pattern: false });
@@ -100,7 +96,6 @@ test('slicer.slice onto channels: a sampler becomes the Slicer, a Slicer keeps i
   assert.equal(ch(kick.id).generator.type, SLICER_PLUGIN);
   assert.deepEqual(ch(kick.id).generator.params, {});
   assert.equal(doc.project.automations[aut.automationId].target, null);
-  // Errors: nothing to slice, nothing inside the sample, too many keys.
   bad('slicer.slice', { slices: [0], lengthSec: 1 }, /Give the sample to slice/);
   bad('slicer.slice', { samplePath: 'C:/x.wav', slices: [5], lengthSec: 1 }, /None of the slice times/);
   ok('channels.setGenParams', { id: first.channelId, params: { baseKey: 126 } });
@@ -130,7 +125,6 @@ test('add / move / remove / set refuse crossings with a message and keep the map
   ok('slicer.clear', { channelId });
   assert.equal(ch(channelId).generator.slices, undefined);
   bad('slicer.clear', { channelId }, /no slice markers/);
-  // A sample of known length refuses markers past its end.
   ok('samples.add', { path: 'C:/loops/known.wav', frames: 48000, sampleRate: 48000 });
   const known = ok<Sliced>('slicer.slice', { samplePath: 'C:/loops/known.wav', slices: [0], lengthSec: 1, pattern: false });
   bad('slicer.addSlice', { channelId: known.channelId, sec: 1.5 }, /past the end of the sample \(1 s long\)/);
@@ -157,7 +151,6 @@ test('makePattern replays the current markers; a new sample resets them; other c
   const sampler = Object.values(doc.project.channels).find((c) => c.generator.type === 'krypt.sampler')!;
   bad('slicer.addSlice', { channelId: sampler.id, sec: 0.1 }, /not a Slicer channel/);
   bad('rack.create', { channelId: channelId }, /Slicer can't go in a rack/);
-  // channels.setGenerator away from the Slicer drops the markers with the rest of the generator.
   ok('slicer.addSlice', { channelId, sec: 0.2 });
   ok('channels.setGenerator', { id: channelId, type: 'krypt.sampler' });
   assert.equal(ch(channelId).generator.slices, undefined);

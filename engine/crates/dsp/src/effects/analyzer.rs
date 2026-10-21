@@ -1,7 +1,3 @@
-//! krypt.analyzer — audio passes through untouched. The display (spectrum,
-//! scope, loudness) is computed by the engine's telemetry from this slot's
-//! audio; the `view` param only selects what the UI shows.
-
 use crate::params::{param_table, ParamBank};
 use crate::{Effect, PluginDescriptor, PluginKind, ProcessContext};
 
@@ -41,7 +37,6 @@ impl Effect for Analyzer {
     }
 
     fn process(&mut self, ctx: &ProcessContext, mut buf: [&mut [f32]; 2], _sc: Option<[&[f32]; 2]>) {
-        // untouched, except that NaN/inf never travel further down the chain
         let n = super::frames(ctx, &buf);
         super::sanitize_block(&mut buf, n);
     }

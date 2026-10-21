@@ -1,5 +1,3 @@
-//! ParamRef parsing (mirrors shared/schema/params.ts) and the built-in specs.
-
 use krypt_studio_dsp::ParamSpec;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,31 +8,22 @@ pub enum ParamRef {
     Insert { insert: String, param: InsertParam },
     Slot { insert: String, slot: String, param: String },
     Route { insert: String, target: String },
-    /// A param inside a rack (Wave 12.2b): `<host>/rack/<chainId>/…`.
     Rack { host: RackHost, chain: String, what: RackParam },
 }
 
-/// The rack a `Rack` ref lives in.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RackHost {
-    /// `channel/<ch>`: an instrument / drum rack.
     Channel(String),
-    /// `insert/<i>/slot/<s>`: an effect rack.
     Slot { insert: String, slot: String },
 }
 
-/// What a `Rack` ref names inside its chain (= a macro target, rack.rs).
 #[derive(Debug, Clone, PartialEq)]
 pub enum RackParam {
-    /// `volume` | `pan`.
     Chain(String),
-    /// `inst/<paramId>`.
     Inst(String),
-    /// `dev/<deviceId>/<paramId | mix>`.
     Dev { device: String, param: String },
 }
 
-/// `rack/<chainId>/…` starting at `p[i]`.
 fn parse_rack_tail(p: &[&str], i: usize) -> Option<(String, RackParam)> {
     if p.get(i) != Some(&"rack") || p.iter().any(|x| x.is_empty()) {
         return None;
@@ -115,7 +104,6 @@ fn spec(id: &'static str, name: &'static str, min: f32, max: f32, default: f32, 
     ParamSpec { id, name, min, max, default, unit, scale, step: None, options: None, group: None, automatable: None }
 }
 
-/// BUILTIN_SPECS from params.ts.
 pub fn spec_bpm() -> ParamSpec {
     spec("bpm", "Tempo", 10.0, 999.0, 140.0, "bpm", "linear")
 }
@@ -165,7 +153,6 @@ mod tests {
         );
         assert_eq!(parse_param_ref("insert/i1/route/m"), Some(ParamRef::Route { insert: "i1".into(), target: "m".into() }));
         assert_eq!(parse_param_ref("insert/i1/bogus/x"), None);
-        // Inside racks (shared/schema/params.ts, Wave 12.2b).
         assert_eq!(
             parse_param_ref("channel/c1/rack/k1/volume"),
             Some(ParamRef::Rack { host: RackHost::Channel("c1".into()), chain: "k1".into(), what: RackParam::Chain("volume".into()) })
@@ -193,7 +180,6 @@ mod tests {
     fn builtin_mapping_matches_ts() {
         use krypt_studio_dsp::from_normalized;
         assert!((from_normalized(&spec_bpm(), 0.5) - 504.5).abs() < 1e-3);
-        // gain: max * n^3
         assert!((from_normalized(&spec_master_volume(), 0.5) - 0.25).abs() < 1e-6);
         assert!((from_normalized(&spec_pan(), 0.25) + 0.5).abs() < 1e-6);
     }

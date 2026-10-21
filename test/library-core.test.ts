@@ -1,6 +1,3 @@
-// Wave 3B reference-library core: beat mapping, drum grids, style profiles,
-// KPN examples, similarity vectors and the originality check. Synthetic
-// analyses with known grids, so every expected number is exact.
 import assert from 'node:assert/strict';
 import { test, run } from './harness';
 import type { AudioAnalysis, ChordQuality, ChordSpan, DrumHit, DrumRole } from '@shared/analyzer/protocol';
@@ -13,8 +10,6 @@ import { parse, formatIssues } from '@shared/kpn';
 import { createDefaultProject, makeChannel, makePattern } from '@shared/schema/factory';
 import { defaultNote } from '@shared/schema/project';
 import { PPQ } from '@shared/schema/time';
-
-// ── Synthetic analyses ──────────────────────────────────────────────────
 
 const close = (a: number, b: number, eps = 1e-6, msg?: string) => assert.ok(Math.abs(a - b) <= eps, msg ?? `${a} ≈ ${b}`);
 
@@ -31,16 +26,12 @@ interface SynthOpts {
   key?: string | null;
   confidence?: number;
   swing?: number | null;
-  /** Drum hits per bar (32-step positions). */
   drums?: (bar: number) => Hit[];
-  /** Chord per bar (looped). */
   chords?: Array<[number, ChordQuality]>;
-  /** Sections: [label, bars]. */
   sections?: Array<[string, number]>;
   lufs?: number;
   width?: number;
   onsetRate?: number;
-  /** Deterministic onset jitter in seconds (± this, alternating). */
   jitter?: number;
 }
 
@@ -58,7 +49,6 @@ function synth(o: SynthOpts): AudioAnalysis {
     for (let bar = 0; bar < o.bars; bar++) {
       for (const h of o.drums(bar)) {
         let beat = bar * 4 + h.step / 8;
-        // Swing odd 16ths (32-steps 2, 6, 10 …) late by swing × half a 16th.
         if (o.swing && h.step % 4 === 2) beat += o.swing * 0.125;
         const j = o.jitter ? (n++ % 2 ? 1 : -1) * o.jitter : 0;
         hits.push({ timeSec: timeAt(beat) + j, role: h.role, vel: h.vel ?? 0.8 });
@@ -126,7 +116,6 @@ function synth(o: SynthOpts): AudioAnalysis {
   };
 }
 
-/** The trap groove: kick on 1 (always) and the "and" of 2 in 60 % of bars, hats on 16ths, a 32nd roll every 4th bar. */
 function trapDrums(halfTime: boolean, kick12Always = false) {
   return (bar: number): Hit[] => {
     const h: Hit[] = [{ step: 0, role: 'kick', vel: 0.95 }];
@@ -152,7 +141,6 @@ const MAJOR_LOOP = (root: number): Array<[number, ChordQuality]> => [
   [(root + 5) % 12, 'maj'],
 ];
 
-/** Bass per bar: root on 1 (1 beat), 5th on the "and" of 2 (gap before), b7 gliding in from it, rest before the next bar. */
 function bassLine(rootKey: number, bars: number): BeatNote[] {
   const out: BeatNote[] = [];
   for (let b = 0; b < bars; b++) {
@@ -204,10 +192,7 @@ function trapCollection(): ProfileInput[] {
   });
 }
 
-// ── secToBeat ───────────────────────────────────────────────────────────
-
 test('secToBeat follows a drifting beat grid, origin at the first downbeat, extrapolates at the local tempo', () => {
-  // Accelerating: period shrinks 0.5 s → 0.4 s across 21 beats.
   const times: number[] = [];
   let t = 1;
   for (let i = 0; i < 21; i++) {
@@ -220,14 +205,11 @@ test('secToBeat follows a drifting beat grid, origin at the first downbeat, extr
   close(secToBeat(a, times[10])!, 8);
   close(secToBeat(a, times[0])!, -2, 1e-9, 'beats before the first downbeat are negative');
   close(secToBeat(a, (times[5] + times[6]) / 2)!, 3.5);
-  // Before the grid: head period = mean of the first 4 intervals.
   const head = (times[4] - times[0]) / 4;
   close(secToBeat(a, times[0] - head)!, -3);
-  // After the grid: tail period = mean of the last 4 intervals.
   const tail = (times[20] - times[16]) / 4;
   close(secToBeat(a, times[20] + 2 * tail)!, 20);
   close(secToBeat(a, times[20] + tail / 2)!, 18.5);
-  // beatToSec is the exact inverse, inside and outside the grid.
   for (const b of [-3.25, -2, 0, 3.5, 7.75, 18, 19.5]) close(secToBeat(a, beatToSec(a, b)!)!, b, 1e-9, `round trip ${b}`);
 });
 
@@ -266,8 +248,6 @@ test('notesToBeats and chordsToBeats convert seconds to beats; adjacent repeated
   ]);
 });
 
-// ── drumGrid ────────────────────────────────────────────────────────────
-
 test('drumGrid: a known trap pattern lands on the right 32nd steps (with jitter), velocities and rolls', () => {
   const a = synth({ bpm: 140, bars: 40, drums: trapDrums(true), jitter: 0.008 });
   const g = drumGrid(a, a.drumHits!, 'mix')!;
@@ -289,7 +269,6 @@ test('drumGrid: a known trap pattern lands on the right 32nd steps (with jitter)
 });
 
 test('drumGrid: swing is undone, drum-less bars and bars without a confident downbeat are skipped', () => {
-  // Swung 16ths (0.5): odd 16ths late by a quarter of a 16th → would round onto odd 32nds without un-swinging.
   const sw = synth({ bpm: 100, bars: 8, swing: 0.5, drums: trapDrums(false) });
   const g = drumGrid(sw, sw.drumHits!, 'stem')!;
   for (let s = 0; s < 32; s += 2) assert.equal(g.counts.hat![s], 8);
@@ -298,20 +277,16 @@ test('drumGrid: swing is undone, drum-less bars and bars without a confident dow
   close(unswingBeat(0.75 + 0.5 * 0.125, 0.5), 0.75);
   close(unswingBeat(0.5, 0.5), 0.5);
 
-  // 4 silent bars of intro + a missing downbeat at bar 20 (bar 19 then spans 8 beats → skipped with bar 20).
   const a = synth({ bpm: 140, bars: 40, drums: (bar) => (bar < 4 ? [] : trapDrums(true)(bar)) });
   a.beats!.downbeats = a.beats!.downbeats.filter((_, i) => i !== 20);
   const h = drumGrid(a, a.drumHits!, 'mix')!;
   assert.equal(h.bars, 40 - 4 - 2);
   assert.equal(h.counts.kick![0], 34);
 
-  // No beat grid → null.
   const nb = synth({ bpm: 140, bars: 4, drums: trapDrums(true) });
   nb.beats = null;
   assert.equal(drumGrid(nb, nb.drumHits!, 'mix'), null);
 });
-
-// ── buildProfile ────────────────────────────────────────────────────────
 
 test('buildProfile: tempo, half-time share, keys, swing on 5 synthetic trap tracks', () => {
   const p = buildProfile({ id: 'c1', name: 'Dark trap' }, trapCollection(), { seed: 7, now: 1234 });
@@ -342,7 +317,6 @@ test('buildProfile: drum probabilities are averaged per track (a long song does 
   assert.equal(d.tracks, 5);
   assert.equal(d.source, 'mix');
   assert.equal(d.roles.kick!.prob[0], 1);
-  // Per track: 0.6, 0.6, 0.6, 0.6 and 1.0 for the 80-bar track → 0.68 (bar-weighted pooling would give 0.733).
   close(d.roles.kick!.prob[12], 0.68, 1e-9);
   close(d.roles.snare!.prob[16], 0.8, 1e-9);
   close(d.roles.snare!.prob[8], 0.2, 1e-9);
@@ -364,9 +338,7 @@ test('buildProfile: bass from deep lines — lengths, degrees vs key root, kick 
   close(b.degrees[7], 1 / 3, 1e-3);
   close(b.degrees[10], 1 / 3, 1e-3);
   assert.equal(b.degrees[3], 0);
-  // Root always on a kick, the 5th on the "and" of 2 (kick in 60 % of bars), the b7 never: (1 + 0.6) / 3.
   close(b.kickAlign, 1.6 / 3, 1e-3);
-  // One glide (5th → b7) per bar out of 3 × 40 − 1 transitions.
   close(b.glide, 40 / 119, 1e-3);
 });
 
@@ -422,20 +394,17 @@ test('buildProfile: thin data → null sections with caveats, no examples', () =
   assert.equal(p.mix, null);
   assert.deepEqual(p.examples, { drums: null, bass: null });
   for (const word of ['Tempo', 'Drums', 'Bass/808', 'Harmony', 'Structure', 'Mix', 'Keys']) assert.ok(p.caveats.some((c) => c.startsWith(word)), `caveat for ${word}`);
-  // Light pass only: bass needs the deep pass.
   const light = trapCollection().map((x) => ({ ...x, features: { ...x.features, lines: {} } }));
   const q = buildProfile({ id: 'c3', name: 'Light' }, light, { now: 0 });
   assert.equal(q.bass, null);
   assert.equal(q.examples.bass, null);
   assert.ok(q.caveats.some((c) => /deep analysis/.test(c)));
   assert.ok(q.drums && q.examples.drums);
-  // A track in 3/4 stays out of the 32-step drum odds, with a caveat.
   const waltz = trapCollection();
   waltz[4].features.analysis.beats!.beatsPerBar = 3;
   const w = buildProfile({ id: 'c5', name: 'Waltz' }, waltz, { now: 0 });
   assert.equal(w.drums!.tracks, 4);
   assert.ok(w.caveats.some((c) => c.startsWith('1 track is not in 4/4')));
-  // Empty collection.
   const e = buildProfile({ id: 'c4', name: 'Empty' }, [], { now: 0 });
   assert.equal(e.analysed, 0);
   assert.ok(e.caveats[0].startsWith('No analysed tracks'));
@@ -505,8 +474,6 @@ test('profileText reads like guidance, includes the brief and the examples, resp
   assert.ok(short.includes('Tempo:'), 'high-priority blocks survive');
 });
 
-// ── similarity ──────────────────────────────────────────────────────────
-
 test('featureVector layout, NaN for missing data, similarity bounds', () => {
   assert.equal(VECTOR_VERSION, 1);
   const a = synth({ bpm: 140, bars: 16, drums: trapDrums(true) });
@@ -515,12 +482,10 @@ test('featureVector layout, NaN for missing data, similarity bounds', () => {
   assert.ok(v.every((x) => Number.isFinite(x)), 'a full analysis fills every dimension');
   const noDrums = featureVector(a, null);
   assert.ok(Number.isNaN(noDrums[FEATURE_NAMES.indexOf('drums.kick')]));
-  // 70 and 140 fold onto the same point; the raw tempo still differs.
   const half = featureVector(synth({ bpm: 70, bars: 16 }), null);
   close(half[0], noDrums[0], 1e-3);
   close(half[1], noDrums[1], 1e-3);
   assert.notEqual(half[2], noDrums[2]);
-  // Am and C share the circle-of-fifths position; the mode differs.
   const am = featureVector(synth({ bpm: 100, bars: 4, key: 'Am' }), null);
   const c = featureVector(synth({ bpm: 100, bars: 4, key: 'C' }), null);
   const ki = FEATURE_NAMES.indexOf('key.fifths.sin');
@@ -549,9 +514,6 @@ test('nearest ranks a near-duplicate first', () => {
   assert.deepEqual(nearest(target, items, 0), []);
 });
 
-// ── originality ─────────────────────────────────────────────────────────
-
-/** A distinctive 10-note hook: (beat offset, key). */
 const HOOK: Array<[number, number]> = [
   [0, 67],
   [0.5, 70],
@@ -565,7 +527,6 @@ const HOOK: Array<[number, number]> = [
   [4.5, 67],
 ];
 
-/** A long reference vocal line with the hook at beat 16, surrounded by unrelated material. */
 function referenceLine(hookAt = 16): BeatNote[] {
   const out: BeatNote[] = [];
   const filler = [60, 72, 55, 69, 58, 76, 61, 53, 74, 64, 57, 71];
@@ -583,7 +544,6 @@ function line(notes: Array<{ tick: number; dur: number; key: number }>, label = 
   return { label, patternId: 'p1', channelId: 'ch1', notes };
 }
 
-/** The hook transposed by `semi` and stretched by `scale`, starting at `tick`, with project filler around it. */
 function projectHook(semi: number, scale: number, tick: number, mutate?: (keys: number[]) => void): ProjectLine {
   const keys = HOOK.map(([, k]) => k + semi);
   mutate?.(keys);
@@ -606,16 +566,13 @@ test('lineHashes are transposition- and tempo-invariant; repeated-note windows a
   assert.equal(h1.length, HOOK.length - NGRAM_NOTES + 1);
   assert.deepEqual(h1, h2);
   assert.ok(h1.every((h) => Number.isInteger(h.hash) && h.hash >= 0 && h.hash <= 0xffffffff));
-  // Chords reduce to their top note.
   const chordy = [...orig, ...orig.map((n) => ({ ...n, key: n.key - 12, start: n.start + 0.01 }))];
   assert.deepEqual(lineHashes(chordy), h1);
-  // Reference lines (beats) and project lines (ticks) hash in the same units.
   const refHashes = new Set(beatNoteHashes(referenceLine(16)).map((h) => h.hash));
   const projHashes = projectLineHashes(projectHook(5, 2, 7680));
   assert.equal(projHashes.filter((h) => refHashes.has(h.hash)).length, HOOK.length - NGRAM_NOTES + 1);
   const pedal = Array.from({ length: 8 }, (_, i) => ({ start: i, dur: 0.5, key: 40 }));
   assert.deepEqual(lineHashes(pedal), []);
-  // A different rhythm changes the hashes.
   const other = HOOK.map(([b, k], i) => ({ start: i % 2 ? b + 0.2 : b, dur: 0.25, key: k }));
   assert.notDeepEqual(lineHashes(other), h1);
 });
@@ -628,16 +585,13 @@ test('findMatches finds a transposed, tempo-scaled copy inside a longer referenc
   assert.equal(m[0].notes, 10);
   assert.equal(m[0].atBar, 3);
   assert.equal(m[0].refAtSec, 8.5, 'downbeat 0.5 s + 16 beats at 120 BPM');
-  // With the analysis, the position follows the real beat grid (here 100 BPM from 1 s).
   const withGrid = findMatches(pl, [{ ...r, analysis: synth({ bpm: 100, bars: 16, offset: 1 }) }]);
   assert.equal(withGrid[0].refAtSec, 10.6);
   assert.equal(m[0].similarity, 1);
   assert.equal(m[0].trackId, 'r1');
   assert.equal(m[0].stem, 'vocals');
   assert.equal(m[0].line, 'Pattern "Hook" · Lead');
-  // A 12-note threshold isn't reached by the 10-note hook.
   assert.deepEqual(findMatches(pl, [r], { minNotes: 12 }), []);
-  // The same hook twice in the reference (verse + chorus) → one match per stretch of the project line, from each place.
   const twice = ref([...referenceLine(16), ...HOOK.map(([b, k]) => ({ beat: 60 + b, dur: 0.25, key: k, vel: 0.8 }))]);
   const m2 = findMatches(pl, [twice, ref(referenceLine(16), 'r2')]);
   assert.equal(m2.filter((x) => x.trackId === 'r1').length, 1, 'deduped per reference');
@@ -646,15 +600,12 @@ test('findMatches finds a transposed, tempo-scaled copy inside a longer referenc
 
 test('findMatches rides over one wrong note, ignores different melodies and generic runs', () => {
   const r = ref(referenceLine(16));
-  // One mistranscribed note (a whole tone off) in the middle of the copy.
   const wrong = findMatches(projectHook(0, 1, 7680, (k) => (k[5] += 2)), [r]);
   assert.equal(wrong.length, 1);
   assert.equal(wrong[0].notes, 10);
   assert.ok(wrong[0].similarity < 1 && wrong[0].similarity >= 0.85, `similarity ${wrong[0].similarity}`);
-  // A different melody with the same rhythm.
   const other = projectHook(0, 1, 7680, (k) => k.splice(0, k.length, 60, 64, 59, 67, 62, 71, 57, 66, 61, 69));
   assert.deepEqual(findMatches(other, [r]), []);
-  // A plain scale run and a repeated note shared by project and reference.
   const scale = [0, 2, 4, 5, 7, 9, 11, 12, 14, 16];
   const refGeneric = ref([...scale.map((s, i) => ({ beat: i * 0.5, dur: 0.5, key: 60 + s, vel: 0.8 })), ...Array.from({ length: 10 }, (_, i) => ({ beat: 8 + i * 0.5, dur: 0.5, key: 55, vel: 0.8 }))]);
   const projScale = line(scale.map((s, i) => ({ tick: i * 480, dur: 480, key: 65 + s })));
@@ -729,9 +680,6 @@ test('originalitySummary always carries the disclaimer', () => {
   assert.ok(originalitySummary({ checkedLines: 0, references: 2, matches: [] }).includes('No melodic lines'));
 });
 
-// ── Performance ─────────────────────────────────────────────────────────
-
-// Short by default (500 tracks); KRYPT_PERF=1 runs the full 5,000-track check.
 const PERF_TRACKS = process.env.KRYPT_PERF ? 5000 : 500;
 test(`buildProfile over ${PERF_TRACKS} tracks stays well under a second`, () => {
   const base = trapCollection();

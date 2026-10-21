@@ -1,6 +1,3 @@
-// "Installed" sections for the instrument / effect pickers (next to the
-// stock plugins). Big collections are grouped by vendor.
-
 import { AppWindow, Blocks } from 'lucide-react';
 import type { PluginDescriptor } from '@shared/plugins/types';
 import type { PluginTarget } from '@shared/types';
@@ -34,7 +31,6 @@ export function installedPickerItems(kind: 'instrument' | 'effect', onPick: (d: 
   return items;
 }
 
-/** "Open plugin window" menu entry for a third-party instrument / effect (or nothing). */
 export function nativeEditorItems(type: string, target: PluginTarget): MenuItem[] {
   if (!isExternalPluginId(type)) return [];
   const d = pluginById(type);

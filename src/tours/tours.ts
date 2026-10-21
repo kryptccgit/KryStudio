@@ -1,17 +1,9 @@
-// ──────────────────────────────────────────────────────────────────────
-// The tours (research/22 §1, and "Master a song" from research/23 §3). Written for someone who has never
-// opened a music app: one action per step, plain words, every term
-// explained the first time. Pure data + predicates (test/tours.test.ts).
-// ──────────────────────────────────────────────────────────────────────
-
 import type { SingletonKind } from '../workspace/panels';
 import type { AiChoice, Tour, TourCtx, TourId, TourSnapshot, TourStep } from './types';
 import { AGENT_PROVIDERS } from '@shared/agent/providers';
 
 const vis = (s: TourSnapshot, k: string): boolean => s.visible.includes(k);
 const panelSel = (k: SingletonKind) => (): string => `[data-tour-panel="${k}"]`;
-
-// ── 1. Start here: your first beat ────────────────────────────────────
 
 const firstBeat: Tour = {
   id: 'first-beat',
@@ -119,8 +111,6 @@ const firstBeat: Tour = {
     },
   ],
 };
-
-// ── 2. Find your way: windows and shortcuts ───────────────────────────
 
 const WINDOWS: Array<{ kind: SingletonKind; key: string; name: string; what: string }> = [
   { kind: 'channelRack', key: 'F6', name: 'Channel Rack', what: 'Your sounds, one row each, with the step boxes for beats.' },
@@ -250,8 +240,6 @@ const windows: Tour = {
   ],
 };
 
-// ── 3. Make a song from your beat ─────────────────────────────────────
-
 const song: Tour = {
   id: 'song',
   title: 'Make a song from your beat',
@@ -337,8 +325,6 @@ const song: Tour = {
   ],
 };
 
-// ── 4. Set up AI ──────────────────────────────────────────────────────
-
 export const AI_APPS: Record<Exclude<AiChoice, 'api-key'>, string> = {
   'claude-code': 'Claude Code',
   'claude-desktop': 'Claude Desktop',
@@ -377,7 +363,6 @@ const ai: Tour = {
       ],
     },
 
-    // (a) / (b): an MCP client
     {
       id: 'agents-open',
       when: isClient,
@@ -439,7 +424,6 @@ const ai: Tour = {
       done: (s, b) => s.mcpClientIds.some((id) => !b.mcpClientIds.includes(id)),
     },
 
-    // (c): the built-in chat with an API key
     {
       id: 'get-key',
       when: isKey,
@@ -499,12 +483,6 @@ const ai: Tour = {
   ],
 };
 
-// ── 5. Master a song ──────────────────────────────────────────────────
-// Home ▸ Audio Tools ▸ Master a song… opens a dialog with numbered steps: the tour points at them
-// (data-guide automix.song / automix.run / automix.ab) so the card sits above or below, never over the button to click.
-// Choosing the song (step ①) never starts anything; Master my song does.
-
-/** The result's default button: Keep (next step 2) while the result is undecided, then Export… (step 3) (src/automix/AutoMixDialog.tsx). */
 export const MASTER_DEFAULT_BUTTON = '[role="dialog"][aria-label="Master a song"] [data-autofocus]';
 
 const master: Tour = {

@@ -1,29 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// Auto Mix / Auto Master (research/20). Shared by the IPC handlers (the
-// Mixer's Auto Mix panel, actor = user) and the MCP tool auto_mix (the
-// agent's call group).
-//
-//   understanding  the prompt → AutoMixIntent: the connected AI (strict
-//                  schema, 8 s timeout) or the keyword parser
-//   measuring      an offline render: analysis + a file per insert + GR
-//   planning       roles / vocals, then shared/automix/plan.ts (pure)
-//   applying       ONE history group: Krypt-owned slots, volumes, sends
-//   refining       re-render and re-plan, at most 3 passes in all, until
-//                  the loudness is within ±0.5 LU, the true peak under the
-//                  ceiling and the vocal within 1 dB of its target (the
-//                  crest guard stops pushing loudness and says so)
-//
-// The group stays open across the passes, so every pass lands in the SAME
-// history entry (A/B = DocHost.toggleEntry(entryId), one undo removes it).
-// Cancel at any point rolls the group back: nothing changes.
-//
-// A reference song (research/23 §1) is read once (electron/automix/
-// reference.ts, cached) and replaces the preset's tone curve, loudness and
-// width for master / full; the crest guard and the true-peak ceiling still
-// win. Album mastering and Export all live in ./album.ts; they share this
-// service's one-job-at-a-time lock, progress and Cancel.
-// ──────────────────────────────────────────────────────────────────────
-
 import path from 'node:path';
 import type { Actor } from '@shared/doc/DocHost';
 import type { ActionResult } from '@shared/types';
@@ -67,7 +41,6 @@ export interface AutoMixRun {
   progress?(p: AutoMixProgress): void;
 }
 
-/** Where the edits go: a new group of `actor`, or an agent's call group (`ctx`). */
 export interface AutoMixInto {
   actor: Actor;
   ctx?: RunCtx;
@@ -96,9 +69,7 @@ const sgn = (x: number): string => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.ab
 
 export interface AutoMixServiceDeps {
   deps: MainDeps;
-  /** The AI prompt reader (default: the built-in agent's key when set up). null = keywords only. */
   ai?: AiIntentFn | null;
-  /** The measurement (default: an engine render). Tests pass a fake. */
   measure?: MeasureFn;
 }
 
@@ -116,7 +87,6 @@ export class AutoMixService {
     return this.s.deps;
   }
 
-  /** What is running (the tab-switch guard reads it). */
   get busy(): string | null {
     return this.running?.label ?? null;
   }
@@ -131,7 +101,6 @@ export class AutoMixService {
     return { ok: true, message: `Cancelling Auto Mix (${this.running.label}): nothing will be changed.` };
   }
 
-  /** Claim the one job slot (a label for the tab guard, a signal for Cancel); null when something already runs. */
   private claim(label: string, run: AutoMixRun): { ctx: JobCtx; release(): void } | null {
     if (this.running) return null;
     const ctrl = new AbortController();
@@ -159,21 +128,15 @@ export class AutoMixService {
     };
   }
 
-  /** A reference song's measured sound (one light engine pass, cached per file). Edits nothing. */
   async analyzeReference(p: string, opts: { signal?: AbortSignal } = {}): Promise<ActionResult<ReferenceSound>> {
     return readReference(this.deps, p, opts);
   }
 
-  /**
-   * Play the reference through the engine's preview voice (outside the mixer, so nothing processes it), turned so
-   * its integrated loudness matches `matchLufs` (the result's): a fair A/B, loudness doesn't fool the ear.
-   */
   async playReference(p: string, matchLufs: number | null): Promise<ActionResult<{ gainDb: number }>> {
     const r = await readReference(this.deps, p);
     if (!r.ok || !r.data) return { ok: false, message: r.message ?? "Couldn't read the reference" };
     const ref = r.data;
     const want = typeof matchLufs === 'number' && Number.isFinite(matchLufs) ? matchLufs - ref.lufs : 0;
-    // The preview voice takes a linear gain 0..4 (up to +12 dB).
     const gainDb = r1(Math.max(-40, Math.min(12, want)));
     const res = await this.deps.engine.request({ cmd: 'previewFile', path: ref.path, gain: Math.pow(10, gainDb / 20) }, 15_000).catch((e) => ({ ok: false as const, message: errText(e) }));
     if (!res.ok) return { ok: false, message: `Couldn't play "${ref.name}": ${res.message ?? 'the audio engine refused'}` };
@@ -184,7 +147,6 @@ export class AutoMixService {
     return { ok: true, message: `Playing the reference "${ref.name}" from its start, ${how}.`, data: { gainDb } };
   }
 
-  /** Master 2-20 songs as one record in a new project tab (./album.ts). */
   async masterAlbum(req: AlbumRequest, actor: Actor, run: AutoMixRun = {}): Promise<ActionResult<AlbumOutcome>> {
     const job = this.claim('Master an album', run);
     if (!job) return { ok: false, message: `Auto Mix is already running (${this.running?.label ?? 'another job'}): cancel it first, or wait for it to finish.` };
@@ -195,7 +157,6 @@ export class AutoMixService {
     }
   }
 
-  /** Export all: one file per album song, rendered from its range into a folder (./album.ts). */
   async exportAlbum(req: AlbumExportRequest, run: AutoMixRun = {}): Promise<ActionResult<AlbumExportOutcome>> {
     const job = this.claim('Exporting the album', run);
     if (!job) return { ok: false, message: `Auto Mix is busy (${this.running?.label ?? 'another job'}): wait for it to finish, or cancel it.` };
@@ -206,7 +167,6 @@ export class AutoMixService {
     }
   }
 
-  /** The prompt → intent: the connected AI when available (and allowed), else the keyword parser. Edits nothing. */
   async understand(prompt: string, opts: { useAi?: 'auto' | 'never'; signal?: AbortSignal } = {}): Promise<ActionResult<AutoMixIntent>> {
     const text = String(prompt ?? '').trim().slice(0, 2000);
     if (!text) return { ok: false, message: 'Type what you want (for example "vocals on top, punchy, not harsh, streaming loud").' };
@@ -214,7 +174,6 @@ export class AutoMixService {
     let intent: AutoMixIntent = kw;
     if (opts.useAi !== 'never' && this.ai) {
       const fromAi = await this.ai(text, opts.signal).catch(() => null);
-      // The AI reading leads; the keyword reading fills in what it left out (an explicit "-9 LUFS" always counts).
       if (fromAi) intent = mergeIntents(clampIntent({ ...fromAi, ...(kw.targetLufs !== undefined && fromAi.targetLufs === undefined ? { targetLufs: kw.targetLufs } : {}) }, 'ai'), null)!;
     }
     return { ok: true, message: `Understood (${intent.source === 'ai' ? 'AI' : 'keywords'}): ${intent.summary || 'nothing specific, the preset as it is'}.`, data: intent };
@@ -226,12 +185,10 @@ export class AutoMixService {
       try {
         run.progress?.({ stage, fraction: within < 0 ? -1 : lo + (hi - lo) * Math.max(0, Math.min(1, within)), message });
       } catch {
-        /* progress is best-effort */
       }
     };
   }
 
-  /** The whole run (see the header). */
   async run(req: AutoMixRequest, into: AutoMixInto, run: AutoMixRun = {}, opts: { dryRun?: boolean } = {}): Promise<ActionResult<AutoMixOutcome>> {
     const mode = req.mode;
     if (!['vocals', 'mix', 'master', 'full'].includes(mode)) return { ok: false, message: `Unknown Auto Mix mode "${String(mode).slice(0, 20)}": use vocals, mix, master or full.` };
@@ -252,7 +209,6 @@ export class AutoMixService {
     let group: { id: string; own: boolean } | null = null;
     const rollback = (): boolean => {
       if (!group) return true;
-      // An agent's call group: callTool rolls it back (and says so) when the call fails.
       if (!group.own) {
         group = null;
         return true;
@@ -264,7 +220,6 @@ export class AutoMixService {
       return ok;
     };
     try {
-      // 1. The prompt.
       let intent: AutoMixIntent | null = null;
       if (req.prompt?.trim()) {
         say('understanding', 0, 'Reading your prompt…');
@@ -272,7 +227,6 @@ export class AutoMixService {
         check();
         intent = u.ok && u.data ? u.data : null;
       }
-      // 1b. The reference song (cached after the dialog read it).
       let ref: ReferenceSound | null = null;
       const masters = mode === 'master' || mode === 'full';
       if (req.reference?.trim() && masters) {
@@ -282,13 +236,11 @@ export class AutoMixService {
         if (!rr.ok || !rr.data) return { ok: false, message: `Auto Mix couldn't use the reference song: ${rr.message ?? 'it could not be read'} Nothing was changed.` };
         ref = rr.data;
       }
-      // 2. Measure (before).
       say('measuring', 0.05, 'Rendering and measuring the song…');
       const scope = measureScope(doc.project, req.bars);
       const first = await this.measureFn(this.deps, scope);
       check();
       const before = first.measure;
-      // 3. Preset, targets, roles.
       say('planning', 0, 'Planning…');
       const notes: string[] = [];
       let preset: AutoMixPreset | null = req.preset && req.preset !== 'auto' ? presetById(req.preset) : null;
@@ -353,7 +305,6 @@ export class AutoMixService {
         const tk = pk ? tuneKeyFor(pk.key) : null;
         tune = { style, key: tk ? { root: tk.root, scale: tk.scale, name: tk.label } : null };
       }
-      // 4-5. Apply and refine in ONE group.
       const io: ApplyIO = {
         project: () => doc.project,
         catalog: doc.catalog,
@@ -369,7 +320,6 @@ export class AutoMixService {
       };
       if (into.ctx) group = { id: into.ctx.groupId, own: false };
       const changes = new Map<string, AutoMixChange>();
-      // The measured "before" is the first point of the loudness curve (drive → LUFS) the passes walk along.
       const loudHistory: Array<{ drive: number; lufs: number }> = [{ drive: masterDrive(doc.project, keepUserFx), lufs: before.master.lufs }];
       let current = before;
       let passes = 0;
@@ -386,7 +336,6 @@ export class AutoMixService {
       while (passes < MAX_PASSES) {
         const plan = planAutoMix({ ...base, project: doc.project, catalog: doc.catalog, measure: current, pass: passes + 1, loudHistory });
         if (passes > 0 && plan.converged) {
-          // Converged or capped: say why (the crest guard's note) and stop refining.
           for (const n of plan.notes) if (n.startsWith('Loudness capped')) planNotes.add(n);
           break;
         }
@@ -404,7 +353,6 @@ export class AutoMixService {
         if (plan.drive !== null) loudHistory[loudHistory.length - 1] = { drive: plan.drive, lufs: current.master.lufs };
         if (meetsTargets({ ...base, measure: current }).ok) break;
       }
-      // Safety: never leave the true peak over the ceiling.
       if ((mode === 'master' || mode === 'full') && edits && current.master.truePeak > target.truePeak + 0.05) {
         const plan = planAutoMix({ ...base, project: doc.project, catalog: doc.catalog, measure: current, pass: passes + 1, loudHistory });
         const limOnly = { ...plan, ops: plan.ops.filter((o) => o.op === 'slot' && o.kind === 'limiter') };
@@ -453,10 +401,6 @@ export class AutoMixService {
     }
   }
 
-  /**
-   * Master an audio FILE: a new project tab with the audio on its own track (one history entry), then `master`
-   * on it (a second entry, so A/B and undo touch only the mastering). The UI offers the export afterwards.
-   */
   async masterFile(req: MasterFileRequest, actor: Actor, run: AutoMixRun = {}): Promise<ActionResult<AutoMixOutcome>> {
     const deps = this.deps;
     const abs = String(req.path ?? '').trim();
@@ -504,7 +448,6 @@ export class AutoMixService {
   }
 }
 
-/** Roles for display (the MCP dry run lists them). */
 export function rolesLine(roles: Record<string, InsertInfo>): string {
   return Object.values(roles)
     .map((r) => `${r.name}: ${r.vocal ? 'vocal' : r.role}`)

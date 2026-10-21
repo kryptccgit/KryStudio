@@ -1,17 +1,8 @@
-// Project schema migrations + load-time validation.
-//
-// MIGRATIONS[n] upgrades a raw v(n) document to v(n+1). They are pure
-// functions over untrusted JSON, chained on load, and the result is then
-// validated with zod (zProject) and checkIntegrity(). Files from a NEWER
-// schema are refused with an actionable message (never half-loaded).
-// (Candidate to move to shared/schema/migrations/ once it holds real steps.)
-
 import { SCHEMA_VERSION, checkIntegrity, zProject, type Project } from '@shared/schema/project';
 import { ProjectFileError } from './container';
 
 type Migration = (raw: Record<string, unknown>) => Record<string, unknown>;
 
-/** Keyed by the version they upgrade FROM. Schema 1 is current: nothing to do yet. */
 export const MIGRATIONS: Record<number, Migration> = {};
 
 export function migrate(raw: Record<string, unknown>, fromVersion: number): Record<string, unknown> {
@@ -25,7 +16,6 @@ export function migrate(raw: Record<string, unknown>, fromVersion: number): Reco
   return doc;
 }
 
-/** Untrusted JSON → a valid, current-schema Project (or a ProjectFileError). */
 export function validateProject(raw: unknown, metaSchemaVersion?: number): Project {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ProjectFileError("The project file doesn't contain a project.");
   const obj = raw as Record<string, unknown>;

@@ -1,8 +1,3 @@
-// Analyzer state in the renderer: the Model Manager snapshot from main
-// (models, jobs, devices) and the actions behind the Model Manager buttons.
-// Every action ends in visible feedback; cancelled downloads are reported by
-// the Cancel click, not again when the install promise settles.
-
 import { create } from 'zustand';
 import type { ActionResult, AnalyzerState } from '@shared/types';
 import type { ModelDef } from '@shared/analyzer/models';
@@ -13,7 +8,6 @@ import { openLicenceConfirm } from './LicenceConfirm';
 
 interface AnalyzerStore {
   state: AnalyzerState | null;
-  /** Model id → action in flight (Install / Import / Remove), for button spinners. */
   busy: Record<string, string>;
 }
 
@@ -39,7 +33,6 @@ function setBusy(id: string, label: string | null): void {
 
 let installed = false;
 
-/** Boot: fetch the analyzer snapshot and follow every change from main. */
 export function installAnalyzerSync(): void {
   if (installed) return;
   installed = true;
@@ -53,11 +46,9 @@ export async function refreshAnalyzer(): Promise<void> {
   try {
     apply(await window.krypt.analyzer.state());
   } catch {
-    /* main not ready yet: onState will deliver it */
   }
 }
 
-/** The analyzer is missing: say so (plus how to fix it in development). */
 export function analyzerMissingMessage(): string {
   return "The analyzer (krypt-studio-analyzer.exe) wasn't found, so audio analysis can't run. Reinstall Krypt Studio; in development run “npm run engine:build:debug”.";
 }
@@ -70,7 +61,6 @@ async function call<T>(label: string, fn: () => Promise<ActionResult<T>>): Promi
   }
 }
 
-/** Install: licence + notice confirm first, then download + verify. */
 export async function installModel(def: ModelDef, doc?: Document | null): Promise<boolean> {
   if (!(await openLicenceConfirm(def, 'download', doc))) return false;
   setBusy(def.id, 'Installing');
@@ -78,7 +68,7 @@ export async function installModel(def: ModelDef, doc?: Document | null): Promis
   const r = await call('Install', () => window.krypt.analyzer.installModel(def.id));
   setBusy(def.id, null);
   if (r.data) apply(r.data);
-  if (!r.ok && isCancelMessage(r.message)) return false; // the Cancel click already said so
+  if (!r.ok && isCancelMessage(r.message)) return false;
   return report(r, `${def.name} installed`);
 }
 
@@ -87,14 +77,13 @@ export async function cancelInstall(def: Pick<ModelDef, 'id' | 'name'>): Promise
   if (report(r)) toast.info(`Download of ${def.name} cancelled`);
 }
 
-/** Install from a folder the user picks (offline installs, no published download). */
 export async function importModel(def: ModelDef, doc?: Document | null): Promise<boolean> {
   if (!(await openLicenceConfirm(def, 'folder', doc))) return false;
   setBusy(def.id, 'Importing');
   const r = await call('Install from folder', () => window.krypt.analyzer.importModel(def.id));
   setBusy(def.id, null);
   if (r.data) apply(r.data);
-  if (!r.ok && isCancelMessage(r.message)) return false; // folder picker dismissed
+  if (!r.ok && isCancelMessage(r.message)) return false;
   return report(r, r.message || `${def.name} installed from folder`);
 }
 

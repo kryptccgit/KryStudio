@@ -1,6 +1,3 @@
-// The Auto Mashup guide (research/18). Kept in its own file; articles.ts
-// lists it after "Vocals, tuning & mashups". Pure data.
-
 import type { GuideArticle } from './articles';
 
 export const MASHUP_ARTICLE: GuideArticle = {
