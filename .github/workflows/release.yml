@@ -88,11 +88,7 @@ jobs:
 
       - name: Assert static CRT (no VCRUNTIME140.dll imports)
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          foreach ($exe in Get-ChildItem resources/bin/*.exe) {
-            if (Select-String -Path $exe.FullName -Pattern 'VCRUNTIME140' -SimpleMatch -Quiet) { throw "$($exe.Name) imports VCRUNTIME140.dll" }
-          }
+        run: node scripts/check-static-crt.mjs
 
       - name: Licence gate + notices (all targets)
         if: runner.os == 'Windows'

@@ -106,16 +106,11 @@ jobs:
       - name: Release engine build
         run: npm run engine:build
 
+      # Reads each exe's import table: a text search also matches the analyzer's
+      # own "vcruntime140.dll" string (the DLLs it stages for ONNX Runtime).
       - name: Assert static CRT (no VCRUNTIME140.dll imports)
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          foreach ($exe in Get-ChildItem resources/bin/*.exe) {
-            if (Select-String -Path $exe.FullName -Pattern 'VCRUNTIME140' -SimpleMatch -Quiet) {
-              throw "$($exe.Name) imports VCRUNTIME140.dll: the static CRT flags in .cargo/config.toml were not applied"
-            }
-            Write-Host "$($exe.Name): static CRT ok ($([math]::Round($exe.Length / 1MB, 2)) MB)"
-          }
+        run: node scripts/check-static-crt.mjs
 
       - name: Licence gate (npm + cargo, all targets)
         if: runner.os == 'Windows'

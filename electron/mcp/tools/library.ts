@@ -437,7 +437,7 @@ export const libraryImport = defineTool({
   description:
     "Queue the USER'S OWN songs into a reference-library collection for on-device analysis (the light pass: tempo, key, drums, chords, loudness): folder = a folder (recursively; wav, aiff, flac, mp3, ogg, m4a …), or file = one song (e.g. a reference track to compare against with check_originality). The collection is created when no collection has that name. Any local folder or file works by default; when the user restricted File access (Settings ▸ Agents), paths outside their Browser folders are asked about first (the call waits) or refused. A whole drive is never accepted. Records only: files are never copied, moved or uploaded. For stems + transcribed lines, call library_deep afterwards (needs a stem model the user installed). Doesn't change the project. Example: {\"file\":\"C:\\\\Users\\\\me\\\\Downloads\\\\song.mp3\",\"collection\":\"References\"}",
   input: z.object({
-    folder: z.string().min(3).max(400).optional().describe('Absolute folder path.'),
+    folder: z.string().min(1).max(400).optional().describe('Absolute folder path.'),
     file: z.string().min(3).max(400).optional().describe('Absolute path of ONE audio file (instead of folder).'),
     collection: z.string().min(1).max(64).describe('Collection name or id (created when missing).'),
     tags: z.array(z.string().max(32)).max(8).optional().describe('Tags for a NEW collection.'),
