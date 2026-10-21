@@ -1058,7 +1058,8 @@ fn mp3_jobs_validate_before_rendering() {
     assert_eq!(job.mp3_kbps, None);
     if !mp3_encoder() {
         let e = validate_request(&render_job(&path, "mp3", 48_000.0, None)).unwrap_err();
-        assert_eq!(e, krypt_studio_dsp::mp3::ENCODER_MISSING, "a Windows without the encoder is told so before rendering");
+        let want = if cfg!(windows) { krypt_studio_dsp::mp3::ENCODER_MISSING } else { krypt_studio_dsp::mp3::ENCODER_WINDOWS_ONLY };
+        assert_eq!(e, want, "a system without the encoder is told so before rendering");
         return;
     }
     assert_eq!(validate_request(&render_job(&path, "mp3", 48_000.0, None)), Ok(()));

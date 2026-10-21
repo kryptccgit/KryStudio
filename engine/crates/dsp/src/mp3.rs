@@ -16,6 +16,8 @@ const DECODER_DELAY: u64 = 529;
 
 pub const ENCODER_MISSING: &str = "MP3 export needs Windows' MP3 encoder, which is missing on Windows N editions without the Media Feature Pack.";
 
+pub const ENCODER_WINDOWS_ONLY: &str = "MP3 export needs Windows' MP3 encoder (Media Foundation), which only Windows has";
+
 pub fn parse_kbps(kbps: Option<f64>) -> Result<u32, String> {
     let Some(k) = kbps else { return Ok(DEFAULT_KBPS) };
     if let Some(&b) = BITRATES_KBPS.iter().find(|&&b| b as f64 == k) {
@@ -331,7 +333,7 @@ fn encode(tmp: &Path, left: &[f32], right: &[f32], rate: u32, kbps: u32, cancel:
 
 #[cfg(not(all(windows, feature = "mediafoundation")))]
 fn encode(_tmp: &Path, _left: &[f32], _right: &[f32], _rate: u32, _kbps: u32, _cancel: Option<&AtomicBool>) -> Result<(), String> {
-    Err(if cfg!(windows) { "MP3 export needs Windows Media Foundation, which this build doesn't include".to_string() } else { "MP3 export needs Windows' MP3 encoder (Media Foundation), which only Windows has".to_string() })
+    Err(if cfg!(windows) { "MP3 export needs Windows Media Foundation, which this build doesn't include".to_string() } else { ENCODER_WINDOWS_ONLY.to_string() })
 }
 
 #[cfg(test)]
