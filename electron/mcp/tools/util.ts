@@ -498,9 +498,31 @@ export function unquotePath(s: string): string {
   return (m ? m[2] : t).trim();
 }
 
+const IS_WIN = process.platform === 'win32';
+const DRIVE_PATH = /^[A-Za-z]:[\\/]/;
+const POSIX_PATH = /^\/(?!\/)/;
+const EXAMPLE_DIR = IS_WIN ? 'C:\\Users\\me' : process.platform === 'darwin' ? '/Users/me' : '/home/me';
+const exampleIn = (...parts: string[]): string => [EXAMPLE_DIR, ...parts].join(IS_WIN ? '\\' : '/');
+
+export function isAbsoluteLocalPath(s: string): boolean {
+  return IS_WIN ? DRIVE_PATH.test(s) : POSIX_PATH.test(s);
+}
+
+export function startsLikeLocalPath(s: string): boolean {
+  return DRIVE_PATH.test(s) || (!IS_WIN && POSIX_PATH.test(s));
+}
+
+function isDevicePath(real: string): boolean {
+  return IS_WIN ? !DRIVE_PATH.test(real) : !POSIX_PATH.test(real) || /^\/(dev|proc|sys)(\/|$)/.test(real);
+}
+
+function hasStreamSuffix(s: string): boolean {
+  return (IS_WIN ? s.slice(2) : s).includes(':');
+}
+
 export function looksLikePath(s: string): boolean {
   const t = unquotePath(s);
-  return /^[A-Za-z]:[\\/]/.test(t) || /^[\\/]{2}/.test(t) || t.startsWith('factory:');
+  return startsLikeLocalPath(t) || /^[\\/]{2}/.test(t) || t.startsWith('factory:');
 }
 
 function isNetworkPath(s: string): boolean {
@@ -512,8 +534,8 @@ export function realUserPath(input: string, kind: UserPathKind): { real: string;
   const what = kind === 'folder' ? 'folder' : 'file';
   if (isNetworkPath(s)) fail(`Network (UNC) and device paths are not allowed; use a local ${what} on this PC (opening a \\\\host\\share path would send your Windows login to that host)`);
   if (kind === 'image' || kind === 'midi') return realTypedFile(s, kind);
-  if (!/^[A-Za-z]:[\\/]/.test(s)) fail(kind === 'folder' ? 'folder must be an absolute path, e.g. C:\\Music\\Dark Trap' : `Paths must be absolute (C:\\...\\kick.wav)${kind === 'audio' ? ' or "factory:drums/kick.wav"' : ''}`);
-  if (s.slice(2).includes(':')) fail('Alternate data streams (file:stream) are not allowed');
+  if (!isAbsoluteLocalPath(s)) fail(kind === 'folder' ? `folder must be an absolute path, e.g. ${exampleIn('Music', 'Dark Trap')}` : `Paths must be absolute (${exampleIn('Music', 'kick.wav')})${kind === 'audio' ? ' or "factory:drums/kick.wav"' : ''}`);
+  if (hasStreamSuffix(s)) fail('Alternate data streams (file:stream) are not allowed');
   const wantsAudio = kind === 'audio' || (kind === 'audio-or-folder' && AUDIO_EXT.test(s));
   if (kind === 'audio' && !AUDIO_EXT.test(s)) fail(`"${safeName(path.basename(s))}" is not an audio file (wav, aiff, flac, mp3, ogg, m4a …)`);
   let real: string;
@@ -522,7 +544,7 @@ export function realUserPath(input: string, kind: UserPathKind): { real: string;
   } catch {
     fail(`${kind === 'folder' ? 'Folder' : 'File'} not found: ${safeName(s, 200)}`);
   }
-  if (isNetworkPath(real) || !/^[A-Za-z]:[\\/]/.test(real)) fail(`"${safeName(s, 200)}" leads to a network or device location, which agents can't read`);
+  if (isNetworkPath(real) || isDevicePath(real)) fail(`"${safeName(s, 200)}" leads to a network or device location, which agents can't read`);
   let isDir = false;
   try {
     isDir = fs.statSync(real).isDirectory();
@@ -540,8 +562,8 @@ export function realUserPath(input: string, kind: UserPathKind): { real: string;
 function realTypedFile(s: string, kind: 'image' | 'midi'): { real: string; isDir: boolean } {
   const ext = kind === 'image' ? IMAGE_EXT : MIDI_EXT;
   const notType = (p: string) => `"${safeName(path.basename(p))}" is not ${kind === 'image' ? 'a PNG or JPEG image' : 'a MIDI file (.mid)'}`;
-  if (!/^[A-Za-z]:[\\/]/.test(s)) fail(kind === 'image' ? 'The image path must be absolute, e.g. C:\\Users\\me\\Pictures\\cover.jpg' : 'The MIDI file path must be absolute, e.g. C:\\Users\\me\\Music\\hook.mid');
-  if (s.slice(2).includes(':')) fail('Alternate data streams (file:stream) are not allowed');
+  if (!isAbsoluteLocalPath(s)) fail(kind === 'image' ? `The image path must be absolute, e.g. ${exampleIn('Pictures', 'cover.jpg')}` : `The MIDI file path must be absolute, e.g. ${exampleIn('Music', 'hook.mid')}`);
+  if (hasStreamSuffix(s)) fail('Alternate data streams (file:stream) are not allowed');
   if (!ext.test(s)) fail(notType(s));
   let real: string;
   try {
@@ -549,7 +571,7 @@ function realTypedFile(s: string, kind: 'image' | 'midi'): { real: string; isDir
   } catch {
     fail(`File not found: ${safeName(s, 200)}`);
   }
-  if (isNetworkPath(real) || !/^[A-Za-z]:[\\/]/.test(real)) fail(`"${safeName(s, 200)}" leads to a network or device location, which agents can't read`);
+  if (isNetworkPath(real) || isDevicePath(real)) fail(`"${safeName(s, 200)}" leads to a network or device location, which agents can't read`);
   if (!ext.test(real)) fail(notType(s));
   let isFile = false;
   try {

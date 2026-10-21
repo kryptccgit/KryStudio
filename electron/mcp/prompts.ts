@@ -97,7 +97,7 @@ export interface AudioReference {
   partial: boolean;
 }
 
-const PATH_START = /^["'“‘(<]*[A-Za-z]:[\\/]/;
+const PATH_START = process.platform === 'win32' ? /^["'“‘(<]*[A-Za-z]:[\\/]/ : /^["'“‘(<]*([A-Za-z]:[\\/]|\/(?!\/))/;
 
 function cleanPath(s: string): string {
   return s.replace(/^["'“‘(<]+/, '').replace(/["'”’,;:!?.)>\]]+$/, '');

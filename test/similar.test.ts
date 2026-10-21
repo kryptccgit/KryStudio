@@ -118,12 +118,21 @@ fs.writeFileSync(OUTSIDE, 'RIFF');
 
 const resolveSample = (p: string) => (p.startsWith('pack:testpack/') ? path.join(PACK_DIR, ...p.slice('pack:testpack/'.length).split('/')) : p.startsWith('factory:') ? path.join(FACTORY, ...p.slice(8).split('/')) : p);
 
+const realOf = (p: string): string => {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
+const samePath = (a: string, b: string): boolean => a === b || realOf(a) === realOf(b);
+
 function fakeAnalyzer(calls: string[], opts: { fail?: RegExp } = {}) {
   return async (abs: string): Promise<ActionResult<FingerprintResult>> => {
     calls.push(path.basename(abs));
     if (opts.fail?.test(abs)) return { ok: false, message: 'Unsupported or corrupt audio file' };
-    const pf = PACK_FILES.find((f) => path.join(PACK_DIR, f.file) === abs);
-    const like = pf ? pf.like : abs === USER_KICK ? samplesOf('kick')[2].source.path : samplesOf('hat')[0].source.path;
+    const pf = PACK_FILES.find((f) => samePath(path.join(PACK_DIR, f.file), abs));
+    const like = pf ? pf.like : samePath(abs, USER_KICK) ? samplesOf('kick')[2].source.path : samplesOf('hat')[0].source.path;
     const base = fpOf(like);
     return { ok: true, data: { segments: [], whole: { ...base, rmsDb: base.rmsDb - 1 } } };
   };

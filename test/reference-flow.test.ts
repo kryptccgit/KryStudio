@@ -353,10 +353,11 @@ test('consent: the client asks first; when its elicitation fails, Krypt Studio a
 });
 
 test('consent texts: the dialog and the elicitation name the client, the file and the folder; drive roots are never offered', () => {
-  const req: ConsentRequest = { path: 'C:\\Users\\me\\Downloads\\song.mp3', isDir: false, client: 'Claude Code', clientId: 'claude-code', tool: 'import_audio' };
+  const win = process.platform === 'win32';
+  const req: ConsentRequest = { path: win ? 'C:\\Users\\me\\Downloads\\song.mp3' : '/Users/me/Downloads/song.mp3', isDir: false, client: 'Claude Code', clientId: 'claude-code', tool: 'import_audio' };
   const t = consentText(req);
   assert.equal(t.message, 'Claude Code wants to use "song.mp3" to put it on the Playlist');
-  assert.match(t.detail, /^From: C:\\Users\\me\\Downloads/);
+  assert.ok(t.detail.startsWith(`From: ${win ? 'C:\\Users\\me\\Downloads' : '/Users/me/Downloads'}`), t.detail);
   assert.deepEqual(t.choices.map((c) => c.label), ['Allow this file', 'Allow this folder', 'Deny']);
   const e = consentElicitation(req);
   assert.equal(e.mode, 'form');
@@ -364,9 +365,9 @@ test('consent texts: the dialog and the elicitation name the client, the file an
   const access = e.requestedSchema.properties.access as { oneOf: Array<{ const: string; title: string }> };
   assert.deepEqual(access.oneOf.map((o) => o.const), ['file', 'folder', 'deny']);
   assert.deepEqual(e.requestedSchema.required, ['access']);
-  const top = consentText({ ...req, path: 'C:\\song.mp3' });
+  const top = consentText({ ...req, path: win ? 'C:\\song.mp3' : '/song.mp3' });
   assert.deepEqual(top.choices.map((c) => c.value), ['file', 'deny'], 'never "allow the whole drive"');
-  const dir = consentText({ ...req, path: 'C:\\Music\\Refs', isDir: true, tool: 'library_import' });
+  const dir = consentText({ ...req, path: win ? 'C:\\Music\\Refs' : '/Music/Refs', isDir: true, tool: 'library_import' });
   assert.deepEqual(dir.choices.map((c) => c.label), ['Allow once', 'Add to Browser folders', 'Deny']);
 });
 

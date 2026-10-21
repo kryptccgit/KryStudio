@@ -2,13 +2,13 @@ import type { SimilarQuery, SimilarResult, SimilarSource } from '@shared/types';
 import type { MainDeps } from '../types';
 import { findSimilar, similarDepsFor, type SimilarDeps } from '../../sounds/similar';
 import { fail, ToolFailure, type RunCtx, type ToolCaller } from './types';
-import { agentSamplePath, AUDIO_EXT, safeName, unquotePath } from './util';
+import { agentSamplePath, AUDIO_EXT, safeName, startsLikeLocalPath, unquotePath } from './util';
 import { soundLibrary } from './instruments';
 
 export function likeSource(deps: MainDeps, like: string): SimilarSource {
   const s = unquotePath(like);
   if (!s) fail('like is empty: pass a sample path (factory:… / pack:… / an audio file) or an instrument preset id.');
-  if (s.startsWith('pack:') || (s.startsWith('factory:') && AUDIO_EXT.test(s)) || /^[A-Za-z]:[\\/]/.test(s) || /^[\\/]{2}/.test(s)) return { kind: 'sample', path: s };
+  if (s.startsWith('pack:') || (s.startsWith('factory:') && AUDIO_EXT.test(s)) || startsLikeLocalPath(s) || /^[\\/]{2}/.test(s)) return { kind: 'sample', path: s };
   const presets = soundLibrary(deps).presets;
   const p = presets.find((x) => x.id === s) ?? presets.find((x) => x.name.toLowerCase() === s.toLowerCase());
   if (p && p.kind === 'chain') fail(`"${safeName(p.name, 60)}" is an effect chain; like compares instrument sounds and samples.`);
