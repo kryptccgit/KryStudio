@@ -1,0 +1,157 @@
+name: CI
+
+# Every push to main and every pull request, on Windows, macOS (Apple Silicon)
+# and Linux: typecheck, unit tests, Rust tests, release engine build, demo
+# render smoke test, and the installer as a downloadable artifact. The licence
+# gate and the notices check cover all three targets and run once, on Windows.
+# Releases are built by release.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Builds are unsigned for now (see README). Stop electron-builder from
+  # looking for a certificate in the runner's store / keychain.
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  CARGO_TERM_COLOR: always
+  # Never set RUSTFLAGS here: it overrides the static-CRT flags in
+  # .cargo/config.toml (research/07 §4.5).
+
+jobs:
+  build:
+    name: ${{ matrix.name }} build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+            installers: |
+              release/*.exe
+              release/*.blockmap
+          - os: macos-latest
+            name: macOS
+            installers: release/*.dmg
+          - os: ubuntu-latest
+            name: Linux
+            installers: |
+              release/*.AppImage
+              release/*.deb
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install Rust (stable)
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Linux build dependencies (ALSA for audio + MIDI)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine -> target
+
+      - name: Cache Electron and electron-builder downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Fetch the Electron binary (npm 11 skips install scripts)
+        run: node node_modules/electron/install.js
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Rust tests
+        run: cargo test --locked --manifest-path engine/Cargo.toml --workspace
+
+      - name: Release engine build
+        run: npm run engine:build
+
+      - name: Assert static CRT (no VCRUNTIME140.dll imports)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($exe in Get-ChildItem resources/bin/*.exe) {
+            if (Select-String -Path $exe.FullName -Pattern 'VCRUNTIME140' -SimpleMatch -Quiet) {
+              throw "$($exe.Name) imports VCRUNTIME140.dll: the static CRT flags in .cargo/config.toml were not applied"
+            }
+            Write-Host "$($exe.Name): static CRT ok ($([math]::Round($exe.Length / 1MB, 2)) MB)"
+          }
+
+      - name: Licence gate (npm + cargo, all targets)
+        if: runner.os == 'Windows'
+        run: npm run license:check
+
+      - name: THIRD-PARTY-NOTICES.md is up to date
+        if: runner.os == 'Windows'
+        run: npm run notices:check
+
+      - name: Demo project renders (engine CLI smoke test)
+        run: node scripts/run-script.mjs scripts/make-demo.ts --render
+
+      - name: Build installer
+        run: npm run dist
+
+      - name: macOS signature holds after packaging
+        if: runner.os == 'macOS'
+        run: |
+          APP=$(ls -d release/mac*/*.app | head -1)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Installer size
+        shell: bash
+        run: ls -la release/ | grep -E '\.(exe|dmg|AppImage|deb)$'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: krypt-studio-${{ runner.os }}
+          path: ${{ matrix.installers }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: engine-pdb
+          path: engine/target/release/*.pdb
+          if-no-files-found: warn
+          retention-days: 14

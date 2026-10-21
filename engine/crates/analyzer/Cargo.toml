@@ -1,0 +1,44 @@
+[package]
+name = "krypt-studio-analyzer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Krypt Studio on-device audio ML sidecar (stdio NDJSON jobs: analyze, separate, transcribe)"
+
+[lib]
+name = "krypt_studio_analyzer"
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "krypt-studio-analyzer"
+path = "src/main.rs"
+
+[dependencies]
+krypt-studio-dsp = { path = "../dsp", features = ["decode", "mediafoundation"] }
+serde = { version = "1", features = ["derive"] }  # MIT OR Apache-2.0
+serde_json = "1"                                   # MIT OR Apache-2.0
+hound = "3.5.1"                                    # Apache-2.0 (stem WAV writer)
+# ── Stem separation (separate.rs) ──
+# ONNX Runtime bindings, MIT OR Apache-2.0. `load-dynamic`: onnxruntime.dll is
+# opened at run time (never linked), so the analyzer starts even when the DLL
+# is missing and only `separate` fails. api-24 = ONNX Runtime 1.24, the last
+# release with a DirectML build (Microsoft.ML.OnnxRuntime.DirectML 1.24.4).
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "directml", "api-24"] }
+libloading = "0.9"                                 # ISC (pre-loads the DLLs that sit next to onnxruntime.dll)
+realfft = "3.5"                                    # MIT (HT-Demucs STFT/iSTFT outside the graph)
+rubato = "3.0"                                     # MIT (resampling to/from the model's 44.1 kHz)
+audioadapter-buffers = "3.0"                       # MIT OR Apache-2.0 (rubato buffer adapters)
+# ── Analysis + transcription (analyze.rs, transcribe.rs) ──
+# rten: pure-Rust ONNX runtime (no DLLs) for the tiny bundled models (Basic
+# Pitch, Beat This! small). 0.27 is the first that runs Basic Pitch's nmp.onnx.
+rten = { version = "0.27", default-features = false, features = ["onnx_format", "fft"] }  # MIT OR Apache-2.0
+rten-tensor = "0.27"                               # MIT OR Apache-2.0
+# Beat This! pipeline (mel, chunked inference, peak picking); run on our rten
+# 0.27 through its Model trait. Code MIT (CPJKU + danigb), weights MIT.
+beat-this = { version = "1.1.0", default-features = false }
+anyhow = "1"                                       # MIT OR Apache-2.0 (beat-this Model trait errors)
+rustfft = "6.2"                                    # MIT OR Apache-2.0 (STFT, YIN, autocorrelation)
+# ── Krypt Voice (tts.rs, sing.rs) ──
+miniz_oxide = "0.8"                                # MIT OR Zlib OR Apache-2.0 (inflates the embedded CMUdict)
+krypt-studio-stretch = { path = "../stretch" }     # MIT (Signalsmith Stretch: sing's time-stretch + pitch-shift)

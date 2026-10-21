@@ -1,0 +1,6 @@
+pattern "Trap A" bars=2 grid=16 key=F#m
+kick       : x... .... ..x. .... | x... .... .x.. ..x.
+snare      : .... X... .... X... | .... X... .... X..o
+hat/32     : (x.x.)*7 xxxx | (x.x.)*6 xxxx xxxx
+openhat    : .... .... .... ..o. | .... .... .... ....
+808 {oct=1}: F#1:6 r:4 C#2:2 E2:4 | F#1:8~ C#1:4 r:2 A1:2

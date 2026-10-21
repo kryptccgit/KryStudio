@@ -1,0 +1,37 @@
+[package]
+name = "krypt-studio-pluginhost"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Krypt Studio plugin host: runs third-party VST3/CLAP plugins out of process (and scans them)"
+
+[[bin]]
+name = "krypt-studio-pluginhost"
+path = "src/main.rs"
+
+[dependencies]
+krypt-studio-pluginclient = { path = "../pluginclient", default-features = false }   # shared-memory layout + base64
+serde = { version = "1", features = ["derive"] }           # MIT OR Apache-2.0
+serde_json = "1"                                            # MIT OR Apache-2.0
+# CLAP hosting (MIT OR Apache-2.0).
+clack-host = "0.2.0"
+clack-extensions = { version = "0.2.0", features = ["clack-host", "audio-ports", "note-ports", "params", "state", "latency", "gui", "log", "tail"] }
+# VST3 COM bindings, pre-generated from the MIT VST 3.8 SDK (MIT OR Apache-2.0). NOT vst3-sys (GPL).
+vst3 = "0.3.0"
+rtrb = "0.4.0"                                              # MIT OR Apache-2.0 (audio → UI queues)
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Com",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_System_Threading",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+] }  # MIT OR Apache-2.0

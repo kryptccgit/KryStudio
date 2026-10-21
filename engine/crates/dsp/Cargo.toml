@@ -1,0 +1,31 @@
+[package]
+name = "krypt-studio-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Audio file decoding (engine sample cache, analyzer sidecar).
+decode = ["dep:symphonia"]
+# Windows Media Foundation fallback in `decode` (m4a / aac / mp4 / alac /
+# wma ...): the OS's licensed decoders, loaded at run time. No-op elsewhere.
+mediafoundation = ["decode", "dep:windows"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# EBU R128 loudness (MIT).
+ebur128 = "0.1.10"
+# FFT for analysis (MIT OR Apache-2.0).
+rustfft = "6.2"
+# MPL-2.0 (unmodified; listed in THIRD-PARTY-NOTICES). Royalty-free formats only.
+symphonia = { version = "0.6.1", default-features = false, features = ["wav", "aiff", "pcm", "adpcm", "flac", "mp3", "ogg", "vorbis"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# MIT OR Apache-2.0. COM interface definitions only; the MF DLLs are loaded
+# with LoadLibraryExW, never import-linked.
+windows = { version = "0.62.2", optional = true, features = ["Win32_Foundation", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_LibraryLoader", "Win32_System_Variant"] }
+
+[dev-dependencies]
+# Real-time allocation checks in tests (BSD-2-Clause).
+assert_no_alloc = "1.1"
+serde_json = "1"

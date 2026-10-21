@@ -1,0 +1,53 @@
+# cargo-deny configuration (optional second licence gate; the primary one is
+# `npm run license:check`, which needs no extra tools).
+#
+#   cargo install --locked cargo-deny        # once, per machine (not required by CI)
+#   cargo deny --manifest-path engine/Cargo.toml check licenses sources
+#
+# Policy (research/05 §9.5, §10): permissive licences only. GPL/AGPL/LGPL/SSPL
+# are denied by omission; add a reviewed [[licenses.exceptions]] entry only
+# with a written reason. MPL-2.0 (symphonia) is allowed: file-level copyleft,
+# used unmodified, called out in THIRD-PARTY-NOTICES.md.
+
+[graph]
+targets = ["x86_64-pc-windows-msvc"]
+all-features = false
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "CC0-1.0",
+    "BSL-1.0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+]
+exceptions = []
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[advisories]
+version = 2
+yanked = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,0 +1,21 @@
+WEBVTT
+
+1
+00:00:02.945 --> 00:00:08.750
+Drop any song onto the Playlist. Right-click the clip and choose Detect tempo and key.
+
+2
+00:00:09.173 --> 00:00:12.610
+Krypt hears the tempo, key, sections and loudness.
+
+3
+00:00:13.495 --> 00:00:18.557
+Separate stems splits it into vocals, drums, bass and other, each on its own track.
+
+4
+00:00:18.944 --> 00:00:24.238
+To turn a whole song into editable patterns, use File, Open audio as project.
+
+5
+00:00:24.667 --> 00:00:31.772
+Click the clip's channel name to open its window. Auto-warp puts a warp marker on every bar, so the audio follows your tempo.

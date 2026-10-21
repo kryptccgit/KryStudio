@@ -1,0 +1,3 @@
+pattern "Verse Keys" bars=4 grid=16 key=Am
+chords {oct=3 vel=80}: Am7:16 | Fmaj7:16 | C:16 | G/B:16
+lead {oct=5}: ^5:4 ^3:2 ^1 ^2:4 ^3:4 | ^1:8 r:8 | r:4 ^5:2 ^6 ^5:4 ^3:4 | ^2:12 r:4

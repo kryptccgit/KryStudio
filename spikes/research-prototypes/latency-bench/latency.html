@@ -1,0 +1,20 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>latency</title></head>
+<body><pre id="out">pending</pre>
+<script>
+(async () => {
+  const lines = [navigator.userAgent];
+  for (const hint of ['interactive', 0, 'balanced', 'playback']) {
+    try {
+      const ctx = new AudioContext({ latencyHint: hint });
+      const osc = ctx.createConstantSource(); const g = ctx.createGain(); g.gain.value = 0;
+      osc.connect(g).connect(ctx.destination); osc.start();
+      await ctx.resume();
+      await new Promise(r => setTimeout(r, 700));
+      lines.push(`hint=${JSON.stringify(hint)} state=${ctx.state} sampleRate=${ctx.sampleRate} baseLatency=${(ctx.baseLatency*1000).toFixed(2)}ms outputLatency=${(ctx.outputLatency*1000).toFixed(2)}ms`);
+      await ctx.close();
+    } catch (e) { lines.push(`hint=${hint} error ${e}`); }
+  }
+  document.getElementById('out').textContent = lines.join('\n');
+})();
+</script></body></html>

@@ -1,0 +1,1918 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "krypt.fm",
+      "name": "Krypt FM",
+      "kind": "instrument",
+      "category": "Synth",
+      "description": "Four-operator FM synth: 8 algorithms (stack, pairs, one-to-many, additive), op 4 feedback, per-operator ratio (coarse x (1 + fine)), detune, level, velocity sensitivity and AHDSR. Default patch is an electric piano (pairs: 1:1 body + 14:1 tine); bells, basses, brass, organs and pads are a few knobs away. 2x oversampled, plus filter with envelope, vibrato, Mod X = cutoff, Mod Y = brightness.",
+      "params": [
+        {
+          "id": "algorithm",
+          "name": "Algorithm",
+          "min": 0,
+          "max": 7,
+          "default": 4,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "1: 4>3>2>1 stack",
+            "2: (4+3)>2>1",
+            "3: (3>2)+4 > 1",
+            "4: (4>3)+2 > 1",
+            "5: 4>3 + 2>1 pairs",
+            "6: 4 > 3+2+1",
+            "7: 4>3 + 2 + 1",
+            "8: 4+3+2+1 additive"
+          ],
+          "group": "Algorithm"
+        },
+        {
+          "id": "feedback",
+          "name": "Op 4 feedback",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Algorithm"
+        },
+        {
+          "id": "op1Ratio",
+          "name": "Ratio",
+          "min": 0.5,
+          "max": 16,
+          "default": 1,
+          "unit": "x",
+          "scale": "linear",
+          "step": 0.5,
+          "group": "Op 1"
+        },
+        {
+          "id": "op1Fine",
+          "name": "Fine",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 1"
+        },
+        {
+          "id": "op1Detune",
+          "name": "Detune",
+          "min": -50,
+          "max": 50,
+          "default": 0,
+          "unit": "ct",
+          "scale": "linear",
+          "group": "Op 1"
+        },
+        {
+          "id": "op1Level",
+          "name": "Level",
+          "min": 0,
+          "max": 1,
+          "default": 0.85,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 1"
+        },
+        {
+          "id": "op1Vel",
+          "name": "Velocity",
+          "min": 0,
+          "max": 1,
+          "default": 0.7,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 1"
+        },
+        {
+          "id": "op1Attack",
+          "name": "Attack",
+          "min": 0.1,
+          "max": 10000,
+          "default": 1,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 1"
+        },
+        {
+          "id": "op1Hold",
+          "name": "Hold",
+          "min": 0.1,
+          "max": 5000,
+          "default": 0.1,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 1"
+        },
+        {
+          "id": "op1Decay",
+          "name": "Decay",
+          "min": 1,
+          "max": 20000,
+          "default": 3500,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 1"
+        },
+        {
+          "id": "op1Sustain",
+          "name": "Sustain",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 1"
+        },
+        {
+          "id": "op1Release",
+          "name": "Release",
+          "min": 1,
+          "max": 10000,
+          "default": 450,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 1"
+        },
+        {
+          "id": "op2Ratio",
+          "name": "Ratio",
+          "min": 0.5,
+          "max": 16,
+          "default": 1,
+          "unit": "x",
+          "scale": "linear",
+          "step": 0.5,
+          "group": "Op 2"
+        },
+        {
+          "id": "op2Fine",
+          "name": "Fine",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 2"
+        },
+        {
+          "id": "op2Detune",
+          "name": "Detune",
+          "min": -50,
+          "max": 50,
+          "default": 0,
+          "unit": "ct",
+          "scale": "linear",
+          "group": "Op 2"
+        },
+        {
+          "id": "op2Level",
+          "name": "Level",
+          "min": 0,
+          "max": 1,
+          "default": 0.6,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 2"
+        },
+        {
+          "id": "op2Vel",
+          "name": "Velocity",
+          "min": 0,
+          "max": 1,
+          "default": 0.9,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 2"
+        },
+        {
+          "id": "op2Attack",
+          "name": "Attack",
+          "min": 0.1,
+          "max": 10000,
+          "default": 1,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 2"
+        },
+        {
+          "id": "op2Hold",
+          "name": "Hold",
+          "min": 0.1,
+          "max": 5000,
+          "default": 0.1,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 2"
+        },
+        {
+          "id": "op2Decay",
+          "name": "Decay",
+          "min": 1,
+          "max": 20000,
+          "default": 2000,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 2"
+        },
+        {
+          "id": "op2Sustain",
+          "name": "Sustain",
+          "min": 0,
+          "max": 1,
+          "default": 0.1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 2"
+        },
+        {
+          "id": "op2Release",
+          "name": "Release",
+          "min": 1,
+          "max": 10000,
+          "default": 450,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 2"
+        },
+        {
+          "id": "op3Ratio",
+          "name": "Ratio",
+          "min": 0.5,
+          "max": 16,
+          "default": 1,
+          "unit": "x",
+          "scale": "linear",
+          "step": 0.5,
+          "group": "Op 3"
+        },
+        {
+          "id": "op3Fine",
+          "name": "Fine",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 3"
+        },
+        {
+          "id": "op3Detune",
+          "name": "Detune",
+          "min": -50,
+          "max": 50,
+          "default": 3,
+          "unit": "ct",
+          "scale": "linear",
+          "group": "Op 3"
+        },
+        {
+          "id": "op3Level",
+          "name": "Level",
+          "min": 0,
+          "max": 1,
+          "default": 0.65,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 3"
+        },
+        {
+          "id": "op3Vel",
+          "name": "Velocity",
+          "min": 0,
+          "max": 1,
+          "default": 0.9,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 3"
+        },
+        {
+          "id": "op3Attack",
+          "name": "Attack",
+          "min": 0.1,
+          "max": 10000,
+          "default": 0.5,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 3"
+        },
+        {
+          "id": "op3Hold",
+          "name": "Hold",
+          "min": 0.1,
+          "max": 5000,
+          "default": 0.1,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 3"
+        },
+        {
+          "id": "op3Decay",
+          "name": "Decay",
+          "min": 1,
+          "max": 20000,
+          "default": 1200,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 3"
+        },
+        {
+          "id": "op3Sustain",
+          "name": "Sustain",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 3"
+        },
+        {
+          "id": "op3Release",
+          "name": "Release",
+          "min": 1,
+          "max": 10000,
+          "default": 300,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 3"
+        },
+        {
+          "id": "op4Ratio",
+          "name": "Ratio",
+          "min": 0.5,
+          "max": 16,
+          "default": 14,
+          "unit": "x",
+          "scale": "linear",
+          "step": 0.5,
+          "group": "Op 4"
+        },
+        {
+          "id": "op4Fine",
+          "name": "Fine",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 4"
+        },
+        {
+          "id": "op4Detune",
+          "name": "Detune",
+          "min": -50,
+          "max": 50,
+          "default": 0,
+          "unit": "ct",
+          "scale": "linear",
+          "group": "Op 4"
+        },
+        {
+          "id": "op4Level",
+          "name": "Level",
+          "min": 0,
+          "max": 1,
+          "default": 0.5,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 4"
+        },
+        {
+          "id": "op4Vel",
+          "name": "Velocity",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 4"
+        },
+        {
+          "id": "op4Attack",
+          "name": "Attack",
+          "min": 0.1,
+          "max": 10000,
+          "default": 0.1,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 4"
+        },
+        {
+          "id": "op4Hold",
+          "name": "Hold",
+          "min": 0.1,
+          "max": 5000,
+          "default": 0.1,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 4"
+        },
+        {
+          "id": "op4Decay",
+          "name": "Decay",
+          "min": 1,
+          "max": 20000,
+          "default": 250,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 4"
+        },
+        {
+          "id": "op4Sustain",
+          "name": "Sustain",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Op 4"
+        },
+        {
+          "id": "op4Release",
+          "name": "Release",
+          "min": 1,
+          "max": 10000,
+          "default": 200,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Op 4"
+        },
+        {
+          "id": "filterType",
+          "name": "Type",
+          "min": 0,
+          "max": 3,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Low pass",
+            "High pass",
+            "Band pass",
+            "Notch"
+          ],
+          "group": "Filter"
+        },
+        {
+          "id": "cutoff",
+          "name": "Cutoff",
+          "min": 20,
+          "max": 20000,
+          "default": 20000,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Filter"
+        },
+        {
+          "id": "reso",
+          "name": "Resonance",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Filter"
+        },
+        {
+          "id": "filterEnvAmount",
+          "name": "Env amount",
+          "min": -1,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Filter"
+        },
+        {
+          "id": "filterEnvDecay",
+          "name": "Env decay",
+          "min": 1,
+          "max": 10000,
+          "default": 400,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Filter"
+        },
+        {
+          "id": "filterKeyTrack",
+          "name": "Key tracking",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Filter"
+        },
+        {
+          "id": "vibratoRate",
+          "name": "Vibrato rate",
+          "min": 0.1,
+          "max": 12,
+          "default": 5,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Voice"
+        },
+        {
+          "id": "vibrato",
+          "name": "Vibrato depth",
+          "min": 0,
+          "max": 100,
+          "default": 0,
+          "unit": "ct",
+          "scale": "linear",
+          "group": "Voice"
+        },
+        {
+          "id": "gain",
+          "name": "Gain",
+          "min": -24,
+          "max": 12,
+          "default": -6,
+          "unit": "dB",
+          "scale": "linear",
+          "group": "Voice"
+        }
+      ]
+    },
+    {
+      "id": "krypt.wavetable",
+      "name": "Krypt Wave",
+      "kind": "instrument",
+      "category": "Synth",
+      "description": "Wavetable synth with five generated tables (basic shapes morph, PWM, vowel formants, harmonic sweep, digital sync/bitcrush), band-limited per octave. Position morphs through each table (env 2 and the LFO can move it); up to 8 unison voices with detune and stereo spread; sub oscillator; filter with env 2/LFO/key tracking. Env 2 cutoff amount is ±6 octaves, LFO ±3.",
+      "params": [
+        {
+          "id": "table",
+          "name": "Wavetable",
+          "min": 0,
+          "max": 4,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Basic morph",
+            "PWM",
+            "Formant",
+            "Harmonic sweep",
+            "Digital"
+          ],
+          "group": "Oscillator"
+        },
+        {
+          "id": "position",
+          "name": "Position",
+          "min": 0,
+          "max": 1,
+          "default": 0.67,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Oscillator"
+        },
+        {
+          "id": "coarse",
+          "name": "Coarse",
+          "min": -24,
+          "max": 24,
+          "default": 0,
+          "unit": "st",
+          "scale": "linear",
+          "step": 1,
+          "group": "Oscillator"
+        },
+        {
+          "id": "fine",
+          "name": "Fine",
+          "min": -100,
+          "max": 100,
+          "default": 0,
+          "unit": "ct",
+          "scale": "linear",
+          "group": "Oscillator"
+        },
+        {
+          "id": "level",
+          "name": "Level",
+          "min": 0,
+          "max": 1,
+          "default": 0.8,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Oscillator"
+        },
+        {
+          "id": "unison",
+          "name": "Voices",
+          "min": 1,
+          "max": 8,
+          "default": 3,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "group": "Unison"
+        },
+        {
+          "id": "detune",
+          "name": "Detune",
+          "min": 0,
+          "max": 1,
+          "default": 0.25,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Unison"
+        },
+        {
+          "id": "spread",
+          "name": "Stereo spread",
+          "min": 0,
+          "max": 1,
+          "default": 0.7,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Unison"
+        },
+        {
+          "id": "subLevel",
+          "name": "Level",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Sub"
+        },
+        {
+          "id": "subShape",
+          "name": "Shape",
+          "min": 0,
+          "max": 2,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Sine",
+            "Triangle",
+            "Square"
+          ],
+          "group": "Sub"
+        },
+        {
+          "id": "subOctave",
+          "name": "Octave",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "-1",
+            "-2"
+          ],
+          "group": "Sub"
+        },
+        {
+          "id": "filterType",
+          "name": "Type",
+          "min": 0,
+          "max": 3,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Low pass",
+            "High pass",
+            "Band pass",
+            "Notch"
+          ],
+          "group": "Filter"
+        },
+        {
+          "id": "cutoff",
+          "name": "Cutoff",
+          "min": 20,
+          "max": 20000,
+          "default": 9000,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Filter"
+        },
+        {
+          "id": "reso",
+          "name": "Resonance",
+          "min": 0,
+          "max": 1,
+          "default": 0.15,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Filter"
+        },
+        {
+          "id": "filterKeyTrack",
+          "name": "Key tracking",
+          "min": 0,
+          "max": 1,
+          "default": 0.3,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Filter"
+        },
+        {
+          "id": "ampAttack",
+          "name": "Attack",
+          "min": 0.1,
+          "max": 10000,
+          "default": 3,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Env 1 (amp)"
+        },
+        {
+          "id": "ampHold",
+          "name": "Hold",
+          "min": 0.1,
+          "max": 5000,
+          "default": 0.1,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Env 1 (amp)"
+        },
+        {
+          "id": "ampDecay",
+          "name": "Decay",
+          "min": 1,
+          "max": 20000,
+          "default": 600,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Env 1 (amp)"
+        },
+        {
+          "id": "ampSustain",
+          "name": "Sustain",
+          "min": 0,
+          "max": 1,
+          "default": 0.8,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Env 1 (amp)"
+        },
+        {
+          "id": "ampRelease",
+          "name": "Release",
+          "min": 1,
+          "max": 20000,
+          "default": 300,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Env 1 (amp)"
+        },
+        {
+          "id": "modAttack",
+          "name": "Attack",
+          "min": 0.1,
+          "max": 10000,
+          "default": 5,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Env 2 (mod)"
+        },
+        {
+          "id": "modDecay",
+          "name": "Decay",
+          "min": 1,
+          "max": 20000,
+          "default": 800,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Env 2 (mod)"
+        },
+        {
+          "id": "modSustain",
+          "name": "Sustain",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Env 2 (mod)"
+        },
+        {
+          "id": "modRelease",
+          "name": "Release",
+          "min": 1,
+          "max": 20000,
+          "default": 400,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Env 2 (mod)"
+        },
+        {
+          "id": "modToPosition",
+          "name": "Position amount",
+          "min": -1,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Env 2 (mod)"
+        },
+        {
+          "id": "modToCutoff",
+          "name": "Cutoff amount",
+          "min": -1,
+          "max": 1,
+          "default": 0.25,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Env 2 (mod)"
+        },
+        {
+          "id": "lfoShape",
+          "name": "Shape",
+          "min": 0,
+          "max": 4,
+          "default": 1,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Sine",
+            "Triangle",
+            "Saw up",
+            "Saw down",
+            "Square"
+          ],
+          "group": "LFO"
+        },
+        {
+          "id": "lfoSync",
+          "name": "Tempo sync",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Off",
+            "On"
+          ],
+          "group": "LFO"
+        },
+        {
+          "id": "lfoDivision",
+          "name": "Rate (sync)",
+          "min": 0,
+          "max": 14,
+          "default": 9,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "1/64",
+            "1/32",
+            "1/16T",
+            "1/16",
+            "1/16D",
+            "1/8T",
+            "1/8",
+            "1/8D",
+            "1/4T",
+            "1/4",
+            "1/4D",
+            "1/2",
+            "1 bar",
+            "2 bars",
+            "4 bars"
+          ],
+          "group": "LFO"
+        },
+        {
+          "id": "lfoRate",
+          "name": "Rate (free)",
+          "min": 0.01,
+          "max": 30,
+          "default": 0.5,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "LFO"
+        },
+        {
+          "id": "lfoToPosition",
+          "name": "Position amount",
+          "min": -1,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "LFO"
+        },
+        {
+          "id": "lfoToCutoff",
+          "name": "Cutoff amount",
+          "min": -1,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "LFO"
+        },
+        {
+          "id": "lfoToPitch",
+          "name": "Vibrato",
+          "min": 0,
+          "max": 100,
+          "default": 0,
+          "unit": "ct",
+          "scale": "linear",
+          "group": "LFO"
+        },
+        {
+          "id": "gain",
+          "name": "Gain",
+          "min": -24,
+          "max": 12,
+          "default": -6,
+          "unit": "dB",
+          "scale": "linear",
+          "group": "Voice"
+        }
+      ]
+    },
+    {
+      "id": "krypt.chorus",
+      "name": "Krypt Chorus",
+      "kind": "effect",
+      "category": "Modulation",
+      "description": "Multi-voice chorus and ensemble: 1-6 modulated delay voices per side with staggered delays and rates. Stereo spread offsets the right side's LFOs (a mono source turns wide). Depth 1 sweeps up to ±5 ms. Low/high cut shape the wet signal only, so bass stays mono and tight. Has its own Mix (50% = classic chorus). Zero latency.",
+      "params": [
+        {
+          "id": "voices",
+          "name": "Voices",
+          "min": 1,
+          "max": 6,
+          "default": 3,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "group": "Chorus"
+        },
+        {
+          "id": "rate",
+          "name": "Rate",
+          "min": 0.05,
+          "max": 10,
+          "default": 0.6,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Chorus"
+        },
+        {
+          "id": "depth",
+          "name": "Depth",
+          "min": 0,
+          "max": 1,
+          "default": 0.45,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Chorus"
+        },
+        {
+          "id": "delay",
+          "name": "Delay",
+          "min": 2,
+          "max": 40,
+          "default": 14,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Chorus"
+        },
+        {
+          "id": "spread",
+          "name": "Stereo spread",
+          "min": 0,
+          "max": 1,
+          "default": 0.8,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Chorus"
+        },
+        {
+          "id": "feedback",
+          "name": "Feedback",
+          "min": 0,
+          "max": 0.7,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Chorus"
+        },
+        {
+          "id": "lowCut",
+          "name": "Low cut",
+          "min": 20,
+          "max": 1000,
+          "default": 120,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Tone"
+        },
+        {
+          "id": "highCut",
+          "name": "High cut",
+          "min": 1000,
+          "max": 20000,
+          "default": 12000,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Tone"
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "min": 0,
+          "max": 1,
+          "default": 0.5,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Output"
+        }
+      ],
+      "defaultMix": 1
+    },
+    {
+      "id": "krypt.flanger",
+      "name": "Krypt Flanger",
+      "kind": "effect",
+      "category": "Modulation",
+      "description": "Flanger: a 0.1-10 ms delay swept exponentially by a sine or triangle LFO (free or tempo-synced to the bar), with positive or negative feedback for metallic or hollow tones. Stereo phase offsets the right LFO. Through-zero mode delays the dry signal 3 ms (that is its latency; 0 otherwise) and sweeps the wet tap through it for the classic jet cancellation; Delay is then ignored. Has its own Mix.",
+      "params": [
+        {
+          "id": "delay",
+          "name": "Delay",
+          "min": 0.1,
+          "max": 10,
+          "default": 1,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Flanger"
+        },
+        {
+          "id": "depth",
+          "name": "Depth",
+          "min": 0,
+          "max": 1,
+          "default": 0.7,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Flanger"
+        },
+        {
+          "id": "rate",
+          "name": "Rate (free)",
+          "min": 0.01,
+          "max": 10,
+          "default": 0.2,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Flanger"
+        },
+        {
+          "id": "sync",
+          "name": "Tempo sync",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Off",
+            "On"
+          ],
+          "group": "Flanger"
+        },
+        {
+          "id": "division",
+          "name": "Rate (sync)",
+          "min": 0,
+          "max": 14,
+          "default": 12,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "1/64",
+            "1/32",
+            "1/16T",
+            "1/16",
+            "1/16D",
+            "1/8T",
+            "1/8",
+            "1/8D",
+            "1/4T",
+            "1/4",
+            "1/4D",
+            "1/2",
+            "1 bar",
+            "2 bars",
+            "4 bars"
+          ],
+          "group": "Flanger"
+        },
+        {
+          "id": "shape",
+          "name": "LFO shape",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Sine",
+            "Triangle"
+          ],
+          "group": "Flanger"
+        },
+        {
+          "id": "feedback",
+          "name": "Feedback",
+          "min": -0.95,
+          "max": 0.95,
+          "default": 0.5,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Flanger"
+        },
+        {
+          "id": "throughZero",
+          "name": "Through-zero",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Off",
+            "On"
+          ],
+          "group": "Flanger",
+          "automatable": false
+        },
+        {
+          "id": "stereo",
+          "name": "Stereo phase",
+          "min": 0,
+          "max": 180,
+          "default": 90,
+          "unit": "deg",
+          "scale": "linear",
+          "group": "Flanger"
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "min": 0,
+          "max": 1,
+          "default": 0.5,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Output"
+        }
+      ],
+      "defaultMix": 1
+    },
+    {
+      "id": "krypt.phaser",
+      "name": "Krypt Phaser",
+      "kind": "effect",
+      "category": "Modulation",
+      "description": "Phaser with 4-12 allpass stages (stages/2 notches) swept around Centre by a sine LFO: depth 1 = ±2 octaves. Free rate or tempo-synced to the bar. Feedback (±) sharpens the peaks; Stereo phase offsets the right LFO. Has its own Mix (50% = deepest notches). Zero latency.",
+      "params": [
+        {
+          "id": "stages",
+          "name": "Stages",
+          "min": 4,
+          "max": 12,
+          "default": 6,
+          "unit": "",
+          "scale": "linear",
+          "step": 2,
+          "group": "Phaser"
+        },
+        {
+          "id": "center",
+          "name": "Centre",
+          "min": 100,
+          "max": 8000,
+          "default": 700,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Phaser"
+        },
+        {
+          "id": "depth",
+          "name": "Depth",
+          "min": 0,
+          "max": 1,
+          "default": 0.7,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Phaser"
+        },
+        {
+          "id": "rate",
+          "name": "Rate (free)",
+          "min": 0.01,
+          "max": 10,
+          "default": 0.35,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Phaser"
+        },
+        {
+          "id": "sync",
+          "name": "Tempo sync",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Off",
+            "On"
+          ],
+          "group": "Phaser"
+        },
+        {
+          "id": "division",
+          "name": "Rate (sync)",
+          "min": 0,
+          "max": 14,
+          "default": 11,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "1/64",
+            "1/32",
+            "1/16T",
+            "1/16",
+            "1/16D",
+            "1/8T",
+            "1/8",
+            "1/8D",
+            "1/4T",
+            "1/4",
+            "1/4D",
+            "1/2",
+            "1 bar",
+            "2 bars",
+            "4 bars"
+          ],
+          "group": "Phaser"
+        },
+        {
+          "id": "feedback",
+          "name": "Feedback",
+          "min": -0.9,
+          "max": 0.9,
+          "default": 0.5,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Phaser"
+        },
+        {
+          "id": "stereo",
+          "name": "Stereo phase",
+          "min": 0,
+          "max": 180,
+          "default": 90,
+          "unit": "deg",
+          "scale": "linear",
+          "group": "Phaser"
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "min": 0,
+          "max": 1,
+          "default": 0.5,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Output"
+        }
+      ],
+      "defaultMix": 1
+    },
+    {
+      "id": "krypt.gate",
+      "name": "Krypt Gate/Time",
+      "kind": "effect",
+      "category": "Creative",
+      "description": "Tempo-locked time and volume patterns: half-time, 1/8 and 1/16 stutters, triplet chops, tape stop, reverse 1/4, scratch and three gate rhythms. Reads only from the past (no latency). Trigger Always runs on the bar grid while playing; Active param runs only while Active is on (automate it) and restarts the pattern from the nearest 1/16 at or before each activation. Depth scales the time warp and the gate; Smoothing sets crossfades and gate edges.",
+      "params": [
+        {
+          "id": "pattern",
+          "name": "Pattern",
+          "min": 0,
+          "max": 9,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Half-time",
+            "Stutter 1/8",
+            "Stutter 1/16",
+            "Triplet chops",
+            "Tape stop",
+            "Reverse 1/4",
+            "Scratch",
+            "Gate 1/8",
+            "Gate 1/16 trance",
+            "Gate 3-3-2"
+          ],
+          "group": "Gate/Time"
+        },
+        {
+          "id": "trigger",
+          "name": "Trigger",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Always",
+            "Active param"
+          ],
+          "group": "Gate/Time"
+        },
+        {
+          "id": "active",
+          "name": "Active",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Off",
+            "On"
+          ],
+          "group": "Gate/Time"
+        },
+        {
+          "id": "depth",
+          "name": "Depth",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Gate/Time"
+        },
+        {
+          "id": "smoothing",
+          "name": "Smoothing",
+          "min": 0.5,
+          "max": 50,
+          "default": 6,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Gate/Time"
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Output"
+        }
+      ],
+      "defaultMix": 1
+    },
+    {
+      "id": "krypt.vocoder",
+      "name": "Krypt Vocoder",
+      "kind": "effect",
+      "category": "Vocal",
+      "description": "Filterbank vocoder, 8-32 bands. Default: this slot's input is the carrier (synth) and the sidechain is the voice; swap them, or use the internal saw (Internal pitch, MIDI note) or noise carrier. With no sidechain routed, the input becomes the voice over the internal carrier. Carrier flatten evens out the carrier's spectrum; Formant shift moves the carrier bands; Sibilance passes the voice's top end for consonants.",
+      "params": [
+        {
+          "id": "bands",
+          "name": "Bands",
+          "min": 8,
+          "max": 32,
+          "default": 16,
+          "unit": "",
+          "scale": "linear",
+          "step": 4,
+          "group": "Vocoder"
+        },
+        {
+          "id": "voice",
+          "name": "Voice (modulator)",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Sidechain",
+            "Input"
+          ],
+          "group": "Routing"
+        },
+        {
+          "id": "carrier",
+          "name": "Carrier",
+          "min": 0,
+          "max": 3,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Input",
+            "Sidechain",
+            "Internal saw",
+            "Internal noise"
+          ],
+          "group": "Routing"
+        },
+        {
+          "id": "carrierNote",
+          "name": "Internal pitch",
+          "min": 24,
+          "max": 84,
+          "default": 48,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "group": "Routing"
+        },
+        {
+          "id": "lowFreq",
+          "name": "Lowest band",
+          "min": 50,
+          "max": 500,
+          "default": 100,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Vocoder"
+        },
+        {
+          "id": "highFreq",
+          "name": "Highest band",
+          "min": 2000,
+          "max": 16000,
+          "default": 8000,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Vocoder"
+        },
+        {
+          "id": "width",
+          "name": "Band width",
+          "min": 0,
+          "max": 1,
+          "default": 0.5,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Vocoder"
+        },
+        {
+          "id": "formant",
+          "name": "Formant shift",
+          "min": -12,
+          "max": 12,
+          "default": 0,
+          "unit": "st",
+          "scale": "linear",
+          "group": "Vocoder"
+        },
+        {
+          "id": "flatten",
+          "name": "Carrier flatten",
+          "min": 0,
+          "max": 1,
+          "default": 0.7,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Vocoder"
+        },
+        {
+          "id": "sibilance",
+          "name": "Sibilance",
+          "min": 0,
+          "max": 1,
+          "default": 0.3,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Vocoder"
+        },
+        {
+          "id": "attack",
+          "name": "Attack",
+          "min": 0.5,
+          "max": 100,
+          "default": 4,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Envelope"
+        },
+        {
+          "id": "release",
+          "name": "Release",
+          "min": 5,
+          "max": 500,
+          "default": 60,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Envelope"
+        },
+        {
+          "id": "output",
+          "name": "Output",
+          "min": -24,
+          "max": 24,
+          "default": 0,
+          "unit": "dB",
+          "scale": "linear",
+          "group": "Output"
+        }
+      ],
+      "sidechain": true,
+      "defaultMix": 1
+    },
+    {
+      "id": "krypt.transient",
+      "name": "Krypt Transient",
+      "kind": "effect",
+      "category": "Dynamics",
+      "description": "Transient shaper: Attack boosts (+) or softens (-) the start of every hit, Sustain lifts or shortens the tail. Works at any input level (no threshold). Attack window sets how long the onset counts as attack; Sustain window sets how long tails are tracked. Up to about +18/-30 dB. Zero latency.",
+      "params": [
+        {
+          "id": "attack",
+          "name": "Attack",
+          "min": -1,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Transient"
+        },
+        {
+          "id": "sustain",
+          "name": "Sustain",
+          "min": -1,
+          "max": 1,
+          "default": 0,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Transient"
+        },
+        {
+          "id": "attackWindow",
+          "name": "Attack window",
+          "min": 2,
+          "max": 60,
+          "default": 15,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Transient"
+        },
+        {
+          "id": "sustainWindow",
+          "name": "Sustain window",
+          "min": 20,
+          "max": 1000,
+          "default": 200,
+          "unit": "ms",
+          "scale": "log",
+          "group": "Transient"
+        },
+        {
+          "id": "output",
+          "name": "Output",
+          "min": -24,
+          "max": 12,
+          "default": 0,
+          "unit": "dB",
+          "scale": "linear",
+          "group": "Transient"
+        }
+      ],
+      "defaultMix": 1
+    },
+    {
+      "id": "krypt.squash",
+      "name": "Krypt Squash",
+      "kind": "effect",
+      "category": "Dynamics",
+      "description": "Aggressive 3-band upward and downward compressor (multiband squash): squashes loud parts (10:1 above -24 dB) and pulls quiet detail up (4:1 below -36 dB, up to +30 dB) in each band. Depth is a phase-coherent parallel mix, Time scales attack/release, Upward/Downward scale each half. Band gains and split points shape the tone. Zero latency.",
+      "params": [
+        {
+          "id": "depth",
+          "name": "Depth",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Squash"
+        },
+        {
+          "id": "time",
+          "name": "Time",
+          "min": 0,
+          "max": 1,
+          "default": 0.5,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Squash"
+        },
+        {
+          "id": "upward",
+          "name": "Upward",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Squash"
+        },
+        {
+          "id": "downward",
+          "name": "Downward",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Squash"
+        },
+        {
+          "id": "inGain",
+          "name": "Input",
+          "min": -24,
+          "max": 24,
+          "default": 0,
+          "unit": "dB",
+          "scale": "linear",
+          "group": "Gain"
+        },
+        {
+          "id": "outGain",
+          "name": "Output",
+          "min": -24,
+          "max": 24,
+          "default": 0,
+          "unit": "dB",
+          "scale": "linear",
+          "group": "Gain"
+        },
+        {
+          "id": "lowGain",
+          "name": "Low",
+          "min": -12,
+          "max": 12,
+          "default": 0,
+          "unit": "dB",
+          "scale": "linear",
+          "group": "Bands"
+        },
+        {
+          "id": "midGain",
+          "name": "Mid",
+          "min": -12,
+          "max": 12,
+          "default": 0,
+          "unit": "dB",
+          "scale": "linear",
+          "group": "Bands"
+        },
+        {
+          "id": "highGain",
+          "name": "High",
+          "min": -12,
+          "max": 12,
+          "default": 0,
+          "unit": "dB",
+          "scale": "linear",
+          "group": "Bands"
+        },
+        {
+          "id": "lowFreq",
+          "name": "Low/mid split",
+          "min": 40,
+          "max": 500,
+          "default": 88,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Bands"
+        },
+        {
+          "id": "highFreq",
+          "name": "Mid/high split",
+          "min": 1000,
+          "max": 10000,
+          "default": 2500,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Bands"
+        }
+      ],
+      "defaultMix": 1
+    },
+    {
+      "id": "krypt.imager",
+      "name": "Krypt Imager",
+      "kind": "effect",
+      "category": "Stereo",
+      "description": "Multiband stereo width: low, mid and high bands each from 0% (mono) through 100% (unchanged) to 200% (extra wide). Low width 0% gives mono-compatible bass. Linkwitz-Riley crossovers keep mid and side phase-aligned, so the magnitude is flat at default. Zero latency.",
+      "params": [
+        {
+          "id": "lowWidth",
+          "name": "Low width",
+          "min": 0,
+          "max": 2,
+          "default": 1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Width"
+        },
+        {
+          "id": "midWidth",
+          "name": "Mid width",
+          "min": 0,
+          "max": 2,
+          "default": 1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Width"
+        },
+        {
+          "id": "highWidth",
+          "name": "High width",
+          "min": 0,
+          "max": 2,
+          "default": 1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Width"
+        },
+        {
+          "id": "lowFreq",
+          "name": "Low/mid split",
+          "min": 40,
+          "max": 1000,
+          "default": 200,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Bands"
+        },
+        {
+          "id": "highFreq",
+          "name": "Mid/high split",
+          "min": 1000,
+          "max": 16000,
+          "default": 4000,
+          "unit": "Hz",
+          "scale": "log",
+          "group": "Bands"
+        },
+        {
+          "id": "output",
+          "name": "Output",
+          "min": -12,
+          "max": 12,
+          "default": 0,
+          "unit": "dB",
+          "scale": "linear",
+          "group": "Output"
+        }
+      ],
+      "defaultMix": 1
+    },
+    {
+      "id": "krypt.pitch",
+      "name": "Krypt Tune",
+      "kind": "effect",
+      "category": "Vocal",
+      "description": "Real-time pitch correction for monophonic vocals and instruments (60-1000 Hz). Snaps to the nearest note of the Key and Scale. Retune speed 0 ms gives the hard robotic effect; 30-80 ms sounds natural. Humanize keeps vibrato and expression; Amount scales the correction. Formant-friendly pitch-synchronous shifting. Latency about 15 ms (reported for delay compensation).",
+      "params": [
+        {
+          "id": "root",
+          "name": "Key",
+          "min": 0,
+          "max": 11,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "C",
+            "C#",
+            "D",
+            "D#",
+            "E",
+            "F",
+            "F#",
+            "G",
+            "G#",
+            "A",
+            "A#",
+            "B"
+          ],
+          "group": "Scale"
+        },
+        {
+          "id": "scale",
+          "name": "Scale",
+          "min": 0,
+          "max": 8,
+          "default": 0,
+          "unit": "",
+          "scale": "linear",
+          "step": 1,
+          "options": [
+            "Chromatic",
+            "Major",
+            "Minor",
+            "Harmonic minor",
+            "Major pentatonic",
+            "Minor pentatonic",
+            "Dorian",
+            "Mixolydian",
+            "Blues"
+          ],
+          "group": "Scale"
+        },
+        {
+          "id": "speed",
+          "name": "Retune speed",
+          "min": 0,
+          "max": 500,
+          "default": 40,
+          "unit": "ms",
+          "scale": "linear",
+          "group": "Correction"
+        },
+        {
+          "id": "humanize",
+          "name": "Humanize",
+          "min": 0,
+          "max": 1,
+          "default": 0.2,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Correction"
+        },
+        {
+          "id": "amount",
+          "name": "Amount",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Correction"
+        },
+        {
+          "id": "mix",
+          "name": "Mix",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "unit": "%",
+          "scale": "linear",
+          "group": "Output"
+        }
+      ],
+      "defaultMix": 1
+    }
+  ]
+}

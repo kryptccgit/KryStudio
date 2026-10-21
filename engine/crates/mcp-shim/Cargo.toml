@@ -1,0 +1,13 @@
+[package]
+name = "krypt-studio-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Krypt Studio MCP shim: stdio <-> named-pipe relay launched by AI agent clients"
+
+[[bin]]
+name = "krypt-studio-mcp"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"

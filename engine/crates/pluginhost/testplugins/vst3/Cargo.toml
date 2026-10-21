@@ -1,0 +1,13 @@
+[package]
+name = "krypt-test-vst3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Krypt Studio test VST3: a split processor/controller gain with state (based on the MIT vst3-rs gain example)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+vst3 = "0.3.0"

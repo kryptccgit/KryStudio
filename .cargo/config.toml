@@ -1,0 +1,5 @@
+# Static CRT so the shipped exes never need VCRUNTIME140.dll. This MUST live
+# at the repo root: `cargo build --manifest-path engine/Cargo.toml` run from
+# the root ignores engine/.cargo/ (research/07 §0.8 — reproduced locally).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

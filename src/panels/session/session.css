@@ -1,0 +1,21 @@
+/* Session view: the "queued" pulse (a clip or a stop waiting for its quantize boundary). */
+@keyframes krypt-session-queued {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.krypt-session-queued {
+  animation: krypt-session-queued 0.8s ease-in-out infinite;
+}
+
+.krypt-session-progress {
+  transform-origin: left center;
+  transform: scaleX(0);
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}

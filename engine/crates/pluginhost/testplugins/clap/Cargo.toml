@@ -1,0 +1,15 @@
+[package]
+name = "krypt-test-clap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Krypt Studio test CLAP bundle: a gain effect with a Win32 GUI and a sine instrument"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+clack-plugin = "0.2.0"
+clack-extensions = { version = "0.2.0", features = ["clack-plugin", "audio-ports", "note-ports", "params", "state", "gui", "latency"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }

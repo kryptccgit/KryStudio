@@ -1,0 +1,40 @@
+[package]
+name = "krypt-studio-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Krypt Studio audio engine sidecar (stdio NDJSON protocol, cpal output, offline render)"
+
+[lib]
+name = "krypt_studio_engine"
+path = "src/lib.rs"
+# The crate has no doctests, and rustdoc + the debug-only global allocator
+# (assert_no_alloc) do not mix under `cargo test --release`.
+doctest = false
+
+[[bin]]
+name = "krypt-studio-engine"
+path = "src/main.rs"
+
+[dependencies]
+krypt-studio-dsp = { path = "../dsp", features = ["decode", "mediafoundation"] }
+# Third-party VST3/CLAP plugins, hosted out of process (krypt-studio-pluginhost.exe).
+krypt-studio-pluginclient = { path = "../pluginclient" }
+# Audio-clip time-stretch / pitch-shift (vendored Signalsmith Stretch, MIT).
+krypt-studio-stretch = { path = "../stretch" }
+serde = { version = "1", features = ["derive"] }                   # MIT OR Apache-2.0
+serde_json = "1"                                                    # MIT OR Apache-2.0
+cpal = "0.18.2"                                                     # Apache-2.0 (WASAPI shared mode)
+rtrb = "0.4.0"                                                      # MIT OR Apache-2.0 (RT queues)
+crossbeam-channel = "0.5.17"                                        # MIT OR Apache-2.0 (non-RT channels)
+tungstenite = "0.30.0"                                              # MIT OR Apache-2.0 (telemetry WebSocket)
+# MPL-2.0 (unmodified; listed in THIRD-PARTY-NOTICES). Royalty-free formats only.
+symphonia = { version = "0.6.1", default-features = false, features = ["wav", "aiff", "pcm", "adpcm", "flac", "mp3", "ogg", "vorbis"] }
+hound = "3.5.1"                                                     # Apache-2.0 (WAV writer)
+rustfft = "6.4.1"                                                   # MIT OR Apache-2.0 (spectrum)
+getrandom = "0.4.3"                                                 # MIT OR Apache-2.0 (telemetry token)
+assert_no_alloc = { version = "1.1.2", features = ["warn_debug"] }  # BSD-1-Clause (debug RT guard)
+midir = "0.11.1"                                                    # MIT (MIDI input, WinMM backend)
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }  # MIT OR Apache-2.0

@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["crates/engine", "crates/dsp", "crates/mcp-shim", "crates/pluginclient", "crates/pluginhost", "crates/analyzer", "crates/stretch"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Krypt <hi@krypt.cc>"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = 1
+panic = "unwind"
+
+[profile.dev]
+# DSP is unusable unoptimized; keep debug builds fast enough to play audio.
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

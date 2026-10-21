@@ -1,0 +1,93 @@
+WEBVTT
+
+1
+00:00:03.166 --> 00:00:09.946
+Welcome to Krypt Studio. This is Home, the start screen. Each card opens one part of the app.
+
+2
+00:00:10.343 --> 00:00:18.191
+Projects, AI agents, audio tools, sounds, and the guides. Press Escape, or click Studio, to start making music.
+
+3
+00:00:18.813 --> 00:00:21.135
+Every window in the Studio has its own key.
+
+4
+00:00:21.527 --> 00:00:26.357
+F6 opens the Channel Rack: your sounds, and the steps you click to make a beat.
+
+5
+00:00:26.758 --> 00:00:30.380
+F7 is the Piano Roll, for melodies, chords and bass.
+
+6
+00:00:30.782 --> 00:00:39.281
+F5 is the Playlist, where your patterns become a song. F9 is the Mixer, and Alt F8 is the Browser, full of sounds.
+
+7
+00:00:39.678 --> 00:00:46.133
+Press a key again to close its window. Closed one by accident? Control Z brings it back.
+
+8
+00:00:46.990 --> 00:00:51.448
+Space plays and stops, and L switches between Pattern and Song mode.
+
+9
+00:00:51.834 --> 00:00:58.939
+Control S saves, Control R exports a WAV or MP3, and Control T plays notes from your computer keyboard.
+
+10
+00:00:59.338 --> 00:01:04.354
+Now, making music with AI. Press Control Shift H to go Home, then open AI Agents.
+
+11
+00:01:04.752 --> 00:01:15.062
+Pick the app you use: Claude Code, Claude Desktop, Cursor or VS Code. Click Set up, and Krypt Studio is added to it as an MCP server.
+
+12
+00:01:15.460 --> 00:01:24.887
+Then open a new Claude Code session, or restart your app, and it connects. No app? The built-in chat works with your own Anthropic API key.
+
+13
+00:01:30.861 --> 00:01:32.765
+Then just ask in plain words.
+
+14
+00:01:34.872 --> 00:01:41.931
+The agent follows a recipe for the genre. It picks the sounds, writes every section, and grooves the drums.
+
+15
+00:01:42.347 --> 00:01:48.895
+Then it arranges the song, adds the transitions, builds the mix, and renders it to review its own work.
+
+16
+00:01:57.462 --> 00:01:59.877
+About a minute later, here's the song.
+
+17
+00:02:07.797 --> 00:02:16.156
+Want changes? Just ask: make the drums punchier, or add a breakdown. Don't like it? History reverts every AI edit in one click.
+
+18
+00:02:16.560 --> 00:02:24.687
+Stuck? Press F1 for the Guides, right beside your work. Start here takes you through everything, step by step.
+
+19
+00:02:25.094 --> 00:02:32.385
+Search any topic. Show me buttons point at the right spot, tours click along with you, and most features have a short video.
+
+20
+00:02:32.790 --> 00:02:38.920
+Last stop: Audio Tools, on Home. These run on your PC, and your audio never leaves it.
+
+21
+00:02:39.326 --> 00:02:47.592
+Open any song as an editable project, find its tempo and key, split stems, turn audio into notes, and tune vocals with Krypt Tune.
+
+22
+00:02:47.997 --> 00:02:53.291
+There's also Auto Mashup, one-click mastering, and Krypt Voice for spoken or sung parts.
+
+23
+00:02:53.685 --> 00:02:58.515
+That's the tour. Press F1 any time for more, and have fun making music.

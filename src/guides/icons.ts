@@ -1,0 +1,65 @@
+// Guide icon keys (GuideIcon in ./articles.ts) → lucide icons. test/guides.test.ts checks every article's icon is here.
+
+import {
+  AudioWaveform,
+  BookOpen,
+  Blocks,
+  Bot,
+  Download,
+  Drum,
+  Flame,
+  Headphones,
+  Keyboard,
+  Layers,
+  LayoutGrid,
+  LibraryBig,
+  LifeBuoy,
+  ListMusic,
+  Mic,
+  MicVocal,
+  Music,
+  Music4,
+  Piano,
+  Rocket,
+  SlidersHorizontal,
+  SlidersVertical,
+  Sparkles,
+  SwatchBook,
+  Zap,
+  Clapperboard,
+  type LucideIcon,
+} from 'lucide-react';
+import type { GuideIcon } from './articles';
+
+export const ICONS: Record<GuideIcon, LucideIcon> = {
+  rocket: Rocket,
+  rack: LayoutGrid,
+  piano: Piano,
+  playlist: ListMusic,
+  mixer: SlidersVertical,
+  mic: Mic,
+  bot: Bot,
+  wave: AudioWaveform,
+  vocal: MicVocal,
+  library: LibraryBig,
+  blocks: Blocks,
+  presets: SwatchBook,
+  download: Download,
+  keyboard: Keyboard,
+  lifebuoy: LifeBuoy,
+  music: Music,
+  drum: Drum,
+  chords: Music4,
+  sliders: SlidersHorizontal,
+  sparkles: Sparkles,
+  book: BookOpen,
+  flame: Flame,
+  headphones: Headphones,
+  layers: Layers,
+  zap: Zap,
+  video: Clapperboard,
+};
+
+export function iconOf(icon: string): LucideIcon {
+  return (ICONS as Record<string, LucideIcon>)[icon] ?? BookOpen;
+}

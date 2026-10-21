@@ -1,0 +1,182 @@
+name: Release
+
+# Push a tag like v0.1.0 to build the installers from that exact commit on
+# Windows, macOS (Apple Silicon) and Linux, then publish them on ONE GitHub
+# release. The tag must match package.json's version. Builds are unsigned for
+# now (the macOS app is signed ad-hoc by scripts/mac-adhoc-sign.cjs); the
+# release notes say so.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      # One broken platform must not ship a release without it: publish needs all three.
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+            installers: |
+              release/*.exe
+              release/*.blockmap
+          - os: macos-latest
+            name: macOS
+            installers: release/*.dmg
+          - os: ubuntu-latest
+            name: Linux
+            installers: |
+              release/*.AppImage
+              release/*.deb
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Tag matches package.json version
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+
+      - name: Install Rust (stable)
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Linux build dependencies (ALSA for audio + MIDI)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine -> target
+
+      - run: npm ci
+      - run: node node_modules/electron/install.js
+      - run: npm run typecheck
+      - run: npm test
+      - run: cargo test --locked --manifest-path engine/Cargo.toml --workspace
+      - run: npm run engine:build
+
+      - name: Assert static CRT (no VCRUNTIME140.dll imports)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($exe in Get-ChildItem resources/bin/*.exe) {
+            if (Select-String -Path $exe.FullName -Pattern 'VCRUNTIME140' -SimpleMatch -Quiet) { throw "$($exe.Name) imports VCRUNTIME140.dll" }
+          }
+
+      - name: Licence gate + notices (all targets)
+        if: runner.os == 'Windows'
+        run: |
+          npm run license:check
+          npm run notices:check
+
+      - run: node scripts/run-script.mjs scripts/make-demo.ts --render
+      - run: npm run dist
+
+      - name: macOS signature holds after packaging
+        if: runner.os == 'macOS'
+        run: |
+          APP=$(ls -d release/mac*/*.app | head -1)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          path: ${{ matrix.installers }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: engine-pdb
+          path: engine/target/release/*.pdb
+          if-no-files-found: warn
+
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: ver
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: release
+          merge-multiple: true
+
+      - name: SHA-256 checksums
+        working-directory: release
+        run: |
+          sha256sum *.exe *.dmg *.AppImage *.deb > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Krypt Studio v${{ steps.ver.outputs.version }}
+          draft: false
+          prerelease: ${{ startsWith(steps.ver.outputs.version, '0.') }}
+          generate_release_notes: true
+          body: |
+            ## Download
+
+            | System | File |
+            |---|---|
+            | Windows 10/11 (64-bit) | `Krypt Studio-Setup-${{ steps.ver.outputs.version }}.exe` |
+            | macOS (Apple Silicon) | `Krypt Studio-${{ steps.ver.outputs.version }}-mac-arm64.dmg` |
+            | Linux (64-bit) | `Krypt Studio-${{ steps.ver.outputs.version }}-linux-x86_64.AppImage` or the `.deb` |
+
+            The builds are not code-signed yet:
+            - **Windows:** SmartScreen warns on first run. Click **More info → Run anyway**.
+            - **macOS:** drag Krypt Studio to Applications, then **right-click it → Open → Open** the first time (or run `xattr -dr com.apple.quarantine "/Applications/Krypt Studio.app"`).
+            - **Linux:** `chmod +x` the AppImage and run it, or `sudo apt install ./<file>.deb`.
+
+            macOS and Linux are new: VST3 / CLAP plugin hosting and MP3 export are Windows-only for now (export WAV instead), and stem separation runs on the CPU. Everything else, including AI agents over MCP, works the same.
+
+            Built by GitHub Actions from this tag; `SHA256SUMS.txt` lists the checksums.
+          files: |
+            release/*.exe
+            release/*.blockmap
+            release/*.dmg
+            release/*.AppImage
+            release/*.deb
+            release/SHA256SUMS.txt
+          fail_on_unmatched_files: true

@@ -1,0 +1,223 @@
+{
+  "name": "krypt-studio",
+  "productName": "Krypt Studio",
+  "version": "0.2.0-beta.1",
+  "description": "A free, open-source, pattern-based DAW for Windows, macOS and Linux with first-class AI agent control over MCP. Part of the Krypt free tools suite.",
+  "main": "dist-electron/main.js",
+  "author": {
+    "name": "Krypt",
+    "email": "hi@krypt.cc",
+    "url": "https://krypt.cc"
+  },
+  "homepage": "https://krypt.cc/tools/studio",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kryptccgit/KryStudio.git"
+  },
+  "bugs": "https://github.com/kryptccgit/KryStudio/issues",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/run-tests.mjs",
+    "engine:build": "node scripts/engine-build.mjs",
+    "engine:build:debug": "node scripts/engine-build.mjs --debug",
+    "engine:check-targets": "node scripts/check-targets.mjs",
+    "fingerprints": "node scripts/fingerprints.mjs",
+    "dist": "npm run engine:build && node scripts/clean-build.mjs && npm run build && electron-builder --publish never",
+    "make-ico": "node scripts/make-ico.mjs",
+    "dev:web": "vite --config vite.web.config.ts",
+    "dist:dir": "npm run engine:build && node scripts/clean-build.mjs && npm run build && electron-builder --dir --publish never",
+    "notices": "node scripts/gen-notices.mjs",
+    "notices:check": "node scripts/gen-notices.mjs --check",
+    "license:check": "node scripts/license-check.mjs",
+    "make-demo": "node scripts/run-script.mjs scripts/make-demo.ts",
+    "guide-videos": "node scripts/guide-videos.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@jitl/quickjs-singlefile-cjs-release-sync": "^0.32.0",
+    "@modelcontextprotocol/server": "^2.3.1",
+    "discord-rpc": "^4.0.1",
+    "dockview-react": "^8.5.1",
+    "fflate": "^0.8.3",
+    "immer": "^10.1.1",
+    "quickjs-emscripten-core": "^0.32.0",
+    "zod": "^4.2.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/discord-rpc": "^4.0.9",
+    "@types/node": "^24.0.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.4.20",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.0",
+    "jimp": "^1.6.1",
+    "lucide-react": "^1.55.0",
+    "png-to-ico": "^2.1.8",
+    "postcss": "^8.4.49",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21",
+    "vite-plugin-electron": "^0.29.1"
+  },
+  "build": {
+    "appId": "cc.krypt.studio",
+    "productName": "Krypt Studio",
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "LICENSE",
+      "THIRD-PARTY-NOTICES.md",
+      "TRADEMARKS.md",
+      "!**/*.map",
+      "!node_modules/register-scheme/**"
+    ],
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources",
+        "filter": [
+          "krypt.ico",
+          "krypt.png",
+          "bin/*.exe",
+          "bin/krypt-studio-engine",
+          "bin/krypt-studio-mcp",
+          "bin/krypt-studio-analyzer",
+          "bin/*.dylib",
+          "bin/*.so",
+          "bin/*.dll",
+          "bin/*.txt",
+          "factory/**",
+          "demos/**",
+          "models/**",
+          "guides/videos/*.mp4",
+          "guides/videos/*.vtt",
+          "guides/videos/*.jpg",
+          "guides/images/*.webp",
+          "guides/images/*.png",
+          "guides/images/*.jpg"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/krypt.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "requestedExecutionLevel": "asInvoker",
+      "fileAssociations": [
+        {
+          "ext": "kstudio",
+          "name": "Krypt Studio Project",
+          "description": "Krypt Studio Project",
+          "role": "Editor",
+          "icon": "resources/krypt.ico"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "installerIcon": "resources/krypt.ico",
+      "uninstallerIcon": "resources/krypt.ico",
+      "uninstallDisplayName": "Krypt Studio",
+      "shortcutName": "Krypt Studio",
+      "include": "build/installer.nsh",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": null,
+    "npmRebuild": false,
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "resources/krypt.png",
+      "category": "public.app-category.music",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Krypt Studio records your microphone or audio interface when you arm a track and press Record."
+      },
+      "fileAssociations": [
+        {
+          "ext": "kstudio",
+          "name": "Krypt Studio Project",
+          "description": "Krypt Studio Project",
+          "role": "Editor"
+        }
+      ]
+    },
+    "dmg": {
+      "title": "${productName} ${version}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/krypt.png",
+      "category": "AudioVideo",
+      "synopsis": "Free AI-ready DAW",
+      "maintainer": "Krypt <hi@krypt.cc>",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
+      "fileAssociations": [
+        {
+          "ext": "kstudio",
+          "name": "Krypt Studio Project",
+          "mimeType": "application/x-krypt-studio"
+        }
+      ]
+    },
+    "deb": {
+      "depends": [
+        "libasound2 | libasound2t64",
+        "libgtk-3-0 | libgtk-3-0t64",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "libnotify4",
+        "xdg-utils",
+        "libatspi2.0-0 | libatspi2.0-0t64",
+        "libuuid1",
+        "libsecret-1-0"
+      ]
+    },
+    "afterPack": "./scripts/mac-adhoc-sign.cjs"
+  }
+}

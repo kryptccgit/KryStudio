@@ -1,0 +1,20 @@
+node_modules/
+dist/
+dist-electron/
+release/
+engine/target/
+engine/target-*/
+target/
+*.log
+.DS_Store
+Thumbs.db
+# built native binaries copied in by scripts/engine-build.mjs
+resources/bin/
+# local scratch
+.scratch/
+test/.out/
+# local secrets and per-user tool settings: never commit
+.env
+.env.*
+*.pem
+.claude/settings.local.json

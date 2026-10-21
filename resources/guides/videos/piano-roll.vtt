@@ -1,0 +1,29 @@
+WEBVTT
+
+1
+00:00:02.974 --> 00:00:09.011
+The Piano Roll is where you write melodies. First pick a channel, here the Keys.
+
+2
+00:00:09.408 --> 00:00:14.563
+Choose a scale and its notes light up, so you stay in key. Snap keeps notes on the grid.
+
+3
+00:00:15.002 --> 00:00:20.435
+Click to draw a note. Drag its end to stretch it, and new notes keep that length.
+
+4
+00:00:26.978 --> 00:00:33.108
+Stuck? Click Generate, or press Alt G. Pick Chords and you get four variations.
+
+5
+00:00:35.326 --> 00:00:38.577
+Click one to apply it. It's a single undo step.
+
+6
+00:00:39.028 --> 00:00:41.164
+Press play to hear it with the beat.
+
+7
+00:00:45.370 --> 00:00:49.921
+And Scripts, the braces button, runs your own note tools in JavaScript.

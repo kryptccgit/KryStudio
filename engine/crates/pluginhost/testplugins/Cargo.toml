@@ -1,0 +1,15 @@
+# Test plugins for the plugin host's end-to-end tests. NOT shipped.
+# Its own workspace (not part of engine/): build with
+#   cargo build --manifest-path engine/crates/pluginhost/testplugins/Cargo.toml
+# then run `node scripts/plugin-testkit.mjs` to stage them as .clap/.vst3.
+[workspace]
+resolver = "2"
+members = ["clap", "vst3"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[profile.dev]
+opt-level = 1

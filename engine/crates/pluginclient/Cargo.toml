@@ -1,0 +1,20 @@
+[package]
+name = "krypt-studio-pluginclient"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Krypt Studio: out-of-process VST3/CLAP plugin proxies for the engine (talks to krypt-studio-pluginhost)"
+
+[features]
+default = ["engine"]
+# The engine-side proxies + registry. The plugin host only needs the shared
+# memory layout and base64 (`default-features = false`).
+engine = ["dep:krypt-studio-dsp"]
+
+[dependencies]
+krypt-studio-dsp = { path = "../dsp", optional = true }
+serde = { version = "1", features = ["derive"] }   # MIT OR Apache-2.0
+serde_json = "1"                                    # MIT OR Apache-2.0
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Memory", "Win32_System_Threading"] }  # MIT OR Apache-2.0
